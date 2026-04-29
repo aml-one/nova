@@ -1,0 +1,19 @@
+{
+  "name": "@nova/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/provider.js",
+  "exports": {
+    "./provider": "./src/provider.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "echo \"No linter configured yet for @nova/sdk\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"No tests yet for @nova/sdk\""
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

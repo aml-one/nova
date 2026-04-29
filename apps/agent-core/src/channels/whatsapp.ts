@@ -1,0 +1,69 @@
+import type { ChannelMessage } from "./channel-router.js";
+
+type WhatsAppWebhookPayload = {
+  entry?: Array<{
+    changes?: Array<{
+      value?: {
+        messages?: Array<{
+          from?: string;
+          text?: { body?: string };
+          type?: string;
+        }>;
+      };
+    }>;
+  }>;
+};
+
+export class WhatsAppChannelAdapter {
+  async ingestWebhook(payload: unknown): Promise<ChannelMessage[]> {
+    const parsed = payload as WhatsAppWebhookPayload;
+    const messages = parsed.entry?.flatMap((entry) => entry.changes ?? []) ?? [];
+    const outbound: ChannelMessage[] = [];
+    for (const change of messages) {
+      for (const message of change.value?.messages ?? []) {
+        if (message.type !== "text") {
+          continue;
+        }
+        const from = message.from ?? "";
+        const text = message.text?.body?.trim() ?? "";
+        if (!from || !text) {
+          continue;
+        }
+        outbound.push({
+          channel: "whatsapp",
+          from,
+          phoneNumber: from,
+          text
+        });
+      }
+    }
+    return outbound;
+  }
+
+  async sendMessage(to: string, text: string): Promise<void> {
+    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const token = process.env.WHATSAPP_TOKEN;
+    const baseUrl = process.env.WHATSAPP_API_BASE_URL ?? "https://graph.facebook.com";
+    if (!phoneNumberId || !token) {
+      console.log(`whatsapp send skipped (missing credentials) => ${to}: ${text}`);
+      return;
+    }
+    const response = await fetch(`${baseUrl}/v22.0/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "text",
+        text: { body: text.slice(0, 4096) }
+      })
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`whatsapp send failed (${response.status}): ${body}`);
+    }
+  }
+}

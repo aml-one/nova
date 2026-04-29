@@ -1,0 +1,5 @@
+autonomousBranchPrefix: "agent/auto/"
+checkpointTagPrefix: "nova-checkpoint-"
+requirePassingValidationForCheckpoint: true
+allowPushToProtectedBranches: false
+defaultPromotionMode: "pull-request"

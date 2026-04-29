@@ -1,0 +1,9 @@
+cameras:
+  - id: bedroom
+    aliases: ["bedroom camera", "bedroom cam"]
+    rtspUrlEnv: "RTSP_BEDROOM_URL"
+    plateRecognitionEnabled: true
+  - id: driveway
+    aliases: ["driveway camera", "front camera"]
+    rtspUrlEnv: "RTSP_DRIVEWAY_URL"
+    plateRecognitionEnabled: true

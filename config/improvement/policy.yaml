@@ -1,0 +1,10 @@
+mode: auto-apply-skills
+autoApplySkills: true
+autoApplyCodeInSandbox: true
+backgroundLearningEnabled: true
+minFailureCountForAutoImprove: 2
+requireValidation:
+  lint: true
+  typecheck: true
+  tests: true
+rollbackOnFailure: true

@@ -1,0 +1,21 @@
+{
+  "name": "@nova/skill-camera-vision",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "echo \"No linter configured yet for @nova/skill-camera-vision\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"No tests yet for @nova/skill-camera-vision\""
+  },
+  "dependencies": {
+    "@nova/skills": "workspace:*",
+    "yaml": "^2.8.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}

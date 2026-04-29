@@ -1,0 +1,14 @@
+{
+  "name": "nova-agent-platform",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local-first autonomous agent platform for macOS, Windows, and Ubuntu.",
+  "packageManager": "pnpm@10.12.1",
+  "scripts": {
+    "build": "corepack pnpm -r build",
+    "dev": "corepack pnpm --parallel --filter @nova/agent-core --filter @nova/web dev",
+    "lint": "corepack pnpm -r lint",
+    "typecheck": "corepack pnpm -r typecheck",
+    "test": "corepack pnpm -r test"
+  }
+}
