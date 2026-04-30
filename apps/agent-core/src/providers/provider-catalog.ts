@@ -45,27 +45,27 @@ export class ProviderCatalogService {
         configured: copilotConfigured,
         details: copilotConfigured ? "Endpoint and API key configured" : "Set COPILOT_BASE_URL and COPILOT_API_KEY",
         steps: [
-          "Create/authenticate Copilot-compatible API key",
-          "Set COPILOT_BASE_URL",
-          "Set COPILOT_API_KEY and default model"
+          "Get an OpenAI-compatible endpoint URL that exposes /models.",
+          "Create an API key in that provider dashboard.",
+          "Set COPILOT_BASE_URL, COPILOT_API_KEY, and choose default model in Settings."
         ]
       },
       signalBridge: {
         configured: signalConfigured,
         details: signalConfigured ? "Signal bridge configured" : "Set SIGNAL_API_URL and SIGNAL_ACCOUNT_NUMBER",
         steps: [
-          "Run signal-cli-rest-api bridge",
-          "Set SIGNAL_API_URL",
-          "Set SIGNAL_ACCOUNT_NUMBER and optional SIGNAL_WEBHOOK_SECRET"
+          "Run signal-cli-rest-api (Docker or local service).",
+          "Link your Signal number once in signal-cli-rest-api.",
+          "Set SIGNAL_API_URL and SIGNAL_ACCOUNT_NUMBER (+ optional SIGNAL_WEBHOOK_SECRET)."
         ]
       },
       whatsAppBridge: {
         configured: waConfigured,
         details: waConfigured ? "WhatsApp bridge configured" : "Set WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_TOKEN",
         steps: [
-          "Configure WhatsApp Cloud App credentials",
-          "Set WHATSAPP_PHONE_NUMBER_ID",
-          "Set WHATSAPP_TOKEN and optional WHATSAPP_APP_SECRET"
+          "In Meta for Developers, create an app and add WhatsApp product.",
+          "Copy Phone Number ID and generate a permanent access token.",
+          "Set WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TOKEN, and optional WHATSAPP_APP_SECRET."
         ]
       }
     };

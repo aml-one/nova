@@ -6,5 +6,14 @@ export function HealthPill({ level }: { level: "green" | "orange" | "red" }) {
     orange: "bg-pastelOrange border-orange-500/70",
     red: "bg-pastelRed border-rose-500/70"
   } as const;
-  return <span className={cn("inline-flex rounded-ui border px-2 py-1 text-xs font-semibold text-slate-900", map[level])}>{level}</span>;
+  const labelMap = {
+    green: "Healthy / Connected",
+    orange: "Not Connected",
+    red: "Failed / Not Configured"
+  } as const;
+  return (
+    <span className={cn("inline-flex rounded-ui border px-2 py-1 text-xs font-semibold text-slate-900", map[level])}>
+      {labelMap[level]}
+    </span>
+  );
 }

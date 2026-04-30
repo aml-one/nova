@@ -443,6 +443,76 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const setup = providerCatalog.buildProviderSetupStatus();
         return sendJson(response, 200, { models, setup, correlationId });
       }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/test") {
+        const payload = (await readJson(request)) as {
+          signalApiUrl?: string;
+          signalAccountNumber?: string;
+          whatsAppPhoneNumberId?: string;
+          whatsAppToken?: string;
+          whatsAppAppSecret?: string;
+        };
+        const signalApiUrl = payload.signalApiUrl?.trim() || "";
+        const signalAccountNumber = payload.signalAccountNumber?.trim() || "";
+        const whatsAppPhoneNumberId = payload.whatsAppPhoneNumberId?.trim() || "";
+        const whatsAppToken = payload.whatsAppToken?.trim() || "";
+        const whatsAppAppSecret = payload.whatsAppAppSecret?.trim() || "";
+        const signalCheck = signalApiUrl
+          ? await pingUrl(`${signalApiUrl.replace(/\/$/, "")}/v1/about`)
+          : { ok: false, detail: "SIGNAL_API_URL missing" };
+        const waCheck =
+          whatsAppPhoneNumberId && whatsAppToken
+            ? await pingUrl(`https://graph.facebook.com/v22.0/${whatsAppPhoneNumberId}?fields=id`, {
+                authorization: `Bearer ${whatsAppToken}`
+              })
+            : { ok: false, detail: "WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_TOKEN missing" };
+        const suggestedEnv = [
+          `SIGNAL_API_URL=${signalApiUrl || "http://127.0.0.1:8080"}`,
+          `SIGNAL_ACCOUNT_NUMBER=${signalAccountNumber || "+15550001111"}`,
+          `WHATSAPP_PHONE_NUMBER_ID=${whatsAppPhoneNumberId || "your_phone_number_id"}`,
+          `WHATSAPP_TOKEN=${whatsAppToken || "your_whatsapp_token"}`,
+          `WHATSAPP_APP_SECRET=${whatsAppAppSecret || "your_whatsapp_app_secret"}`
+        ].join("\n");
+        return sendJson(response, 200, {
+          signal: signalCheck,
+          whatsApp: waCheck,
+          suggestedEnv,
+          quickGuide: {
+            signal: [
+              "Install and run signal-cli-rest-api.",
+              "Link your Signal number once.",
+              "Paste SIGNAL_API_URL and SIGNAL_ACCOUNT_NUMBER, then click Test."
+            ],
+            whatsApp: [
+              "Create a Meta app and add WhatsApp product.",
+              "Generate a permanent access token in Meta dashboard.",
+              "Copy Phone Number ID and token, then click Test."
+            ]
+          },
+          correlationId
+        });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/copilot/test") {
+        const payload = (await readJson(request)) as { baseUrl?: string; apiKey?: string };
+        const baseUrl = payload.baseUrl?.trim() || "";
+        const apiKey = payload.apiKey?.trim() || "";
+        if (!baseUrl || !apiKey) {
+          return sendJson(response, 400, { error: "baseUrl and apiKey are required", correlationId });
+        }
+        const check = await pingUrl(`${baseUrl.replace(/\/$/, "")}/models`, {
+          authorization: `Bearer ${apiKey}`
+        });
+        const suggestedEnv = [`COPILOT_BASE_URL=${baseUrl}`, `COPILOT_API_KEY=${apiKey}`].join("\n");
+        return sendJson(response, 200, {
+          check,
+          suggestedEnv,
+          quickGuide: [
+            "Use a Copilot/OpenAI-compatible endpoint URL (must expose /models).",
+            "Create a token/key in that provider dashboard.",
+            "Paste URL + key, then click Validate."
+          ],
+          correlationId
+        });
+      }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/skills/manifests") {
         const items = options.skillRegistry.list().map((item) => ({
           id: item.id,

@@ -55,6 +55,7 @@ type SkillManifest = {
   settingsTab?: { id: string; label: string; tone?: "blue" | "purple" | "orange" | "green" | "pink" | "yellow"; description?: string };
 };
 type WebsiteProject = { id: string; name: string; domain: string; subdomain: string; local_path: string; remote_www_root: string; remote_subfolder: string };
+type SetupCheckResult = { ok: boolean; detail: string };
 
 const DEFAULT_SETTINGS: SettingsState = {
   delegatedFolders: [],
@@ -94,6 +95,8 @@ export default function SettingsPage() {
   const [backupLabel, setBackupLabel] = useState("nova-core");
   const [skillManifests, setSkillManifests] = useState<SkillManifest[]>([]);
   const [websites, setWebsites] = useState<WebsiteProject[]>([]);
+  const [channelsSetupOutput, setChannelsSetupOutput] = useState<string>("");
+  const [copilotSetupOutput, setCopilotSetupOutput] = useState<string>("");
 
   useEffect(() => {
     void (async () => {
@@ -185,6 +188,68 @@ export default function SettingsPage() {
     const data = (await response.json()) as { result?: { message?: string }; error?: string };
     if (!response.ok) setError(data.error ?? "Update apply failed");
     else setStatus(data.result?.message ?? "Update apply requested");
+  }
+
+  function updateChannelSetup(patch: Record<string, string>): void {
+    setSettings((p) => ({
+      ...p,
+      skillSettings: {
+        ...p.skillSettings,
+        ["channel-setup"]: { ...(p.skillSettings["channel-setup"] ?? {}), ...patch }
+      }
+    }));
+  }
+
+  async function runOneClickChannelSetup(): Promise<void> {
+    setError(null);
+    setStatus(null);
+    const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
+    const response = await fetch("/api/setup/channels/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        signalApiUrl: values.signalApiUrl ?? "",
+        signalAccountNumber: values.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "",
+        whatsAppPhoneNumberId: values.whatsAppPhoneNumberId ?? "",
+        whatsAppToken: values.whatsAppToken ?? "",
+        whatsAppAppSecret: values.whatsAppAppSecret ?? ""
+      })
+    });
+    const data = (await response.json()) as {
+      signal?: SetupCheckResult;
+      whatsApp?: SetupCheckResult;
+      suggestedEnv?: string;
+      error?: string;
+    };
+    if (!response.ok) {
+      setError(data.error ?? "Channel setup test failed");
+      return;
+    }
+    const signalLine = `Signal: ${data.signal?.ok ? "OK" : "Needs attention"} - ${data.signal?.detail ?? "-"}`;
+    const waLine = `WhatsApp: ${data.whatsApp?.ok ? "OK" : "Needs attention"} - ${data.whatsApp?.detail ?? "-"}`;
+    setChannelsSetupOutput([signalLine, waLine, "", data.suggestedEnv ?? ""].join("\n"));
+    setStatus("Channel setup checked. Review result and save settings.");
+  }
+
+  async function runCopilotSetupValidation(): Promise<void> {
+    setError(null);
+    setStatus(null);
+    const response = await fetch("/api/setup/copilot/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        baseUrl: settings.copilot.baseUrl,
+        apiKey: settings.copilot.apiKey
+      })
+    });
+    const data = (await response.json()) as { check?: SetupCheckResult; suggestedEnv?: string; error?: string };
+    if (!response.ok) {
+      setError(data.error ?? "Copilot setup validation failed");
+      return;
+    }
+    const header = `Copilot: ${data.check?.ok ? "OK" : "Needs attention"} - ${data.check?.detail ?? "-"}`;
+    setCopilotSetupOutput([header, "", data.suggestedEnv ?? ""].join("\n"));
+    setStatus("Copilot setup validated. Review result and save settings.");
   }
 
   const modelOptions = catalog?.models ?? {};
@@ -297,9 +362,21 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-2 rounded-ui border bg-surface p-3">
               <h3 className="font-semibold">Copilot quick setup</h3>
+              <p className="text-xs text-muted">
+                Use any OpenAI-compatible provider endpoint. The base URL should expose a <code>/models</code> route, and API key is created in that provider dashboard.
+              </p>
+              <p className="text-xs text-muted">
+                If you use GitHub Models, check <a className="underline" href="https://github.com/marketplace/models" target="_blank" rel="noreferrer">GitHub Models</a> and create a token in your account settings.
+              </p>
               <Input value={settings.copilot.baseUrl} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, baseUrl: e.target.value } }))} placeholder="COPILOT_BASE_URL" />
               <Input value={settings.copilot.apiKey} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, apiKey: e.target.value } }))} placeholder="COPILOT_API_KEY" />
               <Input value={settings.copilot.defaultModel} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, defaultModel: e.target.value } }))} placeholder="Default model" />
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" tone="purple" onClick={() => void runCopilotSetupValidation()}>Validate Copilot setup</Button>
+              </div>
+              {copilotSetupOutput ? (
+                <textarea className="h-24 w-full rounded-ui border bg-white p-2 font-mono text-xs" value={copilotSetupOutput} readOnly />
+              ) : null}
             </div>
           </Card>
         ) : null}
@@ -307,8 +384,46 @@ export default function SettingsPage() {
         {tab === "channels" ? (
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">WhatsApp / Signal Bridge Setup</h2>
+            <p className="text-xs text-muted">
+              One-click setup helper: enter values below, click the setup button, and Nova validates both bridges and generates an environment block you can paste into your deployment.
+            </p>
             <label className="grid gap-1 text-sm">Nova phone number<Input value={settings.messagingAccess.novaPhoneNumber} onChange={(e) => setSettings((p) => ({ ...p, messagingAccess: { ...p.messagingAccess, novaPhoneNumber: e.target.value } }))} /></label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.messagingAccess.denyUnknownNumbers} onChange={(e) => setSettings((p) => ({ ...p, messagingAccess: { ...p.messagingAccess, denyUnknownNumbers: e.target.checked } }))} /> Silent deny unknown numbers</label>
+            <div className="grid gap-2 md:grid-cols-2">
+              <Input
+                value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.signalApiUrl ?? "")}
+                onChange={(e) => updateChannelSetup({ signalApiUrl: e.target.value })}
+                placeholder="SIGNAL_API_URL (example: http://127.0.0.1:8080)"
+              />
+              <Input
+                value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "")}
+                onChange={(e) => updateChannelSetup({ signalAccountNumber: e.target.value })}
+                placeholder="SIGNAL_ACCOUNT_NUMBER"
+              />
+              <Input
+                value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppPhoneNumberId ?? "")}
+                onChange={(e) => updateChannelSetup({ whatsAppPhoneNumberId: e.target.value })}
+                placeholder="WHATSAPP_PHONE_NUMBER_ID"
+              />
+              <Input
+                value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppToken ?? "")}
+                onChange={(e) => updateChannelSetup({ whatsAppToken: e.target.value })}
+                placeholder="WHATSAPP_TOKEN"
+              />
+            </div>
+            <Input
+              value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppAppSecret ?? "")}
+              onChange={(e) => updateChannelSetup({ whatsAppAppSecret: e.target.value })}
+              placeholder="WHATSAPP_APP_SECRET (optional)"
+            />
+            <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
+              <div><strong>Where to get WhatsApp credentials:</strong> Meta for Developers → create app → add WhatsApp product → copy Phone Number ID and generate permanent token.</div>
+              <div><strong>Where to get Signal credentials:</strong> Run `signal-cli-rest-api`, link your phone number once, then use the bridge URL and account number.</div>
+            </div>
+            <Button type="button" tone="green" onClick={() => void runOneClickChannelSetup()}>One-click validate + generate env</Button>
+            {channelsSetupOutput ? (
+              <textarea className="h-32 w-full rounded-ui border bg-white p-2 font-mono text-xs" value={channelsSetupOutput} readOnly />
+            ) : null}
             <div className="grid gap-3 md:grid-cols-2">
               <BridgeGuide title="SignalBridge" item={catalog?.setup?.signalBridge} />
               <BridgeGuide title="WhatsAppBridge" item={catalog?.setup?.whatsAppBridge} />
