@@ -51,7 +51,9 @@ confirm_yes_no() {
   local prompt="$1"
   local answer=""
   read -r -p "$prompt [yes/no]: " answer
-  [[ "${answer,,}" == "yes" ]]
+  local normalized
+  normalized="$(printf "%s" "$answer" | tr '[:upper:]' '[:lower:]')"
+  [[ "$normalized" == "yes" ]]
 }
 
 confirm_typed() {
