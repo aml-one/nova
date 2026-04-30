@@ -32,6 +32,7 @@ type SettingsState = {
   web: {
     loginEnabled: boolean;
     hideProviderModelInStats: boolean;
+    sendOnEnter: boolean;
     chatStyle: {
       userBubbleColor: string;
       assistantBubbleColor: string;
@@ -73,6 +74,7 @@ const DEFAULT_SETTINGS: SettingsState = {
   web: {
     loginEnabled: true,
     hideProviderModelInStats: false,
+    sendOnEnter: false,
     chatStyle: {
       userBubbleColor: "#dbeafe",
       assistantBubbleColor: "#e9d5ff",
@@ -328,6 +330,7 @@ export default function SettingsPage() {
             <label className="flex items-center gap-2"><Checkbox checked={settings.requireApprovals} onChange={(e) => setSettings((p) => ({ ...p, requireApprovals: e.target.checked }))} /> Require approvals</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.loginEnabled} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, loginEnabled: e.target.checked } }))} /> Enable Web login</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.hideProviderModelInStats} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, hideProviderModelInStats: e.target.checked } }))} /> Hide provider/model in chat statistics</label>
+            <label className="flex items-center gap-2"><Checkbox checked={settings.web.sendOnEnter} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, sendOnEnter: e.target.checked } }))} /> Send message on Enter (Shift+Enter for newline)</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.chatStyle.bubbleBackgroundEnabled} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, bubbleBackgroundEnabled: e.target.checked } } }))} /> Enable bubble backgrounds in chat</label>
             <div className="grid gap-2 md:grid-cols-2">
               <label className="grid gap-1 text-xs">
@@ -709,6 +712,7 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
     web: {
       loginEnabled: value?.web?.loginEnabled ?? DEFAULT_SETTINGS.web.loginEnabled,
       hideProviderModelInStats: value?.web?.hideProviderModelInStats ?? DEFAULT_SETTINGS.web.hideProviderModelInStats,
+      sendOnEnter: value?.web?.sendOnEnter ?? DEFAULT_SETTINGS.web.sendOnEnter,
       chatStyle: {
         userBubbleColor: value?.web?.chatStyle?.userBubbleColor ?? DEFAULT_SETTINGS.web.chatStyle.userBubbleColor,
         assistantBubbleColor: value?.web?.chatStyle?.assistantBubbleColor ?? DEFAULT_SETTINGS.web.chatStyle.assistantBubbleColor,

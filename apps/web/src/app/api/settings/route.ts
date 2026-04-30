@@ -19,6 +19,14 @@ type AppSettingsPayload = {
   web?: {
     loginEnabled?: boolean;
     hideProviderModelInStats?: boolean;
+    sendOnEnter?: boolean;
+    chatStyle?: {
+      userBubbleColor?: string;
+      assistantBubbleColor?: string;
+      userTextColor?: string;
+      assistantTextColor?: string;
+      bubbleBackgroundEnabled?: boolean;
+    };
   };
   learning?: {
     enabled?: boolean;

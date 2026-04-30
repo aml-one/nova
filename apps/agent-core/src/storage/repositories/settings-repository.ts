@@ -26,6 +26,7 @@ export type AppSettings = {
       assistantTextColor: string;
       bubbleBackgroundEnabled: boolean;
     };
+    sendOnEnter: boolean;
   };
   learning: {
     enabled: boolean;
@@ -152,7 +153,8 @@ export class SettingsRepository {
                 ? parsed.web.chatStyle.assistantTextColor
                 : "#0f172a",
             bubbleBackgroundEnabled: parsed.web?.chatStyle?.bubbleBackgroundEnabled !== false
-          }
+          },
+          sendOnEnter: parsed.web?.sendOnEnter === true
         },
         learning: {
           enabled: parsed.learning?.enabled === true,

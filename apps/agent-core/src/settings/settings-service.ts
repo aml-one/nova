@@ -25,7 +25,8 @@ const DEFAULT_SETTINGS: AppSettings = {
       userTextColor: "#0f172a",
       assistantTextColor: "#0f172a",
       bubbleBackgroundEnabled: true
-    }
+    },
+    sendOnEnter: false
   },
   learning: {
     enabled: process.env.NOVA_LEARNING_ENABLED === "true" || process.env.NOVA_LEARNING_ENABLED === undefined,
@@ -136,7 +137,8 @@ export class SettingsService {
           assistantTextColor: update.web?.chatStyle?.assistantTextColor ?? current.web.chatStyle.assistantTextColor,
           bubbleBackgroundEnabled:
             update.web?.chatStyle?.bubbleBackgroundEnabled ?? current.web.chatStyle.bubbleBackgroundEnabled
-        }
+        },
+        sendOnEnter: update.web?.sendOnEnter ?? current.web.sendOnEnter
       },
       learning: {
         enabled: update.learning?.enabled ?? current.learning.enabled,
@@ -235,7 +237,8 @@ export class SettingsService {
             DEFAULT_SETTINGS.web.chatStyle.assistantTextColor
           ),
           bubbleBackgroundEnabled: settings.web?.chatStyle?.bubbleBackgroundEnabled !== false
-        }
+        },
+        sendOnEnter: settings.web?.sendOnEnter === true
       },
       learning: {
         enabled: settings.learning?.enabled !== false,

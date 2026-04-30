@@ -38,6 +38,15 @@ type ChatTurn = {
   };
   isPending?: boolean;
 };
+type ChatSession = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  phoneNumber: string;
+  model: string;
+  turns: ChatTurn[];
+};
 type PendingUpload = {
   id: string;
   file: File;
@@ -52,6 +61,8 @@ export default function HomePage() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [model, setModel] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string>("");
   const [uploads, setUploads] = useState<PendingUpload[]>([]);
   const [loading, setLoading] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -69,8 +80,10 @@ export default function HomePage() {
   });
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
+  const [sendOnEnter, setSendOnEnter] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+  const hasLoadedSessionsRef = useRef(false);
 
   const uploadedMedia = useMemo(
     () =>
@@ -131,6 +144,7 @@ export default function HomePage() {
         settings?: {
           web?: {
             hideProviderModelInStats?: boolean;
+            sendOnEnter?: boolean;
             chatStyle?: {
               userBubbleColor?: string;
               assistantBubbleColor?: string;
@@ -143,6 +157,7 @@ export default function HomePage() {
       };
       if (response.ok) {
         setHideProviderModelInStats(data.settings?.web?.hideProviderModelInStats === true);
+        setSendOnEnter(data.settings?.web?.sendOnEnter === true);
         setChatStyle((prev) => ({
           userBubbleColor: data.settings?.web?.chatStyle?.userBubbleColor ?? prev.userBubbleColor,
           assistantBubbleColor: data.settings?.web?.chatStyle?.assistantBubbleColor ?? prev.assistantBubbleColor,
@@ -153,6 +168,53 @@ export default function HomePage() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (hasLoadedSessionsRef.current) return;
+    hasLoadedSessionsRef.current = true;
+    try {
+      const raw = localStorage.getItem("nova.chat.sessions.v1");
+      const parsed = raw ? (JSON.parse(raw) as ChatSession[]) : [];
+      if (parsed.length > 0) {
+        setSessions(parsed);
+        setActiveSessionId(parsed[0].id);
+        setTurns(parsed[0].turns ?? []);
+        setPhoneNumber(parsed[0].phoneNumber ?? "");
+        setModel(parsed[0].model ?? "");
+      } else {
+        const initial = createEmptySession();
+        setSessions([initial]);
+        setActiveSessionId(initial.id);
+      }
+    } catch {
+      const initial = createEmptySession();
+      setSessions([initial]);
+      setActiveSessionId(initial.id);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedSessionsRef.current || !activeSessionId) return;
+    setSessions((prev) =>
+      prev.map((session) =>
+        session.id === activeSessionId
+          ? {
+              ...session,
+              phoneNumber,
+              model,
+              turns,
+              title: buildSessionTitle(turns),
+              updatedAt: new Date().toISOString()
+            }
+          : session
+      )
+    );
+  }, [turns, phoneNumber, model, activeSessionId]);
+
+  useEffect(() => {
+    if (!hasLoadedSessionsRef.current) return;
+    localStorage.setItem("nova.chat.sessions.v1", JSON.stringify(sessions));
+  }, [sessions]);
 
   useEffect(() => {
     const container = chatScrollRef.current;
@@ -365,6 +427,91 @@ export default function HomePage() {
           <Input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="+15551234567" />
           <label className="text-xs text-muted">Model override (optional)</label>
           <Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="llama3.1 or gpt-4o" />
+          <label className="text-xs text-muted">Session</label>
+          <div className="flex gap-1.5">
+            <Select
+              value={activeSessionId}
+              onChange={(event) => {
+                const sessionId = event.target.value;
+                const session = sessions.find((item) => item.id === sessionId);
+                if (!session) return;
+                setActiveSessionId(session.id);
+                setTurns(session.turns ?? []);
+                setPhoneNumber(session.phoneNumber ?? "");
+                setModel(session.model ?? "");
+              }}
+            >
+              {sessions.map((session) => (
+                <option key={session.id} value={session.id}>
+                  {session.title}
+                </option>
+              ))}
+            </Select>
+            <Button
+              type="button"
+              tone="neutral"
+              onClick={() => {
+                const active = sessions.find((item) => item.id === activeSessionId);
+                if (!active) return;
+                const next = window.prompt("Rename session", active.title)?.trim();
+                if (!next) return;
+                setSessions((prev) => prev.map((item) => (item.id === activeSessionId ? { ...item, title: next } : item)));
+              }}
+              title="Rename active session"
+            >
+              Rename
+            </Button>
+            <Button
+              type="button"
+              tone="red"
+              onClick={() => {
+                if (!activeSessionId) return;
+                const ok = window.confirm("Delete this session?");
+                if (!ok) return;
+                const remaining = sessions.filter((item) => item.id !== activeSessionId);
+                if (remaining.length === 0) {
+                  const fallback = createEmptySession();
+                  setSessions([fallback]);
+                  setActiveSessionId(fallback.id);
+                  setTurns([]);
+                  setMessage("");
+                  setUploads([]);
+                  setPhoneNumber("");
+                  setModel("");
+                  return;
+                }
+                const nextActive = remaining[0];
+                setSessions(remaining);
+                setActiveSessionId(nextActive.id);
+                setTurns(nextActive.turns ?? []);
+                setPhoneNumber(nextActive.phoneNumber ?? "");
+                setModel(nextActive.model ?? "");
+                setMessage("");
+                setUploads([]);
+              }}
+              title="Delete active session"
+            >
+              Delete
+            </Button>
+            <Button
+              type="button"
+              tone="green"
+              className="px-2"
+              onClick={() => {
+                const next = createEmptySession();
+                setSessions((prev) => [next, ...prev]);
+                setActiveSessionId(next.id);
+                setTurns([]);
+                setMessage("");
+                setUploads([]);
+                setPhoneNumber("");
+                setModel("");
+              }}
+              title="Start new session"
+            >
+              +
+            </Button>
+          </div>
           <Badge tone="blue">/run supports shell tasks</Badge>
           <Badge tone="pink">{uploadedMedia.length} media ready</Badge>
           <label className="flex items-center gap-2 text-xs text-muted">
@@ -592,7 +739,21 @@ export default function HomePage() {
               ))}
             </div>
           ) : null}
-          <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} placeholder="Ask Nova to do something..." />
+          <Textarea
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if (!sendOnEnter) return;
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                if (!loading && message.trim()) {
+                  void onSubmit(event as unknown as FormEvent<HTMLFormElement>);
+                }
+              }
+            }}
+            rows={4}
+            placeholder="Ask Nova to do something..."
+          />
           <div className="flex justify-end gap-2">
             <Select value={model ? "custom" : "default"} onChange={(event) => {
               if (event.target.value === "default") setModel("");
@@ -600,6 +761,26 @@ export default function HomePage() {
               <option value="default">Default Model</option>
               <option value="custom">Custom Override</option>
             </Select>
+            <label className="flex items-center gap-1 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={sendOnEnter}
+                onChange={async (event) => {
+                  const next = event.target.checked;
+                  setSendOnEnter(next);
+                  try {
+                    await fetch("/api/settings", {
+                      method: "PUT",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({ web: { sendOnEnter: next } })
+                    });
+                  } catch {
+                    // Ignore save failures for this optional UX preference.
+                  }
+                }}
+              />
+              Send on Enter
+            </label>
             <Button type="submit" tone="green" disabled={loading}>
               {loading ? "Streaming..." : "Send"}
             </Button>
@@ -629,6 +810,26 @@ export default function HomePage() {
       ) : null}
     </div>
   );
+}
+
+function createEmptySession(): ChatSession {
+  const id = randomId();
+  const now = new Date().toISOString();
+  return {
+    id,
+    title: "New session",
+    createdAt: now,
+    updatedAt: now,
+    phoneNumber: "",
+    model: "",
+    turns: []
+  };
+}
+
+function buildSessionTitle(turns: ChatTurn[]): string {
+  const firstUser = turns.find((item) => item.role === "user" && item.text.trim().length > 0)?.text.trim();
+  if (!firstUser) return "New session";
+  return firstUser.slice(0, 40);
 }
 
 function inferMediaKind(value?: string): "image" | "video" | undefined {
