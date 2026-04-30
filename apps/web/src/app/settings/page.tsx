@@ -289,6 +289,17 @@ export default function SettingsPage() {
   }
 
   const modelOptions = catalog?.models ?? {};
+  const websiteBuilderSettings = (settings.skillSettings["website-builder"] ?? {}) as Record<string, unknown>;
+  const cameraVisionSettings = (settings.skillSettings["camera-vision"] ?? {}) as Record<string, unknown>;
+  const selectedWebsiteBuilderProvider = String(websiteBuilderSettings.provider ?? settings.activeProvider);
+  const selectedWebsiteBuilderModels =
+    selectedWebsiteBuilderProvider === "ollama"
+      ? modelOptions.ollama ?? []
+      : selectedWebsiteBuilderProvider === "lmstudio"
+        ? modelOptions.lmstudio ?? []
+        : modelOptions.copilot ?? [];
+  const websiteBuilderModel = String(websiteBuilderSettings.model ?? "");
+  const updateErrorMessage = normalizeUpdateError(updateStatus?.lastError);
   const tabs = [
     { id: "general", label: "General", tone: "blue" as const },
     { id: "models", label: "Models", tone: "purple" as const },
@@ -307,11 +318,19 @@ export default function SettingsPage() {
   );
 
   return (
-    <form onSubmit={save} className="grid gap-4 lg:grid-cols-[1fr_380px]">
+    <form onSubmit={save} className="grid items-start gap-4 lg:grid-cols-[1fr_380px]">
       <div className="space-y-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Settings</h1>
-          <p className="text-sm text-muted">Modern control center with setup guidance and live status.</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold">Settings</h1>
+            <p className="text-sm text-muted">Modern control center with setup guidance and live status.</p>
+          </div>
+          <div className="flex min-w-[220px] flex-col items-end gap-1">
+            <Button type="submit" tone="green" disabled={saving}>{saving ? "Saving..." : "Save Settings"}</Button>
+            <span className={`text-xs ${status ? "text-emerald-600" : error ? "text-rose-600" : "invisible"}`}>
+              {status ?? error ?? "placeholder"}
+            </span>
+          </div>
         </div>
         {loading ? <Card>Loading...</Card> : null}
         <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
@@ -693,9 +712,43 @@ export default function SettingsPage() {
                 <div>Available: {updateStatus.updateAvailable ? "Yes" : "No"}</div>
                 <div>Last checked: {updateStatus.lastCheckedAt ? new Date(updateStatus.lastCheckedAt).toLocaleString() : "-"}</div>
                 <div>Last applied: {updateStatus.lastAppliedAt ? new Date(updateStatus.lastAppliedAt).toLocaleString() : "-"}</div>
-                {updateStatus.lastError ? <div className="text-red-600">{updateStatus.lastError}</div> : null}
+                {updateErrorMessage ? <div className="text-red-600">{updateErrorMessage}</div> : null}
               </div>
             ) : null}
+          </Card>
+        ) : null}
+
+        {tab === "skill:camera-vision" ? (
+          <Card className="space-y-3">
+            <h2 className="text-lg font-semibold">Camera Vision Skill</h2>
+            <p className="text-xs text-muted">
+              Add RTSP camera URLs (one per line). Example: <code>rtsp://user:password@192.168.31.10:554/h.264</code>
+            </p>
+            <textarea
+              className="min-h-[120px] w-full rounded-ui border bg-surface px-2 py-1 text-sm"
+              value={String(cameraVisionSettings.rtspUrls ?? "")}
+              onChange={(e) =>
+                setSettings((p) => ({
+                  ...p,
+                  skillSettings: {
+                    ...p.skillSettings,
+                    ["camera-vision"]: { ...p.skillSettings["camera-vision"], rtspUrls: e.target.value }
+                  }
+                }))
+              }
+              placeholder={"rtsp://user:password@camera-1:554/stream\nrtsp://user:password@camera-2:554/h.264"}
+            />
+            <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
+              <div className="font-semibold">Detected camera entries</div>
+              {String(cameraVisionSettings.rtspUrls ?? "")
+                .split(/\r?\n/)
+                .map((line) => line.trim())
+                .filter(Boolean)
+                .map((line, idx) => (
+                  <div key={`${line}-${idx}`}>{line}</div>
+                ))}
+              {!String(cameraVisionSettings.rtspUrls ?? "").trim() ? <div>No cameras configured yet.</div> : null}
+            </div>
           </Card>
         ) : null}
 
@@ -703,27 +756,82 @@ export default function SettingsPage() {
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">Website Builder Skill</h2>
             <p className="text-xs text-muted">Configure SSH/Caddy defaults and manage created websites.</p>
+            <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
+              SSH must be passwordless (public key auth). Do not use passwords here. Optionally provide a private key path.
+            </div>
             <div className="grid gap-2 md:grid-cols-2">
               <Input
-                value={String(settings.skillSettings["website-builder"]?.sshHost ?? "")}
+                value={String(websiteBuilderSettings.sshHost ?? "")}
                 onChange={(e) => setSettings((p) => ({ ...p, skillSettings: { ...p.skillSettings, ["website-builder"]: { ...p.skillSettings["website-builder"], sshHost: e.target.value } } }))}
                 placeholder="Default SSH host"
               />
               <Input
-                value={String(settings.skillSettings["website-builder"]?.sshUser ?? "")}
+                value={String(websiteBuilderSettings.sshUser ?? "")}
                 onChange={(e) => setSettings((p) => ({ ...p, skillSettings: { ...p.skillSettings, ["website-builder"]: { ...p.skillSettings["website-builder"], sshUser: e.target.value } } }))}
                 placeholder="Default SSH user"
               />
               <Input
-                value={String(settings.skillSettings["website-builder"]?.remoteWwwRoot ?? "/var/www")}
+                type="number"
+                value={String(websiteBuilderSettings.sshPort ?? "22")}
+                onChange={(e) => setSettings((p) => ({ ...p, skillSettings: { ...p.skillSettings, ["website-builder"]: { ...p.skillSettings["website-builder"], sshPort: Number(e.target.value || 22) } } }))}
+                placeholder="Default SSH port"
+              />
+              <Input
+                value={String(websiteBuilderSettings.sshPrivateKeyPath ?? "")}
+                onChange={(e) => setSettings((p) => ({ ...p, skillSettings: { ...p.skillSettings, ["website-builder"]: { ...p.skillSettings["website-builder"], sshPrivateKeyPath: e.target.value } } }))}
+                placeholder="SSH private key path (optional)"
+              />
+              <Input
+                value={String(websiteBuilderSettings.remoteWwwRoot ?? "/var/www")}
                 onChange={(e) => setSettings((p) => ({ ...p, skillSettings: { ...p.skillSettings, ["website-builder"]: { ...p.skillSettings["website-builder"], remoteWwwRoot: e.target.value } } }))}
                 placeholder="Remote www root"
               />
               <Input
-                value={String(settings.skillSettings["website-builder"]?.caddyFilePath ?? "/etc/caddy/Caddyfile")}
+                value={String(websiteBuilderSettings.caddyFilePath ?? "/etc/caddy/Caddyfile")}
                 onChange={(e) => setSettings((p) => ({ ...p, skillSettings: { ...p.skillSettings, ["website-builder"]: { ...p.skillSettings["website-builder"], caddyFilePath: e.target.value } } }))}
                 placeholder="Caddy file path"
               />
+            </div>
+            <div className="grid gap-2 md:grid-cols-2">
+              <label className="grid gap-1 text-xs">
+                Website Builder provider
+                <Select
+                  value={selectedWebsiteBuilderProvider}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      skillSettings: {
+                        ...p.skillSettings,
+                        ["website-builder"]: { ...p.skillSettings["website-builder"], provider: e.target.value }
+                      }
+                    }))
+                  }
+                >
+                  <option value="ollama">Ollama</option>
+                  <option value="lmstudio">LM Studio</option>
+                  <option value="copilot">Copilot</option>
+                </Select>
+              </label>
+              <label className="grid gap-1 text-xs">
+                Website Builder model (optional override)
+                <Select
+                  value={websiteBuilderModel}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      skillSettings: {
+                        ...p.skillSettings,
+                        ["website-builder"]: { ...p.skillSettings["website-builder"], model: e.target.value }
+                      }
+                    }))
+                  }
+                >
+                  <option value="">Auto (use provider default)</option>
+                  {selectedWebsiteBuilderModels.map((m) => (
+                    <option key={m.id} value={m.id}>{m.id}</option>
+                  ))}
+                </Select>
+              </label>
             </div>
             <div className="space-y-2">
               <h3 className="font-semibold">Built Websites</h3>
@@ -763,28 +871,23 @@ export default function SettingsPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button type="submit" tone="green" disabled={saving}>{saving ? "Saving..." : "Save Settings"}</Button>
-          {status ? <span className="text-sm text-emerald-600">{status}</span> : null}
-          {error ? <span className="text-sm text-rose-600">{error}</span> : null}
-        </div>
       </div>
 
-      <aside className="space-y-3 lg:sticky lg:top-24 lg:h-fit">
+      <aside className="space-y-3 lg:sticky lg:top-24 lg:h-fit lg:self-start">
         <Card>
           <div className="mb-2 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Full Health</h2>
+            <h2 className="text-lg font-semibold">Health checks</h2>
             <Button type="button" tone="blue" onClick={() => void loadHealth()}>Refresh</Button>
           </div>
           <div className="mb-2">
-            <HealthPill level={health?.level ?? "orange"} label={health?.level === "green" ? "Operational" : undefined} />
+            <HealthPill level={health?.level ?? "orange"} label={health?.level === "green" ? "Operational" : undefined} className="w-48 justify-center whitespace-nowrap" />
           </div>
           <div className="max-h-[60vh] space-y-2 overflow-y-auto">
             {(health?.checks ?? []).map((check) => (
               <article key={check.id} className="rounded-ui border bg-surface p-2 text-xs">
                 <div className="flex items-center justify-between gap-2">
                   <strong>{check.name}</strong>
-                  <HealthPill level={check.level} label={healthLabelForCheck(check)} className="w-40 justify-center whitespace-nowrap" />
+                  <HealthPill level={check.level} label={healthLabelForCheck(check)} className="w-48 justify-center whitespace-nowrap" />
                 </div>
                 <div className="text-muted">{check.detail}</div>
                 <div className="text-muted">Last OK: {check.lastSuccessfulAt ? new Date(check.lastSuccessfulAt).toLocaleString() : "-"}</div>
@@ -819,6 +922,22 @@ function healthLabelForCheck(check: HealthCheck): string {
   if (/(token|key|secret|auth|credential)/.test(lowered)) return "Configured";
   if (/(bridge|signal|whatsapp|webhook|socket|http|api|connect)/.test(lowered)) return "Connected";
   return "Healthy";
+}
+
+function normalizeUpdateError(value?: string): string | undefined {
+  if (!value) return undefined;
+  const cleaned = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(
+      (line) =>
+        line.length > 0 &&
+        !line.startsWith("From https://github.com/") &&
+        !line.includes("[DEP0169]") &&
+        !line.includes("url.parse() behavior is not standardized")
+    );
+  if (cleaned.length === 0) return undefined;
+  return cleaned.join(" ");
 }
 
 function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsState {
