@@ -1,5 +1,6 @@
-import { getDatabase } from "../sqlite.js";
 import { randomUUID } from "node:crypto";
+import { sqliteUtcDatetimeToIso } from "../../util/sqlite-timestamp.js";
+import { getDatabase } from "../sqlite.js";
 
 export type EmotionStateRecord = {
   userId: string;
@@ -120,7 +121,7 @@ export class EmotionRepository {
       arousal: Number(row.arousal ?? 0),
       label: String(row.label ?? "neutral"),
       metadata: parseJson(row.metadata),
-      createdAt: String(row.created_at ?? "")
+      createdAt: sqliteUtcDatetimeToIso(String(row.created_at ?? ""))
     }));
   }
 }

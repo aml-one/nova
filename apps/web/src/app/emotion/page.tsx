@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
+import { formatLocalDayHeading, groupByLocalCalendarDate } from "../../lib/local-date";
 
 type EmotionEvent = {
   id: string;
@@ -27,8 +28,9 @@ export default function EmotionPage() {
     setLoading(true);
     const query = targetUserId ? `?userId=${encodeURIComponent(targetUserId)}` : "";
     const response = await fetch(`/api/emotion/history${query}`);
-    const data = (await response.json()) as { itemsByDate?: Record<string, EmotionEvent[]> };
-    setItemsByDate(data.itemsByDate ?? {});
+    const data = (await response.json()) as { items?: EmotionEvent[]; itemsByDate?: Record<string, EmotionEvent[]> };
+    const flat = Array.isArray(data.items) ? data.items : [];
+    setItemsByDate(flat.length > 0 ? groupByLocalCalendarDate(flat) : data.itemsByDate ?? {});
     setLoading(false);
   }
 
@@ -58,7 +60,7 @@ export default function EmotionPage() {
       {!loading &&
         dates.map((date) => (
           <section key={date} className="space-y-2">
-            <h2 className="text-lg font-semibold">{date}</h2>
+            <h2 className="text-lg font-semibold">{formatLocalDayHeading(date)}</h2>
             <div className="grid gap-2">
               {itemsByDate[date]?.map((item) => (
                 <article key={item.id} className="rounded-ui border bg-surface2 p-3">

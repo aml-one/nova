@@ -25,7 +25,8 @@ import {
   FaWandMagicSparkles,
   FaBookOpen,
   FaChevronLeft,
-  FaChevronRight
+  FaChevronRight,
+  FaShareNodes
 } from "react-icons/fa6";
 import { ThemeToggle } from "./theme-toggle";
 import { EmotionBadge } from "./emotion-badge";
@@ -39,6 +40,12 @@ const links: NavLink[] = [
   { href: "/emotion", label: "Emotion", icon: FaHeart, subtitle: "Emotion timeline and state transitions." },
   { href: "/memory", label: "Memory", icon: FaDatabase, subtitle: "Pin and manage durable memory cards for Nova." },
   { href: "/knowledge", label: "Knowledge", icon: FaRoute, subtitle: "Entity and relationship graph from long-term memory." },
+  {
+    href: "/identity-evolution",
+    label: "Identity",
+    icon: FaShareNodes,
+    subtitle: "Read-only identity evolution timeline (persona, learning, backups)."
+  },
   { href: "/reports", label: "Reports", icon: FaBookOpen, subtitle: "Weekly learning summaries and overnight digests." },
   { href: "/learning", label: "Learning", icon: FaRobot, subtitle: "Self-improvement events and autonomous learning runs." },
   { href: "/workflows", label: "Workflows", icon: FaListCheck, subtitle: "Build if-this-then-that automations for Nova tasks." },
@@ -106,7 +113,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
               {!navCollapsed ? <span>{link.label}</span> : null}
             </Link>
-            {index === 1 || index === 5 || index === 8 || index === 11 ? <div className="my-2 h-px w-full bg-slate-300/40" /> : null}
+            {index === 1 || index === 6 || index === 9 || index === 12 ? <div className="my-2 h-px w-full bg-slate-300/40" /> : null}
             </div>
           ))}
           <div className="mt-2 h-px w-full bg-slate-300/40" />

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { sqliteUtcDatetimeToIso } from "../../util/sqlite-timestamp.js";
 import { getDatabase } from "../sqlite.js";
 
 export type ThoughtCategory = "chat" | "learning" | "system";
@@ -45,7 +46,7 @@ export class ThoughtRepository {
       title: String(row.title ?? ""),
       content: String(row.content ?? ""),
       metadata: parseJson(row.metadata),
-      createdAt: String(row.created_at ?? "")
+      createdAt: sqliteUtcDatetimeToIso(String(row.created_at ?? ""))
     }));
   }
 }

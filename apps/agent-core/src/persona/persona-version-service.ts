@@ -1,15 +1,20 @@
 import { existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { sqliteUtcDatetimeToIso } from "../util/sqlite-timestamp.js";
 import { getDatabase } from "../storage/sqlite.js";
 
 export class PersonaVersionService {
   list(personaId: string): Array<{ version: number; createdAt: string }> {
     const db = getDatabase();
-    return db
+    const rows = db
       .prepare(
         "SELECT version, created_at as createdAt FROM persona_versions WHERE persona_id = ? ORDER BY version DESC LIMIT 100"
       )
       .all(personaId) as Array<{ version: number; createdAt: string }>;
+    return rows.map((row) => ({
+      version: row.version,
+      createdAt: sqliteUtcDatetimeToIso(String(row.createdAt ?? ""))
+    }));
   }
 
   rollback(personaId: string, version: number): void {
