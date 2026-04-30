@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { HealthPill } from "../../components/ui/health-pill";
+import { Badge } from "../../components/ui/badge";
+import { ThoughtMetadataDetails } from "../../components/thought-metadata";
+import { cn } from "../../lib/cn";
 
 type ThoughtItem = {
   id: string;
@@ -84,18 +87,27 @@ export default function ThoughtsPage() {
         <div className="max-h-[68vh] space-y-2 overflow-y-auto pr-1">
           {items.length === 0 ? <p className="text-sm text-muted">No thoughts yet.</p> : null}
           {items.map((item) => (
-            <article key={item.id} className="rounded-ui border bg-surface p-3">
-              <div className="mb-1 flex items-center justify-between gap-2 text-xs">
-                <span className="font-semibold uppercase text-muted">{item.category}</span>
-                <span className="text-muted">{new Date(item.createdAt).toLocaleString()}</span>
+            <article
+              key={item.id}
+              className={cn(
+                "rounded-ui border bg-surface p-3 shadow-sm",
+                item.category === "chat" && "border-l-4 border-l-blue-500/70",
+                item.category === "learning" && "border-l-4 border-l-purple-500/70",
+                item.category === "system" && "border-l-4 border-l-slate-500/70"
+              )}
+            >
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <CategoryBadge category={item.category} />
+                <time className="tabular-nums text-slate-500" dateTime={item.createdAt}>
+                  {new Date(item.createdAt).toLocaleString(undefined, {
+                    dateStyle: "medium",
+                    timeStyle: "short"
+                  })}
+                </time>
               </div>
-              <h3 className="text-sm font-semibold">{item.title}</h3>
-              <p className="whitespace-pre-wrap text-sm text-muted">{item.content}</p>
-              {item.metadata ? (
-                <pre className="mt-2 overflow-x-auto rounded-ui border bg-surface2 p-2 text-xs text-muted">
-                  {formatThoughtMetadata(item.metadata)}
-                </pre>
-              ) : null}
+              <h3 className="text-[15px] font-semibold leading-snug text-slate-100">{item.title}</h3>
+              <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{item.content}</p>
+              {item.metadata !== undefined && item.metadata !== null ? <ThoughtMetadataDetails metadata={item.metadata} /> : null}
             </article>
           ))}
         </div>
@@ -112,12 +124,8 @@ function dedupeById(items: ThoughtItem[]): ThoughtItem[] {
   return Array.from(map.values()).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 }
 
-function formatThoughtMetadata(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
+function CategoryBadge({ category }: { category: ThoughtItem["category"] }) {
+  const tone = category === "chat" ? "blue" : category === "learning" ? "purple" : "neutral";
+  const label = category === "chat" ? "Chat" : category === "learning" ? "Learning" : "System";
+  return <Badge tone={tone}>{label}</Badge>;
 }
