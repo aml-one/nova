@@ -1,4 +1,6 @@
 import { TaskOrchestrator } from "./orchestrator/task-orchestrator.js";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { InMemorySkillRegistry } from "./skills/skill-registry.js";
 import { ModelRouter } from "./providers/router.js";
 import { MemoryService } from "./memory/memory-service.js";
@@ -24,6 +26,7 @@ import { UpdateManager } from "./update/update-manager.js";
 import { InstallStateService } from "./update/install-state.js";
 
 async function bootstrap(): Promise<void> {
+  runMobileSetupDiagnostics();
   const settings = new SettingsService();
   const skillRegistry = new InMemorySkillRegistry(() => settings.get().skills);
   const router = new ModelRouter();
@@ -90,6 +93,33 @@ async function bootstrap(): Promise<void> {
     appVersion: currentVersion,
     installedAt: installState.getInstalledAt()
   });
+}
+
+function runMobileSetupDiagnostics(): void {
+  const credentialPath = process.env.NOVA_FIREBASE_ADMIN_CREDENTIALS_PATH?.trim();
+  if (!credentialPath) {
+    console.warn(
+      "[mobile-setup] NOVA_FIREBASE_ADMIN_CREDENTIALS_PATH is not set. Push delivery is disabled until this is configured."
+    );
+  } else {
+    const resolved = resolve(process.cwd(), credentialPath);
+    if (!existsSync(resolved)) {
+      console.warn(`[mobile-setup] Firebase Admin credentials file not found: ${resolved}`);
+    }
+  }
+
+  const androidConfig = resolve(process.cwd(), "../mobile_flutter/android/app/google-services.json");
+  const iosConfig = resolve(process.cwd(), "../mobile_flutter/ios/Runner/GoogleService-Info.plist");
+  if (!existsSync(androidConfig)) {
+    console.warn(
+      `[mobile-setup] Missing Android Firebase config: ${androidConfig}. Copy it from api_keys/google-services.json`
+    );
+  }
+  if (!existsSync(iosConfig)) {
+    console.warn(
+      `[mobile-setup] Missing iOS Firebase config: ${iosConfig}. Copy it from api_keys/GoogleService-Info.plist`
+    );
+  }
 }
 
 bootstrap().catch((error) => {
