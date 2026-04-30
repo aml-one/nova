@@ -43,7 +43,6 @@ type ChatSession = {
   title: string;
   createdAt: string;
   updatedAt: string;
-  phoneNumber: string;
   model: string;
   turns: ChatTurn[];
 };
@@ -58,7 +57,6 @@ type PendingUpload = {
 
 export default function HomePage() {
   const [message, setMessage] = useState("");
-  const [phoneNumber, setPhoneNumber] = useState("");
   const [model, setModel] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -179,7 +177,6 @@ export default function HomePage() {
         setSessions(parsed);
         setActiveSessionId(parsed[0].id);
         setTurns(parsed[0].turns ?? []);
-        setPhoneNumber(parsed[0].phoneNumber ?? "");
         setModel(parsed[0].model ?? "");
       } else {
         const initial = createEmptySession();
@@ -200,7 +197,6 @@ export default function HomePage() {
         session.id === activeSessionId
           ? {
               ...session,
-              phoneNumber,
               model,
               turns,
               title: buildSessionTitle(turns),
@@ -209,7 +205,7 @@ export default function HomePage() {
           : session
       )
     );
-  }, [turns, phoneNumber, model, activeSessionId]);
+  }, [turns, model, activeSessionId]);
 
   useEffect(() => {
     if (!hasLoadedSessionsRef.current) return;
@@ -254,7 +250,6 @@ export default function HomePage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           message: composedMessage,
-          phoneNumber: phoneNumber.trim() || undefined,
           imageUrl: readyUploads.find((item) => item.kind === "image")?.url,
           model: model.trim() || undefined
         })
@@ -423,13 +418,12 @@ export default function HomePage() {
       <Card className="h-fit">
         <h2 className="mb-2 text-lg font-semibold">Session</h2>
         <div className="space-y-2">
-          <label className="text-xs text-muted">Phone Number</label>
-          <Input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="+15551234567" />
           <label className="text-xs text-muted">Model override (optional)</label>
           <Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="llama3.1 or gpt-4o" />
           <label className="text-xs text-muted">Session</label>
-          <div className="flex gap-1.5">
+          <div className="space-y-1.5">
             <Select
+              className="w-full"
               value={activeSessionId}
               onChange={(event) => {
                 const sessionId = event.target.value;
@@ -437,7 +431,6 @@ export default function HomePage() {
                 if (!session) return;
                 setActiveSessionId(session.id);
                 setTurns(session.turns ?? []);
-                setPhoneNumber(session.phoneNumber ?? "");
                 setModel(session.model ?? "");
               }}
             >
@@ -447,6 +440,7 @@ export default function HomePage() {
                 </option>
               ))}
             </Select>
+            <div className="grid grid-cols-3 gap-1.5">
             <Button
               type="button"
               tone="neutral"
@@ -476,7 +470,6 @@ export default function HomePage() {
                   setTurns([]);
                   setMessage("");
                   setUploads([]);
-                  setPhoneNumber("");
                   setModel("");
                   return;
                 }
@@ -484,7 +477,6 @@ export default function HomePage() {
                 setSessions(remaining);
                 setActiveSessionId(nextActive.id);
                 setTurns(nextActive.turns ?? []);
-                setPhoneNumber(nextActive.phoneNumber ?? "");
                 setModel(nextActive.model ?? "");
                 setMessage("");
                 setUploads([]);
@@ -504,13 +496,13 @@ export default function HomePage() {
                 setTurns([]);
                 setMessage("");
                 setUploads([]);
-                setPhoneNumber("");
                 setModel("");
               }}
               title="Start new session"
             >
               +
             </Button>
+            </div>
           </div>
           <Badge tone="blue">/run supports shell tasks</Badge>
           <Badge tone="pink">{uploadedMedia.length} media ready</Badge>
@@ -820,7 +812,6 @@ function createEmptySession(): ChatSession {
     title: "New session",
     createdAt: now,
     updatedAt: now,
-    phoneNumber: "",
     model: "",
     turns: []
   };

@@ -334,20 +334,20 @@ export default function SettingsPage() {
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.chatStyle.bubbleBackgroundEnabled} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, bubbleBackgroundEnabled: e.target.checked } } }))} /> Enable bubble backgrounds in chat</label>
             <div className="grid gap-2 md:grid-cols-2">
               <label className="grid gap-1 text-xs">
-                User bubble color
-                <Input type="color" value={settings.web.chatStyle.userBubbleColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBubbleColor: e.target.value } } }))} />
-              </label>
-              <label className="grid gap-1 text-xs">
-                Assistant bubble color
+                Nova bubble color (left)
                 <Input type="color" value={settings.web.chatStyle.assistantBubbleColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBubbleColor: e.target.value } } }))} />
               </label>
               <label className="grid gap-1 text-xs">
-                User text color
-                <Input type="color" value={settings.web.chatStyle.userTextColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userTextColor: e.target.value } } }))} />
+                User bubble color (right)
+                <Input type="color" value={settings.web.chatStyle.userBubbleColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBubbleColor: e.target.value } } }))} />
               </label>
               <label className="grid gap-1 text-xs">
-                Assistant text color
+                Nova text color (left)
                 <Input type="color" value={settings.web.chatStyle.assistantTextColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantTextColor: e.target.value } } }))} />
+              </label>
+              <label className="grid gap-1 text-xs">
+                User text color (right)
+                <Input type="color" value={settings.web.chatStyle.userTextColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userTextColor: e.target.value } } }))} />
               </label>
             </div>
             <div className="rounded-ui border bg-surface p-3">
@@ -669,14 +669,14 @@ export default function SettingsPage() {
             <Button type="button" tone="blue" onClick={() => void loadHealth()}>Refresh</Button>
           </div>
           <div className="mb-2">
-            <HealthPill level={health?.level ?? "orange"} />
+            <HealthPill level={health?.level ?? "orange"} label={health?.level === "green" ? "Operational" : undefined} />
           </div>
           <div className="max-h-[60vh] space-y-2 overflow-y-auto">
             {(health?.checks ?? []).map((check) => (
               <article key={check.id} className="rounded-ui border bg-surface p-2 text-xs">
                 <div className="flex items-center justify-between gap-2">
                   <strong>{check.name}</strong>
-                  <HealthPill level={check.level} />
+                  <HealthPill level={check.level} label={healthLabelForCheck(check)} />
                 </div>
                 <div className="text-muted">{check.detail}</div>
                 <div className="text-muted">Last OK: {check.lastSuccessfulAt ? new Date(check.lastSuccessfulAt).toLocaleString() : "-"}</div>
@@ -694,7 +694,7 @@ function BridgeGuide({ title, item }: { title: string; item?: { configured: bool
     <div className="rounded-ui border bg-surface p-3">
       <div className="mb-1 flex items-center justify-between">
         <strong>{title}</strong>
-        <HealthPill level={item?.configured ? "green" : "orange"} />
+        <HealthPill level={item?.configured ? "green" : "orange"} label={item?.configured ? "Connected" : "Not Connected"} />
       </div>
       <div className="mb-1 text-xs text-muted">{item?.details ?? "No status data"}</div>
       <ol className="list-inside list-decimal text-xs text-muted">
@@ -702,6 +702,15 @@ function BridgeGuide({ title, item }: { title: string; item?: { configured: bool
       </ol>
     </div>
   );
+}
+
+function healthLabelForCheck(check: HealthCheck): string {
+  if (check.level === "red") return "Failed / Not Configured";
+  if (check.level === "orange") return "Not Connected";
+  const lowered = `${check.name} ${check.detail}`.toLowerCase();
+  if (/(token|key|secret|auth|credential)/.test(lowered)) return "Configured";
+  if (/(bridge|signal|whatsapp|webhook|socket|http|api|connect)/.test(lowered)) return "Connected";
+  return "Healthy";
 }
 
 function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsState {

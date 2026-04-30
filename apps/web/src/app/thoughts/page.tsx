@@ -68,7 +68,7 @@ export default function ThoughtsPage() {
           <p className="text-sm text-muted">Always-on feed of Nova's internal reasoning, including idle cycles.</p>
         </div>
         <div className="flex items-center gap-2">
-          <HealthPill level={loading ? "orange" : "green"} />
+          <HealthPill level={loading ? "orange" : "green"} label={loading ? "Syncing" : "Live"} />
           <Button type="button" tone="blue" onClick={() => void load()}>
             Refresh now
           </Button>
