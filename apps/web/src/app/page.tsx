@@ -74,7 +74,9 @@ export default function HomePage() {
     assistantBubbleColor: "#e9d5ff",
     userTextColor: "#0f172a",
     assistantTextColor: "#0f172a",
-    bubbleBackgroundEnabled: true
+    bubbleBackgroundEnabled: true,
+    borderColor: "#94a3b8",
+    borderThicknessPx: 1
   });
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -149,6 +151,8 @@ export default function HomePage() {
               userTextColor?: string;
               assistantTextColor?: string;
               bubbleBackgroundEnabled?: boolean;
+              borderColor?: string;
+              borderThicknessPx?: number;
             };
           };
         };
@@ -161,7 +165,9 @@ export default function HomePage() {
           assistantBubbleColor: data.settings?.web?.chatStyle?.assistantBubbleColor ?? prev.assistantBubbleColor,
           userTextColor: data.settings?.web?.chatStyle?.userTextColor ?? prev.userTextColor,
           assistantTextColor: data.settings?.web?.chatStyle?.assistantTextColor ?? prev.assistantTextColor,
-          bubbleBackgroundEnabled: data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled
+          bubbleBackgroundEnabled: data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled,
+          borderColor: data.settings?.web?.chatStyle?.borderColor ?? prev.borderColor,
+          borderThicknessPx: data.settings?.web?.chatStyle?.borderThicknessPx ?? prev.borderThicknessPx
         }));
       }
     })();
@@ -553,12 +559,14 @@ export default function HomePage() {
                   ? {
                       backgroundColor: chatStyle.bubbleBackgroundEnabled ? chatStyle.userBubbleColor : "transparent",
                       color: chatStyle.userTextColor,
-                      borderColor: chatStyle.userBubbleColor
+                      borderColor: chatStyle.borderColor,
+                      borderWidth: `${chatStyle.borderThicknessPx}px`
                     }
                   : {
                       backgroundColor: chatStyle.bubbleBackgroundEnabled ? chatStyle.assistantBubbleColor : "transparent",
                       color: chatStyle.assistantTextColor,
-                      borderColor: chatStyle.assistantBubbleColor
+                      borderColor: chatStyle.borderColor,
+                      borderWidth: `${chatStyle.borderThicknessPx}px`
                     }
               }
             >

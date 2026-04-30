@@ -24,7 +24,9 @@ const DEFAULT_SETTINGS: AppSettings = {
       assistantBubbleColor: "#e9d5ff",
       userTextColor: "#0f172a",
       assistantTextColor: "#0f172a",
-      bubbleBackgroundEnabled: true
+      bubbleBackgroundEnabled: true,
+      borderColor: "#94a3b8",
+      borderThicknessPx: 1
     },
     sendOnEnter: false
   },
@@ -136,7 +138,9 @@ export class SettingsService {
           userTextColor: update.web?.chatStyle?.userTextColor ?? current.web.chatStyle.userTextColor,
           assistantTextColor: update.web?.chatStyle?.assistantTextColor ?? current.web.chatStyle.assistantTextColor,
           bubbleBackgroundEnabled:
-            update.web?.chatStyle?.bubbleBackgroundEnabled ?? current.web.chatStyle.bubbleBackgroundEnabled
+            update.web?.chatStyle?.bubbleBackgroundEnabled ?? current.web.chatStyle.bubbleBackgroundEnabled,
+          borderColor: update.web?.chatStyle?.borderColor ?? current.web.chatStyle.borderColor,
+          borderThicknessPx: update.web?.chatStyle?.borderThicknessPx ?? current.web.chatStyle.borderThicknessPx
         },
         sendOnEnter: update.web?.sendOnEnter ?? current.web.sendOnEnter
       },
@@ -236,7 +240,9 @@ export class SettingsService {
             settings.web?.chatStyle?.assistantTextColor,
             DEFAULT_SETTINGS.web.chatStyle.assistantTextColor
           ),
-          bubbleBackgroundEnabled: settings.web?.chatStyle?.bubbleBackgroundEnabled !== false
+          bubbleBackgroundEnabled: settings.web?.chatStyle?.bubbleBackgroundEnabled !== false,
+          borderColor: normalizeHexColor(settings.web?.chatStyle?.borderColor, DEFAULT_SETTINGS.web.chatStyle.borderColor),
+          borderThicknessPx: clampInt(settings.web?.chatStyle?.borderThicknessPx, 0, 8, DEFAULT_SETTINGS.web.chatStyle.borderThicknessPx)
         },
         sendOnEnter: settings.web?.sendOnEnter === true
       },

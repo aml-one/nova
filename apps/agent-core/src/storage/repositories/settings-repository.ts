@@ -25,6 +25,8 @@ export type AppSettings = {
       userTextColor: string;
       assistantTextColor: string;
       bubbleBackgroundEnabled: boolean;
+      borderColor: string;
+      borderThicknessPx: number;
     };
     sendOnEnter: boolean;
   };
@@ -152,7 +154,10 @@ export class SettingsRepository {
               typeof parsed.web?.chatStyle?.assistantTextColor === "string"
                 ? parsed.web.chatStyle.assistantTextColor
                 : "#0f172a",
-            bubbleBackgroundEnabled: parsed.web?.chatStyle?.bubbleBackgroundEnabled !== false
+            bubbleBackgroundEnabled: parsed.web?.chatStyle?.bubbleBackgroundEnabled !== false,
+            borderColor:
+              typeof parsed.web?.chatStyle?.borderColor === "string" ? parsed.web.chatStyle.borderColor : "#94a3b8",
+            borderThicknessPx: Number(parsed.web?.chatStyle?.borderThicknessPx ?? 1)
           },
           sendOnEnter: parsed.web?.sendOnEnter === true
         },

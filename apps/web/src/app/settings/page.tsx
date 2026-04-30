@@ -39,6 +39,8 @@ type SettingsState = {
       userTextColor: string;
       assistantTextColor: string;
       bubbleBackgroundEnabled: boolean;
+      borderColor: string;
+      borderThicknessPx: number;
     };
   };
   learning: { enabled: boolean; idleMinutes: number; intervalMs: number; minFailuresForAutoImprove: number };
@@ -80,7 +82,9 @@ const DEFAULT_SETTINGS: SettingsState = {
       assistantBubbleColor: "#e9d5ff",
       userTextColor: "#0f172a",
       assistantTextColor: "#0f172a",
-      bubbleBackgroundEnabled: true
+      bubbleBackgroundEnabled: true,
+      borderColor: "#94a3b8",
+      borderThicknessPx: 1
     }
   },
   learning: { enabled: true, idleMinutes: 3, intervalMs: 120000, minFailuresForAutoImprove: 2 },
@@ -116,7 +120,6 @@ export default function SettingsPage() {
   const [backupLabel, setBackupLabel] = useState("nova-core");
   const [skillManifests, setSkillManifests] = useState<SkillManifest[]>([]);
   const [websites, setWebsites] = useState<WebsiteProject[]>([]);
-  const [tabsCollapsed, setTabsCollapsed] = useState(false);
   const [channelsSetupOutput, setChannelsSetupOutput] = useState<string>("");
   const [copilotSetupOutput, setCopilotSetupOutput] = useState<string>("");
 
@@ -303,10 +306,7 @@ export default function SettingsPage() {
         <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
           <Card className="h-fit lg:sticky lg:top-24">
             <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">{tabsCollapsed ? "Menu" : "Settings Menu"}</h2>
-              <Button type="button" tone="neutral" onClick={() => setTabsCollapsed((prev) => !prev)}>
-                {tabsCollapsed ? "Expand" : "Collapse"}
-              </Button>
+              <h2 className="text-sm font-semibold">Settings Menu</h2>
             </div>
             <div className="space-y-1">
               {tabs.map((item) => (
@@ -315,10 +315,10 @@ export default function SettingsPage() {
                   type="button"
                   tone={tab === item.id ? item.tone ?? "blue" : "neutral"}
                   onClick={() => setTab(item.id)}
-                  className={tabsCollapsed ? "h-8 w-8 p-0" : "w-full justify-start text-left"}
+                  className="w-full justify-start text-left"
                   title={item.label}
                 >
-                  {tabsCollapsed ? item.label.slice(0, 1).toUpperCase() : item.label}
+                  {item.label}
                 </Button>
               ))}
             </div>
@@ -349,6 +349,14 @@ export default function SettingsPage() {
                 User text color (right)
                 <Input type="color" value={settings.web.chatStyle.userTextColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userTextColor: e.target.value } } }))} />
               </label>
+              <label className="grid gap-1 text-xs">
+                Bubble border color
+                <Input type="color" value={settings.web.chatStyle.borderColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, borderColor: e.target.value } } }))} />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Border thickness (px)
+                <Input type="number" min={0} max={8} value={settings.web.chatStyle.borderThicknessPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, borderThicknessPx: Number(e.target.value || 0) } } }))} />
+              </label>
             </div>
             <div className="rounded-ui border bg-surface p-3">
               <div className="mb-2 text-xs font-semibold text-muted">Live chat style preview</div>
@@ -360,7 +368,8 @@ export default function SettingsPage() {
                       ? settings.web.chatStyle.userBubbleColor
                       : "transparent",
                     color: settings.web.chatStyle.userTextColor,
-                    borderColor: settings.web.chatStyle.userBubbleColor
+                    borderColor: settings.web.chatStyle.borderColor,
+                    borderWidth: `${settings.web.chatStyle.borderThicknessPx}px`
                   }}
                 >
                   <div className="mb-1 text-[11px] font-semibold">You</div>
@@ -373,7 +382,8 @@ export default function SettingsPage() {
                       ? settings.web.chatStyle.assistantBubbleColor
                       : "transparent",
                     color: settings.web.chatStyle.assistantTextColor,
-                    borderColor: settings.web.chatStyle.assistantBubbleColor
+                    borderColor: settings.web.chatStyle.borderColor,
+                    borderWidth: `${settings.web.chatStyle.borderThicknessPx}px`
                   }}
                 >
                   <div className="mb-1 text-[11px] font-semibold">Nova</div>
@@ -728,7 +738,9 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
         userTextColor: value?.web?.chatStyle?.userTextColor ?? DEFAULT_SETTINGS.web.chatStyle.userTextColor,
         assistantTextColor: value?.web?.chatStyle?.assistantTextColor ?? DEFAULT_SETTINGS.web.chatStyle.assistantTextColor,
         bubbleBackgroundEnabled:
-          value?.web?.chatStyle?.bubbleBackgroundEnabled ?? DEFAULT_SETTINGS.web.chatStyle.bubbleBackgroundEnabled
+          value?.web?.chatStyle?.bubbleBackgroundEnabled ?? DEFAULT_SETTINGS.web.chatStyle.bubbleBackgroundEnabled,
+        borderColor: value?.web?.chatStyle?.borderColor ?? DEFAULT_SETTINGS.web.chatStyle.borderColor,
+        borderThicknessPx: value?.web?.chatStyle?.borderThicknessPx ?? DEFAULT_SETTINGS.web.chatStyle.borderThicknessPx
       }
     },
     learning: {

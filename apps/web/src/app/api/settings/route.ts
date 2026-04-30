@@ -26,6 +26,8 @@ type AppSettingsPayload = {
       userTextColor?: string;
       assistantTextColor?: string;
       bubbleBackgroundEnabled?: boolean;
+      borderColor?: string;
+      borderThicknessPx?: number;
     };
   };
   learning?: {
