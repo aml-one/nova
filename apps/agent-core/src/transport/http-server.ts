@@ -1801,12 +1801,36 @@ async function buildFullHealth(
     detail: scheduler.isRunning() ? "running" : "stopped"
   });
 
-  const level = checks.some((item) => item.level === "red")
-    ? "red"
-    : checks.some((item) => item.level === "orange")
-      ? "orange"
-      : "green";
+  const level = computeOverallHealthLevel(checks);
   return { level, checks: enrichHealthChecks(checks) };
+}
+
+function computeOverallHealthLevel(checks: HealthCheckResult[]): HealthLevel {
+  const criticalChecks = checks.filter((item) => !isAdvisoryHealthCheck(item.id));
+  if (criticalChecks.some((item) => item.level === "red")) {
+    return "red";
+  }
+  if (criticalChecks.some((item) => item.level === "orange")) {
+    return "orange";
+  }
+  return "green";
+}
+
+function isAdvisoryHealthCheck(id: string): boolean {
+  // Channel bridges and webhook signature checks are optional when Web UI is used.
+  if (
+    id === "whatsapp-config" ||
+    id === "signal-config" ||
+    id === "webhook-whatsapp-secret" ||
+    id === "webhook-signal-secret"
+  ) {
+    return true;
+  }
+  // Model providers are grouped as optional alternatives; individual provider failures are advisory.
+  if (id.startsWith("provider-")) {
+    return true;
+  }
+  return false;
 }
 
 async function checkDatabase(): Promise<HealthCheckResult> {
@@ -1826,12 +1850,22 @@ async function checkDatabase(): Promise<HealthCheckResult> {
 async function checkModelProviders(modelRouter: ModelRouter): Promise<HealthCheckResult[]> {
   try {
     const statuses = await modelRouter.health();
-    return Object.entries(statuses).map(([provider, ok]) => ({
+    const items = Object.entries(statuses).map(([provider, ok]) => ({
       id: `provider-${provider}`,
       name: `Model Provider: ${provider}`,
       level: ok ? "green" : "orange",
       detail: ok ? "reachable" : "unreachable"
-    }));
+    })) as HealthCheckResult[];
+    const anyReachable = items.some((item) => item.level === "green");
+    return [
+      {
+        id: "providers-routing",
+        name: "Model Routing Availability",
+        level: anyReachable ? "green" : "orange",
+        detail: anyReachable ? "at least one provider reachable" : "no model providers reachable"
+      },
+      ...items
+    ];
   } catch (error) {
     return [
       {
