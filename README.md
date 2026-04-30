@@ -59,7 +59,7 @@ Local-first headless AI agent framework for macOS, Windows, and Ubuntu.
 1. Install required tools (Homebrew):
    - `brew install git node`
 2. Clone repository:
-   - `git clone <your-repo-url> Nova`
+   - `git clone https://github.com/aml-one/nova Nova`
    - `cd Nova`
 3. Enable Corepack:
    - `corepack enable`
@@ -79,7 +79,7 @@ Local-first headless AI agent framework for macOS, Windows, and Ubuntu.
    - Git for Windows
    - Node.js 22 LTS
 2. Open **PowerShell** and clone:
-   - `git clone <your-repo-url> Nova`
+   - `git clone https://github.com/aml-one/nova Nova`
    - `cd Nova`
 3. Enable Corepack:
    - `corepack enable`
@@ -100,7 +100,7 @@ Local-first headless AI agent framework for macOS, Windows, and Ubuntu.
    - `curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -`
    - `sudo apt install -y nodejs`
 3. Clone project:
-   - `git clone <your-repo-url> Nova`
+   - `git clone https://github.com/aml-one/nova Nova`
    - `cd Nova`
 4. Enable Corepack + install deps:
    - `corepack enable`
