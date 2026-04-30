@@ -3,7 +3,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { FaBrain, FaPenToSquare, FaPlus, FaSpinner, FaTrash } from "react-icons/fa6";
+import { FaBrain, FaCopy, FaFloppyDisk, FaPenToSquare, FaPlus, FaRotateRight, FaSpinner, FaTrash, FaXmark } from "react-icons/fa6";
 import { Card } from "../components/ui/card";
 import { Textarea } from "../components/ui/textarea";
 import { Select } from "../components/ui/select";
@@ -74,7 +74,9 @@ export default function HomePage() {
     assistantTextColor: "#0f172a",
     bubbleBackgroundEnabled: true,
     borderColor: "#94a3b8",
-    borderThicknessPx: 1
+    borderThicknessPx: 1,
+    bubbleRadiusPx: 16,
+    showNames: true
   });
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -82,7 +84,7 @@ export default function HomePage() {
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const hasLoadedSessionsRef = useRef(false);
-  const compactButtonClass = "h-5 px-1.5 py-0 text-[10px]";
+  const compactActionClass = "inline-flex h-7 w-7 items-center justify-center p-0";
 
   const uploadedMedia = useMemo(
     () =>
@@ -152,6 +154,8 @@ export default function HomePage() {
               bubbleBackgroundEnabled?: boolean;
               borderColor?: string;
               borderThicknessPx?: number;
+              bubbleRadiusPx?: number;
+              showNames?: boolean;
             };
           };
         };
@@ -166,7 +170,9 @@ export default function HomePage() {
           assistantTextColor: data.settings?.web?.chatStyle?.assistantTextColor ?? prev.assistantTextColor,
           bubbleBackgroundEnabled: data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled,
           borderColor: data.settings?.web?.chatStyle?.borderColor ?? prev.borderColor,
-          borderThicknessPx: data.settings?.web?.chatStyle?.borderThicknessPx ?? prev.borderThicknessPx
+          borderThicknessPx: data.settings?.web?.chatStyle?.borderThicknessPx ?? prev.borderThicknessPx,
+          bubbleRadiusPx: data.settings?.web?.chatStyle?.bubbleRadiusPx ?? prev.bubbleRadiusPx,
+          showNames: data.settings?.web?.chatStyle?.showNames ?? prev.showNames
         }));
       }
     })();
@@ -415,6 +421,15 @@ export default function HomePage() {
     });
   }
 
+  async function copyTurnText(value: string): Promise<void> {
+    if (!value.trim()) return;
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      // Ignore clipboard failures to keep chat interaction lightweight.
+    }
+  }
+
   return (
     <div className="grid gap-4">
       <Card className="flex min-h-[calc(100vh-170px)] flex-col">
@@ -422,7 +437,7 @@ export default function HomePage() {
           <h1 className="text-2xl font-semibold">Nova Chat</h1>
           <div className="flex items-center gap-1.5">
             <Select
-              className="h-6 min-w-[220px] py-0 text-xs"
+              className="h-8 min-w-[240px] py-0 text-sm leading-none"
               value={activeSessionId}
               onChange={(event) => {
                 const sessionId = event.target.value;
@@ -441,7 +456,7 @@ export default function HomePage() {
             <Button
               type="button"
               tone="green"
-              className={compactButtonClass}
+              className="inline-flex h-8 min-w-8 items-center justify-center px-2"
               onClick={() => {
                 const next = createEmptySession();
                 setSessions((prev) => [next, ...prev]);
@@ -452,12 +467,12 @@ export default function HomePage() {
               }}
               title="Start new session"
             >
-              <FaPlus className="h-2.5 w-2.5" />
+              <FaPlus className="h-3.5 w-3.5" />
             </Button>
             <Button
               type="button"
               tone="neutral"
-              className={compactButtonClass}
+              className="inline-flex h-8 min-w-8 items-center justify-center px-2"
               onClick={() => {
                 const active = sessions.find((item) => item.id === activeSessionId);
                 if (!active) return;
@@ -467,12 +482,12 @@ export default function HomePage() {
               }}
               title="Rename active session"
             >
-              <FaPenToSquare className="h-2.5 w-2.5" />
+              <FaPenToSquare className="h-3.5 w-3.5" />
             </Button>
             <Button
               type="button"
               tone="red"
-              className={compactButtonClass}
+              className="inline-flex h-8 min-w-8 items-center justify-center px-2"
               onClick={() => {
                 if (!activeSessionId) return;
                 const ok = window.confirm("Delete this session?");
@@ -496,16 +511,16 @@ export default function HomePage() {
               }}
               title="Delete active session"
             >
-              <FaTrash className="h-2.5 w-2.5" />
+              <FaTrash className="h-3.5 w-3.5" />
             </Button>
             {loading ? (
               <button
                 type="button"
-                className="inline-flex h-6 w-6 items-center justify-center rounded-ui border bg-surface2"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-ui border bg-surface2"
                 title="Nova is streaming"
                 disabled
               >
-                <FaSpinner className="h-3 w-3 animate-spin text-slate-600" />
+                <FaSpinner className="h-3.5 w-3.5 animate-spin text-slate-600" />
               </button>
             ) : null}
           </div>
@@ -538,8 +553,8 @@ export default function HomePage() {
               key={turn.id}
               className={
                 turn.role === "user"
-                  ? "ml-auto w-fit min-w-[250px] max-w-[85%] rounded-ui border p-2.5"
-                  : "mr-auto max-w-[85%] rounded-ui border p-2.5"
+                  ? "ml-auto w-fit min-w-[250px] max-w-[85%] border p-2.5"
+                  : "mr-auto w-full border p-2.5"
               }
               style={
                 turn.role === "user"
@@ -547,25 +562,27 @@ export default function HomePage() {
                       backgroundColor: chatStyle.bubbleBackgroundEnabled ? chatStyle.userBubbleColor : "transparent",
                       color: chatStyle.userTextColor,
                       borderColor: chatStyle.borderColor,
-                      borderWidth: `${chatStyle.borderThicknessPx}px`
+                      borderWidth: `${chatStyle.borderThicknessPx}px`,
+                      borderRadius: `${chatStyle.bubbleRadiusPx}px`
                     }
                   : {
                       backgroundColor: chatStyle.bubbleBackgroundEnabled ? chatStyle.assistantBubbleColor : "transparent",
                       color: chatStyle.assistantTextColor,
                       borderColor: chatStyle.borderColor,
-                      borderWidth: `${chatStyle.borderThicknessPx}px`
+                      borderWidth: `${chatStyle.borderThicknessPx}px`,
+                      borderRadius: `${chatStyle.bubbleRadiusPx}px`
                     }
               }
             >
-              <div className="mb-1 text-xs font-semibold">{turn.role === "user" ? "You" : "Nova"}</div>
+              {chatStyle.showNames ? <div className="mb-1 text-xs font-semibold">{turn.role === "user" ? "You" : "Nova"}</div> : null}
               {editingTurnId === turn.id ? (
                 <div className="space-y-2">
                   <Textarea value={editingText} onChange={(event) => setEditingText(event.target.value)} rows={3} />
-                  <div className="flex gap-2">
+                  <div className="flex items-center gap-2">
                     <Button
                       type="button"
                       tone="green"
-                      className={compactButtonClass}
+                      className={compactActionClass}
                       onClick={() => {
                         const next = editingText.trim();
                         if (!next) return;
@@ -573,12 +590,11 @@ export default function HomePage() {
                         setMessage(next);
                         setEditingTurnId(null);
                       }}
+                      title="Save"
                     >
-                      Save
+                      <FaFloppyDisk className="h-3.5 w-3.5" />
                     </Button>
-                    <Button type="button" tone="red" className={compactButtonClass} onClick={() => setEditingTurnId(null)}>
-                      Cancel
-                    </Button>
+                    <button type="button" className="text-xs text-rose-400 hover:text-rose-300" onClick={() => setEditingTurnId(null)}>Cancel</button>
                   </div>
                 </div>
               ) : (
@@ -587,29 +603,43 @@ export default function HomePage() {
                 </div>
               )}
               {turn.role === "user" ? (
-                <div className="mt-2 flex gap-1.5">
+                <div className="mt-2 flex items-center justify-between gap-2">
+                  <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-ui border bg-surface2" onClick={() => void copyTurnText(turn.text)} title="Copy message">
+                    <FaCopy className="h-3.5 w-3.5" />
+                  </button>
+                  <div className="flex items-center gap-1.5">
                   <Button
                     type="button"
                     tone="yellow"
-                    className={compactButtonClass}
+                    className={compactActionClass}
                     onClick={() => {
                       setEditingTurnId(turn.id);
                       setEditingText(turn.text);
                     }}
+                    title="Edit"
                   >
-                    Edit
+                    <FaPenToSquare className="h-3.5 w-3.5" />
                   </Button>
                   <Button
                     type="button"
                     tone="orange"
-                    className={compactButtonClass}
+                    className={compactActionClass}
                     onClick={() => {
                       setMessage(turn.text);
                       window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
                     }}
+                    title="Regenerate"
                   >
-                    Regenerate
+                    <FaRotateRight className="h-3.5 w-3.5" />
                   </Button>
+                  </div>
+                </div>
+              ) : null}
+              {turn.role === "assistant" ? (
+                <div className="mt-2">
+                  <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-ui border bg-surface2" onClick={() => void copyTurnText(turn.text)} title="Copy message">
+                    <FaCopy className="h-3.5 w-3.5" />
+                  </button>
                 </div>
               ) : null}
               {turn.role === "assistant" && showThinkingInChat && turn.thinkingText ? (
@@ -643,18 +673,18 @@ export default function HomePage() {
                 </div>
               ) : null}
               {turn.attachments?.length ? (
-                <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-3">
+                <div className="mt-2 flex flex-wrap gap-2">
                   {turn.attachments.map((item, mediaIndex) => (
                     <button
                       key={`${item.url}-${mediaIndex}`}
                       type="button"
-                      className="overflow-hidden rounded-ui border bg-surface/70"
+                      className="h-20 w-20 overflow-hidden rounded-xl border bg-surface/70"
                       onClick={() => setLightbox({ items: turn.attachments ?? [], index: mediaIndex })}
                     >
                       {item.kind === "image" ? (
-                        <img src={item.url} alt={item.name ?? "attachment"} className="h-24 w-full object-cover" />
+                        <img src={item.url} alt={item.name ?? "attachment"} className="h-full w-full object-cover" />
                       ) : (
-                        <img src={item.posterUrl || item.url} alt={item.name ?? "video"} className="h-24 w-full object-cover" />
+                        <img src={item.posterUrl || item.url} alt={item.name ?? "video"} className="h-full w-full object-cover" />
                       )}
                     </button>
                   ))}
@@ -702,31 +732,34 @@ export default function HomePage() {
             </div>
           </div>
           {uploads.length ? (
-            <div className="space-y-2 rounded-ui border bg-surface2 p-2">
-              {uploads.map((item, idx) => (
-                <div key={item.id} className="rounded-ui border bg-surface p-2 text-xs">
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <span className="truncate">{item.file.name}</span>
-                    <div className="flex gap-1">
-                      <Button type="button" tone="blue" className={compactButtonClass} onClick={() => moveUpload(item.id, -1)} disabled={idx === 0}>
-                        Up
-                      </Button>
-                      <Button type="button" tone="blue" className={compactButtonClass} onClick={() => moveUpload(item.id, 1)} disabled={idx === uploads.length - 1}>
-                        Down
-                      </Button>
-                      <Button type="button" tone="red" className={compactButtonClass} onClick={() => setUploads((prev) => prev.filter((u) => u.id !== item.id))}>
-                        Remove
-                      </Button>
+            <div className="rounded-2xl border bg-surface2 p-2">
+              <div className="mb-2 flex flex-wrap gap-2">
+                {uploads.map((item, idx) => {
+                  const previewUrl = item.uploaded?.kind === "video" ? (item.uploaded.posterUrl || item.uploaded.url) : item.uploaded?.url;
+                  return (
+                    <div key={item.id} className="relative h-14 w-14 overflow-hidden rounded-lg border bg-surface">
+                      {previewUrl ? (
+                        <img src={previewUrl} alt={item.file.name} className="h-full w-full object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center px-1 text-center text-[10px] text-muted">{item.file.name}</div>
+                      )}
+                      <button type="button" className="absolute right-0 top-0 inline-flex h-5 w-5 items-center justify-center rounded-bl-md bg-slate-900/80 text-white" onClick={() => setUploads((prev) => prev.filter((u) => u.id !== item.id))} title="Remove file">
+                        <FaXmark className="h-3 w-3" />
+                      </button>
+                      {idx > 0 ? (
+                        <button type="button" className="absolute bottom-0 left-0 inline-flex h-5 w-5 items-center justify-center rounded-tr-md bg-slate-900/80 text-white" onClick={() => moveUpload(item.id, -1)} title="Move earlier">
+                          <FaRotateRight className="h-3 w-3 rotate-180" />
+                        </button>
+                      ) : null}
                     </div>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-ui border bg-surface">
-                    <div className="h-full bg-pastelGreen transition-all" style={{ width: `${item.progress}%` }} />
-                  </div>
-                  <div className="mt-1 text-muted">
-                    {item.status === "failed" ? `Upload failed: ${item.error ?? "unknown error"}` : `${item.status} (${item.progress}%)`}
-                  </div>
-                </div>
-              ))}
+                  );
+                })}
+              </div>
+              <div className="text-xs text-muted">
+                {uploads.some((item) => item.status === "failed")
+                  ? "Some files failed to upload. Remove and retry."
+                  : `${uploads.length} file${uploads.length > 1 ? "s" : ""} ready`}
+              </div>
             </div>
           ) : null}
           <Textarea
@@ -782,7 +815,7 @@ export default function HomePage() {
               </Link>
               {uploadedMedia.length > 0 ? <Badge tone="pink">{uploadedMedia.length} media ready</Badge> : null}
             </div>
-            {!loading && message.trim().length > 0 ? <Button type="submit" tone="green" className={compactButtonClass}>Send</Button> : null}
+            {!loading && message.trim().length > 0 ? <Button type="submit" tone="green" className="h-8 px-3 text-sm">Send</Button> : null}
           </div>
         </form>
       </Card>
@@ -793,7 +826,7 @@ export default function HomePage() {
               <span>
                 {lightbox.index + 1}/{lightbox.items.length}
               </span>
-              <Button type="button" tone="red" className={compactButtonClass} onClick={() => setLightbox(null)}>
+              <Button type="button" tone="red" className="h-8 px-3 text-sm" onClick={() => setLightbox(null)}>
                 Close
               </Button>
             </div>

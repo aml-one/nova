@@ -26,7 +26,9 @@ const DEFAULT_SETTINGS: AppSettings = {
       assistantTextColor: "#0f172a",
       bubbleBackgroundEnabled: true,
       borderColor: "#94a3b8",
-      borderThicknessPx: 1
+      borderThicknessPx: 1,
+      bubbleRadiusPx: 16,
+      showNames: true
     },
     sendOnEnter: false
   },
@@ -140,7 +142,9 @@ export class SettingsService {
           bubbleBackgroundEnabled:
             update.web?.chatStyle?.bubbleBackgroundEnabled ?? current.web.chatStyle.bubbleBackgroundEnabled,
           borderColor: update.web?.chatStyle?.borderColor ?? current.web.chatStyle.borderColor,
-          borderThicknessPx: update.web?.chatStyle?.borderThicknessPx ?? current.web.chatStyle.borderThicknessPx
+          borderThicknessPx: update.web?.chatStyle?.borderThicknessPx ?? current.web.chatStyle.borderThicknessPx,
+          bubbleRadiusPx: update.web?.chatStyle?.bubbleRadiusPx ?? current.web.chatStyle.bubbleRadiusPx,
+          showNames: update.web?.chatStyle?.showNames ?? current.web.chatStyle.showNames
         },
         sendOnEnter: update.web?.sendOnEnter ?? current.web.sendOnEnter
       },
@@ -242,7 +246,9 @@ export class SettingsService {
           ),
           bubbleBackgroundEnabled: settings.web?.chatStyle?.bubbleBackgroundEnabled !== false,
           borderColor: normalizeHexColor(settings.web?.chatStyle?.borderColor, DEFAULT_SETTINGS.web.chatStyle.borderColor),
-          borderThicknessPx: clampInt(settings.web?.chatStyle?.borderThicknessPx, 0, 8, DEFAULT_SETTINGS.web.chatStyle.borderThicknessPx)
+          borderThicknessPx: clampInt(settings.web?.chatStyle?.borderThicknessPx, 0, 8, DEFAULT_SETTINGS.web.chatStyle.borderThicknessPx),
+          bubbleRadiusPx: clampInt(settings.web?.chatStyle?.bubbleRadiusPx, 0, 30, DEFAULT_SETTINGS.web.chatStyle.bubbleRadiusPx),
+          showNames: settings.web?.chatStyle?.showNames !== false
         },
         sendOnEnter: settings.web?.sendOnEnter === true
       },

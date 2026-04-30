@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { z } from "zod";
 import type { UserProfile } from "../identity/user-profile-store.js";
@@ -27,9 +27,61 @@ const personaSchema = z.object({
 });
 
 export class PersonaLoader {
+  getDefaultPersona(): { persona: Persona; filePath?: string; source: "file" | "fallback" } {
+    const root = this.resolvePersonaRoot();
+    if (!root) {
+      return { persona: fallbackPersona, source: "fallback" };
+    }
+    const filePath = resolve(root, "default.persona.yaml");
+    if (!existsSync(filePath)) {
+      return { persona: fallbackPersona, source: "fallback", filePath };
+    }
+    const loaded = this.loadFromFile(filePath);
+    if (!loaded) {
+      return { persona: fallbackPersona, source: "fallback", filePath };
+    }
+    return { persona: loaded, source: "file", filePath };
+  }
+
+  saveDefaultPersona(input: { voice: string; style: string[]; systemPrompt: string }): Persona {
+    const root = this.resolvePersonaRoot() ?? resolve(process.cwd(), "config/personas");
+    mkdirSync(root, { recursive: true });
+    const filePath = resolve(root, "default.persona.yaml");
+    const normalized: Persona = {
+      id: "default",
+      voice: input.voice.trim() || fallbackPersona.voice,
+      style: input.style.map((item) => item.trim()).filter((item) => item.length > 0),
+      systemPrompt: input.systemPrompt.trim() || fallbackPersona.systemPrompt
+    };
+    const yaml = [
+      `id: ${normalized.id}`,
+      `voice: ${yamlQuote(normalized.voice)}`,
+      "style:",
+      ...(normalized.style.length > 0 ? normalized.style.map((item) => `  - ${yamlQuote(item)}`) : ["  - direct", "  - clear"]),
+      "systemPrompt: |",
+      ...normalized.systemPrompt.split(/\r?\n/).map((line) => `  ${line}`)
+    ].join("\n");
+    writeFileSync(filePath, `${yaml}\n`, "utf8");
+    this.persistPersonaVersion("default", yaml);
+    return normalized;
+  }
+
+  ensureDefaultPersonaFile(): string {
+    const root = this.resolvePersonaRoot() ?? resolve(process.cwd(), "config/personas");
+    mkdirSync(root, { recursive: true });
+    const filePath = resolve(root, "default.persona.yaml");
+    if (!existsSync(filePath)) {
+      this.saveDefaultPersona({
+        voice: fallbackPersona.voice,
+        style: fallbackPersona.style,
+        systemPrompt: fallbackPersona.systemPrompt
+      });
+    }
+    return filePath;
+  }
+
   getPersonaForUser(userId: string, channel: string, profile?: UserProfile): Persona {
-    const roots = [resolve(process.cwd(), "config/personas"), resolve(process.cwd(), "../../config/personas")];
-    const root = roots.find((item) => existsSync(item));
+    const root = this.resolvePersonaRoot();
     if (!root) {
       return fallbackPersona;
     }
@@ -96,4 +148,13 @@ export class PersonaLoader {
       raw
     );
   }
+
+  private resolvePersonaRoot(): string | undefined {
+    const roots = [resolve(process.cwd(), "config/personas"), resolve(process.cwd(), "../../config/personas")];
+    return roots.find((item) => existsSync(item));
+  }
+}
+
+function yamlQuote(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }

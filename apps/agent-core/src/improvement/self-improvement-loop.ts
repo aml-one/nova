@@ -7,6 +7,9 @@ import { generateImprovementPrompt, summarizeOutcomes } from "./proposal-generat
 import { isValidationPass, runValidationGate } from "./validation-gate.js";
 import { InMemorySkillRegistry } from "../skills/skill-registry.js";
 import { EmotionService } from "../emotion/emotion-service.js";
+import { ModelRouter } from "../providers/router.js";
+import type { ChatMessage } from "@nova/sdk/provider";
+import { CuriosityStore } from "./curiosity-store.js";
 
 type Outcome = {
   runId: string;
@@ -26,12 +29,18 @@ type ImprovementPolicy = {
 export class SelfImprovementLoop {
   private readonly outcomes: Outcome[] = [];
   private readonly learningLog = new LearningLog();
+  private readonly curiosity = new CuriosityStore();
   private readonly policy: ImprovementPolicy;
 
   constructor(
     private readonly gitOps: GitOpsManager,
     private readonly registry: InMemorySkillRegistry,
-    private readonly emotionService?: EmotionService
+    private readonly emotionService?: EmotionService,
+    private readonly modelRouter?: ModelRouter,
+    private readonly getSettings?: () => {
+      activeProvider: "ollama" | "lmstudio" | "copilot";
+      models: { defaultByProvider: { ollama: string; lmstudio: string; copilot: string } };
+    }
   ) {
     this.policy = loadPolicy();
   }
@@ -81,6 +90,18 @@ export class SelfImprovementLoop {
       return "policy mode prevents auto skill apply";
     }
     const skillId = `auto-${normalizeId(taskHint)}`;
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const generatedToday = this.curiosity.getGeneratedSkillCountForDate(todayKey);
+    if (generatedToday >= 5) {
+      this.learningLog.append(
+        "Skipped auto-skill generation due to daily safety cap",
+        true,
+        `generatedToday=${generatedToday}; dailyLimit=5`,
+        "improvement",
+        { taskHint, dailyLimit: 5 }
+      );
+      return "daily auto-skill cap reached (5/day)";
+    }
     const path = generateSkillFromTemplate(skillId, `Auto-generated for repeated failures in: ${taskHint}`);
     const report = runValidationGate();
     const accepted = isValidationPass(report);
@@ -99,17 +120,23 @@ export class SelfImprovementLoop {
       }
       return `generated ${skillId} but validation failed`;
     }
-    await this.gitOps.commitAndPush(`chore(skills): add auto-generated skill ${skillId}`);
-    this.learningLog.append(`Committed auto-skill ${skillId}`, true, "pushed to git", "improvement", {
+    const afterIncrement = this.curiosity.markSkillGenerated(todayKey);
+    this.learningLog.append(`Generated auto-skill ${skillId} pending user approval`, true, "awaiting approval", "improvement", {
       skillId,
-      path
+      path,
+      approvalRequired: true,
+      generatedToday: afterIncrement,
+      dailyLimit: 5
     });
+    this.curiosity.enqueueQuestions("global", [
+      { question: `I drafted a new skill '${skillId}'. Can you review and approve it before I activate it?`, topic: taskHint }
+    ]);
     this.emotionService?.applySystemEvent("nova-system", "improvement_success", {
       enabled: true,
       expressionStyle: "balanced",
       mirrorUserValence: true
     });
-    return `generated and validated skill at ${path}`;
+    return `generated and validated skill at ${path} (pending user approval before use)`;
   }
 
   async runIdleLearningCycle(options?: { enabled?: boolean; minFailuresForAutoImprove?: number }): Promise<string> {
@@ -123,9 +150,25 @@ export class SelfImprovementLoop {
     );
     const researchTopics = summary.topFailingTasks.length > 0 ? summary.topFailingTasks : ["Intelligent agent", "TypeScript"];
     const researchNotes = await collectResearchNotes(researchTopics.slice(0, 2));
+    const cognition = await this.runAutonomousCognition(researchTopics.slice(0, 2), researchNotes);
     this.learningLog.append("Idle research cycle completed", true, researchNotes, "research", {
       topics: researchTopics.slice(0, 2)
     });
+    if (cognition.summary) {
+      this.learningLog.append("Model-assisted cognition summary", true, cognition.summary, "research", {
+        topics: researchTopics.slice(0, 2),
+        provider: cognition.provider
+      });
+    }
+    if (cognition.questions.length > 0) {
+      this.curiosity.enqueueQuestions(
+        "global",
+        cognition.questions.map((question) => ({ question, topic: researchTopics[0] }))
+      );
+      this.learningLog.append("Queued follow-up user questions", true, cognition.questions.join(" | "), "proposal", {
+        queuedQuestions: cognition.questions.length
+      });
+    }
     this.emotionService?.applySystemEvent("nova-system", "research_complete", {
       enabled: true,
       expressionStyle: "balanced",
@@ -152,6 +195,47 @@ export class SelfImprovementLoop {
     return `idle cycle complete: ${improvementResult}`;
   }
 
+  consumePendingQuestions(userId: string, limit = 2): string[] {
+    return this.curiosity
+      .consumeQuestions(userId, limit)
+      .map((item) => item.question.trim())
+      .filter((item) => item.length > 0);
+  }
+
+  private async runAutonomousCognition(topics: string[], researchNotes: string): Promise<AutonomousCognitionResult> {
+    if (!this.modelRouter) {
+      return { summary: "", questions: [] };
+    }
+    const settings = this.getSettings?.();
+    const localModel = settings?.models?.defaultByProvider?.ollama?.trim() || undefined;
+    const prompt = [
+      "You are Nova's autonomous learning engine.",
+      "Think about improvements to Nova's architecture, skills, reliability, and product quality.",
+      "Use these internet notes as facts. Keep output concise and actionable.",
+      "Return two sections exactly:",
+      "1) SUMMARY: 3 bullet points",
+      "2) QUESTIONS_FOR_USER: up to 2 short questions only if truly unresolved after web research.",
+      "",
+      `Topics: ${topics.join(", ") || "general reliability"}`,
+      `Internet notes:\n${researchNotes || "No external notes available."}`
+    ].join("\n");
+    const messages: ChatMessage[] = [
+      { role: "system", content: "Be practical, safety-aware, and avoid hallucinations." },
+      { role: "user", content: prompt }
+    ];
+    const result = await runModelReasoning(this.modelRouter, messages, localModel);
+    const raw = result.summary;
+    if (!raw) {
+      return { summary: "", provider: result.provider, questions: [] };
+    }
+    const questions = extractQuestions(raw);
+    return {
+      summary: raw,
+      provider: result.provider,
+      questions
+    };
+  }
+
   getLearningHistoryGroupedByDate(): Record<string, Array<Record<string, unknown>>> {
     return this.learningLog.getGroupedByDate();
   }
@@ -159,6 +243,36 @@ export class SelfImprovementLoop {
   getLearningHistory(): Array<Record<string, unknown>> {
     return this.learningLog.getAll();
   }
+}
+
+async function runModelReasoning(
+  router: ModelRouter | undefined,
+  messages: ChatMessage[],
+  model?: string
+): Promise<{ summary: string; provider?: string }> {
+  if (!router) return { summary: "" };
+  try {
+    const response = await router.chatLocalFirst(messages, model);
+    return { summary: response.content.trim(), provider: response.provider };
+  } catch {
+    return { summary: "" };
+  }
+}
+
+type AutonomousCognitionResult = {
+  summary: string;
+  provider?: string;
+  questions: string[];
+};
+
+function extractQuestions(value: string): string[] {
+  const section = value.split(/questions_for_user\s*:/i)[1] ?? "";
+  const source = section || value;
+  const lines = source
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
+    .filter((line) => line.endsWith("?"));
+  return Array.from(new Set(lines)).slice(0, 2);
 }
 
 function loadPolicy(): ImprovementPolicy {
@@ -214,11 +328,12 @@ async function collectResearchNotes(topics: string[]): Promise<string> {
     try {
       const payload = await fetchWikipediaSummary(topic);
       const extract = payload.extract?.trim();
+      const webSnippet = await fetchDuckDuckGoSnippet(topic);
       if (!extract) {
-        notes.push(`${topic}: no reference summary found`);
+        notes.push(`${topic}: no reference summary found${webSnippet ? `; web note: ${webSnippet}` : ""}`);
         continue;
       }
-      notes.push(`${topic}: ${extract.slice(0, 220)}`);
+      notes.push(`${topic}: ${extract.slice(0, 220)}${webSnippet ? ` | web: ${webSnippet}` : ""}`);
     } catch (error) {
       notes.push(`${topic}: reference lookup failed (${error instanceof Error ? error.message : "unknown error"})`);
     }
@@ -248,4 +363,21 @@ async function fetchWikipediaSummary(topic: string): Promise<{ extract?: string 
     return {};
   }
   return (await fallback.json()) as { extract?: string };
+}
+
+async function fetchDuckDuckGoSnippet(topic: string): Promise<string> {
+  const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(topic)}&format=json&no_redirect=1&no_html=1`;
+  const response = await fetch(url);
+  if (!response.ok) return "";
+  const payload = (await response.json()) as {
+    AbstractText?: string;
+    Answer?: string;
+    RelatedTopics?: Array<{ Text?: string }>;
+  };
+  const answer = payload.AbstractText?.trim() || payload.Answer?.trim();
+  if (answer) {
+    return answer.slice(0, 220);
+  }
+  const related = payload.RelatedTopics?.find((item) => typeof item.Text === "string" && item.Text.trim().length > 0)?.Text?.trim();
+  return related ? related.slice(0, 220) : "";
 }

@@ -20,6 +20,7 @@ import { BackupService } from "../backup/backup-service.js";
 import { IdentityBackupService } from "../backup/identity-backup-service.js";
 import { SchedulerService } from "../scheduler/scheduler-service.js";
 import { PersonaVersionService } from "../persona/persona-version-service.js";
+import { PersonaLoader } from "../persona/persona-loader.js";
 import { appendUploadChunk, completeChunkedUpload, getUploadFile, initChunkedUpload, saveUpload } from "../media/media-storage.js";
 import { SettingsService } from "../settings/settings-service.js";
 import { AuthService } from "../auth/auth-service.js";
@@ -62,6 +63,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   const identityBackup = new IdentityBackupService();
   const scheduler = new SchedulerService();
   const personas = new PersonaVersionService();
+  const personaLoader = new PersonaLoader();
   const approvals = new ApprovalService();
   const providerCatalog = new ProviderCatalogService();
   const thoughtLog = new ThoughtRepository();
@@ -544,6 +546,19 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const limit = Number(parsedUrl.searchParams.get("limit") ?? "300");
         const items = thoughtLog.list(limit);
         return sendJson(response, 200, { items, correlationId });
+      }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/persona/default") {
+        const { persona, source, filePath } = personaLoader.getDefaultPersona();
+        return sendJson(response, 200, { persona, source, filePath, correlationId });
+      }
+      if (request.method === "PUT" && parsedUrl.pathname === "/v1/persona/default") {
+        const payload = (await readJson(request)) as { voice?: string; style?: string[]; systemPrompt?: string };
+        const persona = personaLoader.saveDefaultPersona({
+          voice: payload.voice ?? "",
+          style: Array.isArray(payload.style) ? payload.style : [],
+          systemPrompt: payload.systemPrompt ?? ""
+        });
+        return sendJson(response, 200, { persona, correlationId });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/improvement/history") {
         return sendJson(response, 200, { itemsByDate: options.improvement.getLearningHistoryGroupedByDate(), correlationId });

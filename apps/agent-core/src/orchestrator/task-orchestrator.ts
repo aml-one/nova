@@ -88,6 +88,7 @@ export class TaskOrchestrator {
     const emotionState = this.deps.emotionService.updateFromUserInput(userId, input.text, runtimeSettings.emotions);
     const emotionOverlay = this.deps.emotionService.buildSystemOverlay(emotionState, runtimeSettings.emotions);
     const memoryContext = this.deps.memoryService.buildPromptContext(userId, input.text);
+    const pendingQuestionsForUser = this.deps.improvement.consumePendingQuestions(userId, 2);
     const runId = randomUUID();
     const correlationId = input.correlationId ?? runId;
 
@@ -189,6 +190,12 @@ export class TaskOrchestrator {
     const promptMessages: ChatMessage[] = [
       { role: "system", content: persona.systemPrompt },
       ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
+      ...(pendingQuestionsForUser.length > 0
+        ? [{
+            role: "system" as const,
+            content: `You have follow-up questions for this user. Ask naturally near the end if still relevant:\n${pendingQuestionsForUser.map((item, index) => `${index + 1}. ${item}`).join("\n")}`
+          }]
+        : []),
       ...memoryContext,
       ...(await this.buildVisionContextIfNeeded(input.text, input.imageUrl, input.accessProfile)),
       { role: "user", content: input.text }

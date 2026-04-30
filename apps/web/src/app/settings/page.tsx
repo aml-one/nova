@@ -41,6 +41,8 @@ type SettingsState = {
       bubbleBackgroundEnabled: boolean;
       borderColor: string;
       borderThicknessPx: number;
+      bubbleRadiusPx: number;
+      showNames: boolean;
     };
   };
   learning: { enabled: boolean; idleMinutes: number; intervalMs: number; minFailuresForAutoImprove: number };
@@ -66,6 +68,16 @@ type SkillManifest = {
   description: string;
   settingsTab?: { id: string; label: string; tone?: "blue" | "purple" | "orange" | "green" | "pink" | "yellow"; description?: string };
 };
+type PersonaState = {
+  id: string;
+  voice: string;
+  style: string[];
+  systemPrompt: string;
+};
+type PersonaVersion = { version: number; createdAt: string };
+type BackupRunState = { status?: "success" | "failed"; createdAt?: string; branch?: string; error?: string } | null;
+type ImprovementHistoryByDate = Record<string, Array<{ category?: string; accepted?: boolean; result?: string }>>;
+type TimelineFilterKey = "persona" | "knowledge" | "backup";
 type WebsiteProject = { id: string; name: string; domain: string; subdomain: string; local_path: string; remote_www_root: string; remote_subfolder: string };
 type SetupCheckResult = { ok: boolean; detail: string };
 type SshTestResult = { ok: boolean; detail: string } | null;
@@ -85,7 +97,9 @@ const DEFAULT_SETTINGS: SettingsState = {
       assistantTextColor: "#0f172a",
       bubbleBackgroundEnabled: true,
       borderColor: "#94a3b8",
-      borderThicknessPx: 1
+      borderThicknessPx: 1,
+      bubbleRadiusPx: 16,
+      showNames: true
     }
   },
   learning: { enabled: true, idleMinutes: 3, intervalMs: 120000, minFailuresForAutoImprove: 2 },
@@ -120,6 +134,23 @@ export default function SettingsPage() {
   const [newFolder, setNewFolder] = useState("");
   const [backupLabel, setBackupLabel] = useState("nova-core");
   const [skillManifests, setSkillManifests] = useState<SkillManifest[]>([]);
+  const [defaultPersona, setDefaultPersona] = useState<PersonaState>({
+    id: "default",
+    voice: "helpful",
+    style: ["direct", "clear"],
+    systemPrompt: "You are Nova, a practical and concise autonomous assistant."
+  });
+  const [personaSource, setPersonaSource] = useState<"file" | "fallback">("fallback");
+  const [personaPath, setPersonaPath] = useState<string>("");
+  const [personaVersions, setPersonaVersions] = useState<PersonaVersion[]>([]);
+  const [improvementHistoryByDate, setImprovementHistoryByDate] = useState<ImprovementHistoryByDate>({});
+  const [latestIdentityBackup, setLatestIdentityBackup] = useState<BackupRunState>(null);
+  const [timelineFilters, setTimelineFilters] = useState<Record<TimelineFilterKey, boolean>>({
+    persona: true,
+    knowledge: true,
+    backup: true
+  });
+  const [restoringPersonaVersion, setRestoringPersonaVersion] = useState<number | null>(null);
   const [websites, setWebsites] = useState<WebsiteProject[]>([]);
   const [channelsSetupOutput, setChannelsSetupOutput] = useState<string>("");
   const [copilotSetupOutput, setCopilotSetupOutput] = useState<string>("");
@@ -136,7 +167,18 @@ export default function SettingsPage() {
         router.push("/login");
         return;
       }
-      await Promise.all([loadSettings(), loadHealth(), loadCatalog(), loadUpdateStatus(), loadSkillManifests(), loadWebsites()]);
+      await Promise.all([
+        loadSettings(),
+        loadHealth(),
+        loadCatalog(),
+        loadUpdateStatus(),
+        loadSkillManifests(),
+        loadWebsites(),
+        loadDefaultPersona(),
+        loadPersonaVersions(),
+        loadImprovementHistory(),
+        loadIdentityBackupStatus()
+      ]);
       setLoading(false);
     })();
   }, [router]);
@@ -171,6 +213,40 @@ export default function SettingsPage() {
     const data = (await response.json()) as { items?: WebsiteProject[] };
     if (response.ok) setWebsites(data.items ?? []);
   }
+  async function loadDefaultPersona(): Promise<void> {
+    const response = await fetch("/api/persona/default");
+    const data = (await response.json()) as { persona?: PersonaState; source?: "file" | "fallback"; filePath?: string };
+    if (!response.ok || !data.persona) return;
+    setDefaultPersona({
+      id: data.persona.id || "default",
+      voice: data.persona.voice || "helpful",
+      style: Array.isArray(data.persona.style) ? data.persona.style : [],
+      systemPrompt: data.persona.systemPrompt || ""
+    });
+    setPersonaSource(data.source === "file" ? "file" : "fallback");
+    setPersonaPath(data.filePath ?? "");
+  }
+  async function loadPersonaVersions(): Promise<void> {
+    const response = await fetch("/api/personas/versions?personaId=default");
+    const data = (await response.json()) as { items?: PersonaVersion[] };
+    if (response.ok) {
+      setPersonaVersions(Array.isArray(data.items) ? data.items : []);
+    }
+  }
+  async function loadImprovementHistory(): Promise<void> {
+    const response = await fetch("/api/improvement/history");
+    const data = (await response.json()) as { itemsByDate?: ImprovementHistoryByDate };
+    if (response.ok) {
+      setImprovementHistoryByDate(data.itemsByDate ?? {});
+    }
+  }
+  async function loadIdentityBackupStatus(): Promise<void> {
+    const response = await fetch("/api/backup/identity/status");
+    const data = (await response.json()) as { latestSuccess?: BackupRunState; latestRun?: BackupRunState };
+    if (response.ok) {
+      setLatestIdentityBackup(data.latestSuccess ?? data.latestRun ?? null);
+    }
+  }
 
   async function save(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -200,7 +276,13 @@ export default function SettingsPage() {
       body: JSON.stringify({ label: backupLabel })
     });
     const data = (await response.json()) as { branch?: string; error?: string };
-    if (!response.ok) setError(data.error ?? "Backup failed");
+    if (!response.ok) {
+      if ((data.error ?? "").includes("persona_exists")) {
+        setError("Backup sanity check failed because default persona file was missing. Nova will recreate it automatically now; try Push Backup again.");
+      } else {
+        setError(data.error ?? "Backup failed");
+      }
+    }
     else setStatus(`Backup pushed on ${data.branch ?? "branch"}`);
   }
 
@@ -308,6 +390,44 @@ export default function SettingsPage() {
       detail: response.ok ? (data.detail ?? "SSH connection test completed.") : (data.error ?? "SSH connection test failed.")
     });
   }
+  async function saveDefaultPersona(): Promise<void> {
+    const response = await fetch("/api/persona/default", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(defaultPersona)
+    });
+    const data = (await response.json()) as { persona?: PersonaState; error?: string };
+    if (!response.ok) {
+      setError(data.error ?? "Could not save base identity");
+      return;
+    }
+    if (data.persona) {
+      setDefaultPersona(data.persona);
+      setPersonaSource("file");
+      await loadPersonaVersions();
+    }
+    setStatus("Base identity saved.");
+  }
+  async function restorePersonaVersion(version: number): Promise<void> {
+    if (!Number.isFinite(version) || version <= 0) return;
+    setRestoringPersonaVersion(version);
+    setStatus(null);
+    setError(null);
+    const response = await fetch("/api/personas/rollback", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ personaId: "default", version })
+    });
+    const data = (await response.json()) as { ok?: boolean; error?: string };
+    if (!response.ok) {
+      setError(data.error ?? `Failed to restore persona version ${version}`);
+      setRestoringPersonaVersion(null);
+      return;
+    }
+    await Promise.all([loadDefaultPersona(), loadPersonaVersions()]);
+    setStatus(`Restored base identity to version ${version}.`);
+    setRestoringPersonaVersion(null);
+  }
 
   const modelOptions = catalog?.models ?? {};
   const websiteBuilderSettings = (settings.skillSettings["website-builder"] ?? {}) as Record<string, unknown>;
@@ -324,6 +444,7 @@ export default function SettingsPage() {
   const tabs = [
     { id: "general", label: "General", tone: "blue" as const },
     { id: "models", label: "Models", tone: "purple" as const },
+    { id: "identity", label: "Identity", tone: "pink" as const },
     { id: "channels", label: "Channels", tone: "orange" as const },
     { id: "learning", label: "Learning", tone: "green" as const },
     { id: "backup", label: "Backup", tone: "pink" as const },
@@ -337,6 +458,13 @@ export default function SettingsPage() {
         tone: item.settingsTab?.tone ?? ("purple" as const)
       }))
   );
+  const skillStatusById = buildSkillStatusMap(skillManifests, health?.checks ?? []);
+  const identityTimeline = buildIdentityTimeline({
+    defaultPersona,
+    versions: personaVersions,
+    improvementHistoryByDate,
+    latestIdentityBackup
+  });
 
   return (
     <form onSubmit={save} className="grid items-start gap-4 lg:grid-cols-[1fr_380px]">
@@ -369,7 +497,16 @@ export default function SettingsPage() {
                   className="w-full justify-start text-left"
                   title={item.label}
                 >
-                  {item.label}
+                  <span className="flex w-full items-center justify-between gap-2">
+                    <span>{item.label}</span>
+                    {item.id.startsWith("skill:") ? (
+                      <span
+                        className={badgeClassForSkillStatus(skillStatusById[item.id.replace("skill:", "")] ?? "inactive")}
+                      >
+                        {labelForSkillStatus(skillStatusById[item.id.replace("skill:", "")] ?? "inactive")}
+                      </span>
+                    ) : null}
+                  </span>
                 </Button>
               ))}
             </div>
@@ -408,49 +545,71 @@ export default function SettingsPage() {
                 Border thickness (px)
                 <Input type="number" min={0} max={8} value={settings.web.chatStyle.borderThicknessPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, borderThicknessPx: Number(e.target.value || 0) } } }))} />
               </label>
+              <label className="grid gap-1 text-xs">
+                Bubble corner radius (0-30px)
+                <Input type="number" min={0} max={30} value={settings.web.chatStyle.bubbleRadiusPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, bubbleRadiusPx: Number(e.target.value || 0) } } }))} />
+              </label>
             </div>
+            <label className="flex items-center gap-2"><Checkbox checked={settings.web.chatStyle.showNames} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, showNames: e.target.checked } } }))} /> Show names in chat bubbles (Nova, You)</label>
             <div className="rounded-ui border bg-surface p-3">
               <div className="mb-2 text-xs font-semibold text-muted">Live chat style preview</div>
               <div className="space-y-2 rounded-ui border bg-surface2 p-2">
                 <article
-                  className="ml-auto max-w-[85%] rounded-ui border p-2.5"
+                  className="ml-auto max-w-[85%] border p-2.5"
                   style={{
                     backgroundColor: settings.web.chatStyle.bubbleBackgroundEnabled
                       ? settings.web.chatStyle.userBubbleColor
                       : "transparent",
                     color: settings.web.chatStyle.userTextColor,
                     borderColor: settings.web.chatStyle.borderColor,
-                    borderWidth: `${settings.web.chatStyle.borderThicknessPx}px`
+                    borderWidth: `${settings.web.chatStyle.borderThicknessPx}px`,
+                    borderRadius: `${settings.web.chatStyle.bubbleRadiusPx}px`
                   }}
                 >
-                  <div className="mb-1 text-[11px] font-semibold">You</div>
+                  {settings.web.chatStyle.showNames ? <div className="mb-1 text-[11px] font-semibold">You</div> : null}
                   <div className="text-xs">Can you summarize what changed?</div>
                 </article>
                 <article
-                  className="mr-auto max-w-[85%] rounded-ui border p-2.5"
+                  className="mr-auto max-w-[85%] border p-2.5"
                   style={{
                     backgroundColor: settings.web.chatStyle.bubbleBackgroundEnabled
                       ? settings.web.chatStyle.assistantBubbleColor
                       : "transparent",
                     color: settings.web.chatStyle.assistantTextColor,
                     borderColor: settings.web.chatStyle.borderColor,
-                    borderWidth: `${settings.web.chatStyle.borderThicknessPx}px`
+                    borderWidth: `${settings.web.chatStyle.borderThicknessPx}px`,
+                    borderRadius: `${settings.web.chatStyle.bubbleRadiusPx}px`
                   }}
                 >
-                  <div className="mb-1 text-[11px] font-semibold">Nova</div>
+                  {settings.web.chatStyle.showNames ? <div className="mb-1 text-[11px] font-semibold">Nova</div> : null}
                   <div className="text-xs">Updated styling preview is now active.</div>
                 </article>
               </div>
             </div>
             <label className="flex items-center gap-2"><Checkbox checked={settings.offlineMode.enabled} onChange={(e) => setSettings((p) => ({ ...p, offlineMode: { enabled: e.target.checked } }))} /> Offline mode (blocks cloud provider calls)</label>
             <div className="grid gap-2 md:grid-cols-2">
-              <Input type="number" value={settings.shell.timeoutMs} onChange={(e) => setSettings((p) => ({ ...p, shell: { ...p.shell, timeoutMs: Number(e.target.value || 0) } }))} placeholder="Shell timeout ms" />
-              <Input type="number" value={settings.shell.maxOutputBytes} onChange={(e) => setSettings((p) => ({ ...p, shell: { ...p.shell, maxOutputBytes: Number(e.target.value || 0) } }))} placeholder="Shell max bytes" />
+              <label className="grid gap-1 text-xs">
+                Shell timeout (ms)
+                <Input type="number" value={settings.shell.timeoutMs} onChange={(e) => setSettings((p) => ({ ...p, shell: { ...p.shell, timeoutMs: Number(e.target.value || 0) } }))} placeholder="Shell timeout ms" />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Shell max output (bytes)
+                <Input type="number" value={settings.shell.maxOutputBytes} onChange={(e) => setSettings((p) => ({ ...p, shell: { ...p.shell, maxOutputBytes: Number(e.target.value || 0) } }))} placeholder="Shell max bytes" />
+              </label>
             </div>
             <div className="grid gap-2 md:grid-cols-3">
-              <Input type="number" step="0.000001" value={settings.costGovernor.providerPricing.ollamaPer1k} onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, providerPricing: { ...p.costGovernor.providerPricing, ollamaPer1k: Number(e.target.value || 0) } } }))} placeholder="Ollama $/1k tok" />
-              <Input type="number" step="0.000001" value={settings.costGovernor.providerPricing.lmstudioPer1k} onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, providerPricing: { ...p.costGovernor.providerPricing, lmstudioPer1k: Number(e.target.value || 0) } } }))} placeholder="LM Studio $/1k tok" />
-              <Input type="number" step="0.000001" value={settings.costGovernor.providerPricing.copilotPer1k} onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, providerPricing: { ...p.costGovernor.providerPricing, copilotPer1k: Number(e.target.value || 0) } } }))} placeholder="Copilot $/1k tok" />
+              <label className="grid gap-1 text-xs">
+                Ollama price ($ / 1k tokens)
+                <Input type="number" step="0.000001" value={settings.costGovernor.providerPricing.ollamaPer1k} onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, providerPricing: { ...p.costGovernor.providerPricing, ollamaPer1k: Number(e.target.value || 0) } } }))} placeholder="Ollama $/1k tok" />
+              </label>
+              <label className="grid gap-1 text-xs">
+                LM Studio price ($ / 1k tokens)
+                <Input type="number" step="0.000001" value={settings.costGovernor.providerPricing.lmstudioPer1k} onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, providerPricing: { ...p.costGovernor.providerPricing, lmstudioPer1k: Number(e.target.value || 0) } } }))} placeholder="LM Studio $/1k tok" />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Copilot price ($ / 1k tokens)
+                <Input type="number" step="0.000001" value={settings.costGovernor.providerPricing.copilotPer1k} onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, providerPricing: { ...p.costGovernor.providerPricing, copilotPer1k: Number(e.target.value || 0) } } }))} placeholder="Copilot $/1k tok" />
+              </label>
             </div>
             <div className="space-y-2">
               <h3 className="font-semibold">Delegated Folders</h3>
@@ -533,6 +692,64 @@ export default function SettingsPage() {
               {copilotSetupOutput ? (
                 <textarea className="h-24 w-full rounded-ui border bg-white p-2 font-mono text-xs" value={copilotSetupOutput} readOnly />
               ) : null}
+            </div>
+          </Card>
+        ) : null}
+
+        {tab === "identity" ? (
+          <Card className="space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Base Identity</h2>
+                <p className="text-xs text-muted">
+                  This is Nova&apos;s core persona. Emotion and learning can evolve behavior over time, but this file is the base anchor used at startup.
+                </p>
+              </div>
+              <span className={`rounded-ui border px-2 py-0.5 text-xs ${personaSource === "file" ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300" : "border-amber-500/40 bg-amber-500/15 text-amber-300"}`}>
+                {personaSource === "file" ? "Loaded from file" : "Using fallback"}
+              </span>
+            </div>
+            <label className="grid gap-1 text-xs">
+              Voice
+              <Input value={defaultPersona.voice} onChange={(e) => setDefaultPersona((p) => ({ ...p, voice: e.target.value }))} placeholder="helpful / mentor / playful..." />
+            </label>
+            <label className="grid gap-1 text-xs">
+              Style tags (comma separated)
+              <Input
+                value={defaultPersona.style.join(", ")}
+                onChange={(e) => setDefaultPersona((p) => ({ ...p, style: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) }))}
+                placeholder="direct, concise, warm"
+              />
+            </label>
+            <label className="grid gap-1 text-xs">
+              System prompt
+              <textarea
+                className="min-h-[180px] w-full rounded-ui border bg-surface px-2 py-1 text-sm"
+                value={defaultPersona.systemPrompt}
+                onChange={(e) => setDefaultPersona((p) => ({ ...p, systemPrompt: e.target.value }))}
+              />
+            </label>
+            <div className="flex items-center gap-2">
+              <Button type="button" tone="pink" onClick={() => void saveDefaultPersona()}>Save Base Identity</Button>
+              {personaPath ? <span className="text-xs text-muted">File: <code>{personaPath}</code></span> : null}
+            </div>
+            <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
+              Identity backups include persona files + learning history + DB snapshot, so Nova&apos;s evolving identity is recoverable after machine issues.
+            </div>
+            <div className="rounded-ui border bg-surface p-3">
+              <div className="mb-2">
+                <h3 className="text-sm font-semibold">Identity Evolution Graph</h3>
+                <p className="text-xs text-muted">
+                  Bottom is Awakening. Top is Present. This view combines personality updates, learning activity, and backup milestones.
+                </p>
+              </div>
+              <IdentityEvolutionGraph
+                items={identityTimeline}
+                filters={timelineFilters}
+                onToggleFilter={(key) => setTimelineFilters((prev) => ({ ...prev, [key]: !prev[key] }))}
+                onRestoreVersion={(version) => void restorePersonaVersion(version)}
+                restoringVersion={restoringPersonaVersion}
+              />
             </div>
           </Card>
         ) : null}
@@ -914,8 +1131,8 @@ export default function SettingsPage() {
 
       </div>
 
-      <aside className="space-y-3 lg:sticky lg:top-24 lg:h-fit lg:self-start">
-        <Card>
+      <aside className="space-y-3 lg:self-start">
+        <Card className="lg:sticky lg:top-24">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-lg font-semibold">Health checks</h2>
             <Button type="button" tone="blue" onClick={() => void loadHealth()}>Refresh</Button>
@@ -973,6 +1190,345 @@ function healthLabelForCheck(check: HealthCheck): string {
   return "Healthy";
 }
 
+function buildSkillStatusMap(
+  manifests: SkillManifest[],
+  checks: HealthCheck[]
+): Record<string, "active" | "degraded" | "inactive"> {
+  const byId: Record<string, "active" | "degraded" | "inactive"> = {};
+  for (const item of manifests) {
+    const matched = checks.find((check) => {
+      const raw = `${check.id} ${check.name} ${check.detail}`.toLowerCase();
+      return raw.includes(item.id.toLowerCase()) || raw.includes(item.name.toLowerCase());
+    });
+    if (!matched) {
+      byId[item.settingsTab?.id ?? item.id] = "inactive";
+      continue;
+    }
+    byId[item.settingsTab?.id ?? item.id] =
+      matched.level === "green" ? "active" : matched.level === "orange" ? "degraded" : "inactive";
+  }
+  return byId;
+}
+
+function labelForSkillStatus(status: "active" | "degraded" | "inactive"): string {
+  if (status === "active") return "active";
+  if (status === "degraded") return "degraded";
+  return "inactive";
+}
+
+function badgeClassForSkillStatus(status: "active" | "degraded" | "inactive"): string {
+  if (status === "active") return "rounded-ui border border-emerald-500/40 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300";
+  if (status === "degraded") return "rounded-ui border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300";
+  return "rounded-ui border border-rose-500/40 bg-rose-500/15 px-1.5 py-0.5 text-[10px] text-rose-300";
+}
+
+type IdentityTimelineItem = {
+  id: string;
+  at: string;
+  title: string;
+  detail: string;
+  side: "left" | "right";
+  accentClass: string;
+  kind: "awakening" | "persona" | "knowledge" | "backup";
+  meta?: Record<string, string | number>;
+};
+
+function buildIdentityTimeline(input: {
+  defaultPersona: PersonaState;
+  versions: PersonaVersion[];
+  improvementHistoryByDate: ImprovementHistoryByDate;
+  latestIdentityBackup: BackupRunState;
+}): IdentityTimelineItem[] {
+  const items: IdentityTimelineItem[] = [];
+  const sortedVersions = [...input.versions].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  if (sortedVersions.length === 0) {
+    items.push({
+      id: "awakening",
+      at: new Date(0).toISOString(),
+      title: "Awakening",
+      detail: `Base voice: ${input.defaultPersona.voice}; style: ${input.defaultPersona.style.join(", ") || "none"}`,
+      side: "left",
+      accentClass: "bg-emerald-400",
+      kind: "awakening",
+      meta: {
+        voice: input.defaultPersona.voice,
+        style: input.defaultPersona.style.join(", ") || "none"
+      }
+    });
+  } else {
+    sortedVersions.forEach((version, index) => {
+      items.push({
+        id: `persona-v${version.version}`,
+        at: version.createdAt,
+        title: index === 0 ? "Awakening Persona" : `Persona Evolution v${version.version}`,
+        detail: index === 0
+          ? `Initial foundation set. Voice: ${input.defaultPersona.voice}`
+          : `Identity refined through ongoing learning and user interaction.`,
+        side: index % 2 === 0 ? "left" : "right",
+        accentClass: index % 2 === 0 ? "bg-orange-400" : "bg-rose-500",
+        kind: "persona",
+        meta: {
+          version: version.version,
+          voice: input.defaultPersona.voice,
+          styles: input.defaultPersona.style.join(", ") || "none"
+        }
+      });
+    });
+  }
+  const learningDates = Object.keys(input.improvementHistoryByDate).sort((a, b) => Date.parse(a) - Date.parse(b));
+  let cumulativeKnowledge = 0;
+  learningDates.slice(-8).forEach((dateKey, index) => {
+    const dayItems = input.improvementHistoryByDate[dateKey] ?? [];
+    const researched = dayItems.filter((item) => item.category === "research").length;
+    const improvements = dayItems.filter((item) => item.category === "improvement").length;
+    cumulativeKnowledge += researched + improvements;
+    items.push({
+      id: `learning-${dateKey}`,
+      at: `${dateKey}T12:00:00.000Z`,
+      title: "Knowledge Growth",
+      detail: `Research notes: ${researched}, improvements: ${improvements}, cumulative growth score: ${cumulativeKnowledge}`,
+      side: index % 2 === 0 ? "right" : "left",
+      accentClass: "bg-sky-500",
+      kind: "knowledge",
+      meta: {
+        day: dateKey,
+        research: researched,
+        improvements,
+        cumulativeGrowth: cumulativeKnowledge
+      }
+    });
+  });
+  if (input.latestIdentityBackup?.createdAt) {
+    items.push({
+      id: "identity-backup",
+      at: input.latestIdentityBackup.createdAt,
+      title: input.latestIdentityBackup.status === "success" ? "Identity Safeguarded" : "Backup Attempt",
+      detail:
+        input.latestIdentityBackup.status === "success"
+          ? `Backup saved. Branch: ${input.latestIdentityBackup.branch ?? "n/a"}`
+          : `Backup issue: ${input.latestIdentityBackup.error ?? "unknown error"}`,
+      side: "right",
+      accentClass: input.latestIdentityBackup.status === "success" ? "bg-lime-500" : "bg-rose-500",
+      kind: "backup",
+      meta: {
+        status: input.latestIdentityBackup.status ?? "unknown",
+        branch: input.latestIdentityBackup.branch ?? "n/a",
+        error: input.latestIdentityBackup.error ?? ""
+      }
+    });
+  }
+  const sorted = items
+    .filter((item) => Number.isFinite(Date.parse(item.at)))
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  if (!sorted.length || sorted[sorted.length - 1]?.title !== "Awakening Persona") {
+    sorted.push({
+      id: "origin-awakening-fallback",
+      at: "1970-01-01T00:00:00.000Z",
+      title: "Awakening",
+      detail: `Nova was initialized with voice "${input.defaultPersona.voice}" and core goals to help, learn, and evolve.`,
+      side: "left",
+      accentClass: "bg-emerald-400",
+      kind: "awakening",
+      meta: {
+        voice: input.defaultPersona.voice,
+        style: input.defaultPersona.style.join(", ") || "none"
+      }
+    });
+  }
+  return sorted;
+}
+
+function IdentityEvolutionGraph(input: {
+  items: IdentityTimelineItem[];
+  filters: Record<TimelineFilterKey, boolean>;
+  onToggleFilter: (key: TimelineFilterKey) => void;
+  onRestoreVersion: (version: number) => void;
+  restoringVersion: number | null;
+}) {
+  const { items, filters, onToggleFilter, onRestoreVersion, restoringVersion } = input;
+  const filteredItems = items.filter((item) => {
+    if (item.kind === "awakening" || item.kind === "persona") return filters.persona;
+    if (item.kind === "knowledge") return filters.knowledge;
+    if (item.kind === "backup") return filters.backup;
+    return true;
+  });
+  const [selectedId, setSelectedId] = useState<string>(filteredItems[0]?.id ?? items[0]?.id ?? "");
+  const selected = filteredItems.find((item) => item.id === selectedId) ?? filteredItems[0] ?? items[0];
+  const selectedVersion = Number(selected?.meta?.version ?? 0);
+  const [confirmStepVersion, setConfirmStepVersion] = useState<number | null>(null);
+  const [typedConfirm, setTypedConfirm] = useState("");
+
+  return (
+    <div className="rounded-ui border bg-surface2 p-3">
+      <div className="mb-2 flex items-center justify-between text-[11px] text-muted">
+        <span className="font-semibold text-emerald-400">Present</span>
+        <span className="font-semibold text-orange-300">Awakening</span>
+      </div>
+      <div className="relative">
+        <div className="pointer-events-none absolute bottom-0 left-1/2 top-0 w-1 -translate-x-1/2 rounded-full bg-gradient-to-t from-orange-400 via-rose-500 to-sky-500" />
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onToggleFilter("persona")}
+            className={`rounded-ui border px-2 py-1 text-[11px] ${filters.persona ? "border-orange-400/50 bg-orange-400/15 text-orange-200" : "border-slate-500/40 text-muted"}`}
+          >
+            Personality
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleFilter("knowledge")}
+            className={`rounded-ui border px-2 py-1 text-[11px] ${filters.knowledge ? "border-sky-400/50 bg-sky-400/15 text-sky-200" : "border-slate-500/40 text-muted"}`}
+          >
+            Knowledge
+          </button>
+          <button
+            type="button"
+            onClick={() => onToggleFilter("backup")}
+            className={`rounded-ui border px-2 py-1 text-[11px] ${filters.backup ? "border-lime-400/50 bg-lime-400/15 text-lime-200" : "border-slate-500/40 text-muted"}`}
+          >
+            Backups
+          </button>
+        </div>
+        <div className="space-y-4">
+          {filteredItems.map((item) => (
+            <div key={item.id} className={`grid grid-cols-[1fr_24px_1fr] items-center gap-2 ${item.side === "left" ? "" : ""}`}>
+              <button
+                type="button"
+                onClick={() => setSelectedId(item.id)}
+                className={`${item.side === "left" ? "text-right" : "invisible"} rounded-ui border bg-surface p-2 transition hover:border-sky-400/60 ${
+                  selected?.id === item.id ? "border-sky-400/70 bg-sky-500/10" : ""
+                }`}
+              >
+                <div className="text-[11px] font-semibold">{item.title}</div>
+                <div className="text-[10px] text-muted">{item.detail}</div>
+                <div className="mt-1 text-[10px] text-muted">{formatTimelineDate(item.at)}</div>
+              </button>
+              <div className="relative flex items-center justify-center">
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(item.id)}
+                  className={`z-10 inline-flex h-4 w-4 rounded-full border-2 border-white/90 ${item.accentClass} ${
+                    selected?.id === item.id ? "ring-2 ring-sky-300/70 ring-offset-1 ring-offset-surface2" : ""
+                  }`}
+                  title={`Open ${item.title} details`}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedId(item.id)}
+                className={`${item.side === "right" ? "text-left" : "invisible"} rounded-ui border bg-surface p-2 transition hover:border-sky-400/60 ${
+                  selected?.id === item.id ? "border-sky-400/70 bg-sky-500/10" : ""
+                }`}
+              >
+                <div className="text-[11px] font-semibold">{item.title}</div>
+                <div className="text-[10px] text-muted">{item.detail}</div>
+                <div className="mt-1 text-[10px] text-muted">{formatTimelineDate(item.at)}</div>
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+      {selected ? (
+        <div className="mt-3 rounded-ui border bg-surface p-3">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <strong className="text-sm">{selected.title}</strong>
+            <span className="rounded-ui border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-[10px] uppercase tracking-wide text-sky-300">
+              {selected.kind}
+            </span>
+          </div>
+          <div className="mb-2 text-xs text-muted">{selected.detail}</div>
+          <div className="text-[11px] text-muted">When: {formatTimelineDate(selected.at)}</div>
+          {selected.meta ? (
+            <div className="mt-2 grid gap-1 rounded-ui border bg-surface2 p-2 text-[11px]">
+              {Object.entries(selected.meta).map(([key, value]) => (
+                <div key={key} className="flex items-start justify-between gap-2">
+                  <span className="text-muted">{prettifyKey(key)}</span>
+                  <span className="text-right">{String(value)}</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          {selected.kind === "persona" && selectedVersion > 0 ? (
+            <div className="mt-3">
+              {confirmStepVersion !== selectedVersion ? (
+                <Button
+                  type="button"
+                  tone="orange"
+                  disabled={restoringVersion !== null}
+                  onClick={() => {
+                    const ok = window.confirm(
+                      `First confirmation: Restore Nova base identity to persona version ${selectedVersion}?`
+                    );
+                    if (!ok) return;
+                    setConfirmStepVersion(selectedVersion);
+                    setTypedConfirm("");
+                  }}
+                >
+                  {`Restore Persona v${selectedVersion}`}
+                </Button>
+              ) : (
+                <div className="space-y-2 rounded-ui border border-rose-500/40 bg-rose-500/10 p-2">
+                  <div className="text-xs font-semibold text-rose-200">
+                    Second confirmation required
+                  </div>
+                  <div className="text-[11px] text-rose-200/90">
+                    Type <code>RESTORE</code> and click confirm to continue.
+                  </div>
+                  <Input
+                    value={typedConfirm}
+                    onChange={(e) => setTypedConfirm(e.target.value)}
+                    placeholder="Type RESTORE"
+                  />
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      tone="red"
+                      disabled={restoringVersion !== null || typedConfirm.trim().toUpperCase() !== "RESTORE"}
+                      onClick={() => {
+                        void onRestoreVersion(selectedVersion);
+                        setConfirmStepVersion(null);
+                        setTypedConfirm("");
+                      }}
+                    >
+                      {restoringVersion === selectedVersion ? "Restoring..." : "Confirm restore"}
+                    </Button>
+                    <Button
+                      type="button"
+                      tone="neutral"
+                      disabled={restoringVersion !== null}
+                      onClick={() => {
+                        setConfirmStepVersion(null);
+                        setTypedConfirm("");
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function formatTimelineDate(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
+
+function prettifyKey(key: string): string {
+  return key
+    .replace(/([A-Z])/g, " $1")
+    .replace(/[_-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^./, (char) => char.toUpperCase());
+}
+
 function normalizeUpdateError(value?: string): string | undefined {
   if (!value) return undefined;
   const cleaned = value
@@ -1009,7 +1565,9 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
         bubbleBackgroundEnabled:
           value?.web?.chatStyle?.bubbleBackgroundEnabled ?? DEFAULT_SETTINGS.web.chatStyle.bubbleBackgroundEnabled,
         borderColor: value?.web?.chatStyle?.borderColor ?? DEFAULT_SETTINGS.web.chatStyle.borderColor,
-        borderThicknessPx: value?.web?.chatStyle?.borderThicknessPx ?? DEFAULT_SETTINGS.web.chatStyle.borderThicknessPx
+        borderThicknessPx: value?.web?.chatStyle?.borderThicknessPx ?? DEFAULT_SETTINGS.web.chatStyle.borderThicknessPx,
+        bubbleRadiusPx: value?.web?.chatStyle?.bubbleRadiusPx ?? DEFAULT_SETTINGS.web.chatStyle.bubbleRadiusPx,
+        showNames: value?.web?.chatStyle?.showNames ?? DEFAULT_SETTINGS.web.chatStyle.showNames
       }
     },
     learning: {

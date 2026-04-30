@@ -10,6 +10,7 @@ export class OllamaProvider implements ModelProvider {
   readonly name = "ollama";
   private readonly baseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
   private readonly model = process.env.OLLAMA_MODEL ?? "llama3.1";
+  private readonly keepAlive = process.env.NOVA_OLLAMA_KEEP_ALIVE?.trim() || "30m";
 
   async health(): Promise<ProviderHealth> {
     try {
@@ -38,6 +39,7 @@ export class OllamaProvider implements ModelProvider {
         model: request.model ?? this.model,
         messages: request.messages,
         stream: false,
+        keep_alive: this.keepAlive,
         options: {
           temperature: request.temperature ?? 0.2,
           num_predict: request.maxTokens ?? 700
@@ -71,6 +73,7 @@ export class OllamaProvider implements ModelProvider {
         model: request.model ?? this.model,
         messages: request.messages,
         stream: true,
+        keep_alive: this.keepAlive,
         options: {
           temperature: request.temperature ?? 0.2,
           num_predict: request.maxTokens ?? 700

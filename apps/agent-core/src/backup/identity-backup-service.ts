@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { getDatabase } from "../storage/sqlite.js";
+import { PersonaLoader } from "../persona/persona-loader.js";
 
 type SanityReport = {
   ok: boolean;
@@ -22,6 +23,8 @@ type BackupRunStatus = {
 };
 
 export class IdentityBackupService {
+  private readonly personas = new PersonaLoader();
+
   async createAndPushIdentityBackup(
     label?: string,
     mode: BackupMode = "manual"
@@ -74,11 +77,11 @@ export class IdentityBackupService {
       }
     }
 
-    const personaPath = resolve(root, "config", "personas", "default.persona.yaml");
+    const personaPath = this.personas.ensureDefaultPersonaFile();
     checks.push({
       name: "persona_exists",
       ok: existsSync(personaPath),
-      detail: existsSync(personaPath) ? "default persona present" : "default persona missing"
+      detail: existsSync(personaPath) ? personaPath : "default persona missing"
     });
 
     const sizeLimitBytes = 1024 * 1024 * 1024;

@@ -27,6 +27,8 @@ export type AppSettings = {
       bubbleBackgroundEnabled: boolean;
       borderColor: string;
       borderThicknessPx: number;
+      bubbleRadiusPx: number;
+      showNames: boolean;
     };
     sendOnEnter: boolean;
   };
@@ -157,7 +159,9 @@ export class SettingsRepository {
             bubbleBackgroundEnabled: parsed.web?.chatStyle?.bubbleBackgroundEnabled !== false,
             borderColor:
               typeof parsed.web?.chatStyle?.borderColor === "string" ? parsed.web.chatStyle.borderColor : "#94a3b8",
-            borderThicknessPx: Number(parsed.web?.chatStyle?.borderThicknessPx ?? 1)
+            borderThicknessPx: Number(parsed.web?.chatStyle?.borderThicknessPx ?? 1),
+            bubbleRadiusPx: Number(parsed.web?.chatStyle?.bubbleRadiusPx ?? 16),
+            showNames: parsed.web?.chatStyle?.showNames !== false
           },
           sendOnEnter: parsed.web?.sendOnEnter === true
         },

@@ -47,7 +47,7 @@ async function bootstrap(): Promise<void> {
   const installState = new InstallStateService();
   installState.ensureInitialized();
   const currentVersion = process.env.NOVA_APP_VERSION ?? "0.1.0";
-  const improvement = new SelfImprovementLoop(gitOps, skillRegistry, emotionService);
+  const improvement = new SelfImprovementLoop(gitOps, skillRegistry, emotionService, router, () => settings.get());
   await loadWorkspaceSkills(skillRegistry);
 
   const orchestrator = new TaskOrchestrator({
