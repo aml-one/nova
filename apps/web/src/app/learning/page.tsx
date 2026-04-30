@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 
@@ -77,12 +78,33 @@ export default function LearningPage() {
                   </div>
                   <div>{item.proposal}</div>
                   {item.result ? <div className="text-muted">Result: {item.result}</div> : null}
-                  {item.details ? <pre className="m-0 overflow-x-auto text-xs">{JSON.stringify(item.details, null, 2)}</pre> : null}
+                  {renderLearningDetails(item.details)}
                 </article>
               ))}
             </div>
           </section>
         ))}
+    </div>
+  );
+}
+
+function renderLearningDetails(details?: Record<string, unknown>): ReactNode | null {
+  if (!details || Object.keys(details).length === 0) return null;
+
+  const topics = Array.isArray(details.topics) ? details.topics.map((item) => String(item)) : [];
+  const runId = typeof details.runId === "string" ? details.runId : undefined;
+  const userId = typeof details.userId === "string" ? details.userId : undefined;
+  const failures =
+    typeof details.failures === "number" || typeof details.failures === "string" ? String(details.failures) : undefined;
+  const notes = typeof details.notes === "string" ? details.notes : undefined;
+
+  return (
+    <div className="mt-1 space-y-1 text-xs text-muted">
+      {topics.length > 0 ? <div>Topics: {topics.join(", ")}</div> : null}
+      {failures ? <div>Recent failures considered: {failures}</div> : null}
+      {notes ? <div>Notes: {notes}</div> : null}
+      {runId ? <div>Run: {runId}</div> : null}
+      {userId ? <div>User: {userId}</div> : null}
     </div>
   );
 }

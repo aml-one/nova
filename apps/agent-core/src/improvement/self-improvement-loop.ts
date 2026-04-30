@@ -121,7 +121,7 @@ export class SelfImprovementLoop {
       this.outcomes.map((item) => item.task),
       this.outcomes.map((item) => item.success)
     );
-    const researchTopics = summary.topFailingTasks.length > 0 ? summary.topFailingTasks : ["ai agent reliability", "typescript agent design"];
+    const researchTopics = summary.topFailingTasks.length > 0 ? summary.topFailingTasks : ["Intelligent agent", "TypeScript"];
     const researchNotes = await collectResearchNotes(researchTopics.slice(0, 2));
     this.learningLog.append("Idle research cycle completed", true, researchNotes, "research", {
       topics: researchTopics.slice(0, 2)
@@ -212,22 +212,40 @@ async function collectResearchNotes(topics: string[]): Promise<string> {
   const notes: string[] = [];
   for (const topic of topics) {
     try {
-      const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(topic)}`;
-      const response = await fetch(url);
-      if (!response.ok) {
-        notes.push(`${topic}: no summary (${response.status})`);
-        continue;
-      }
-      const payload = (await response.json()) as { extract?: string };
+      const payload = await fetchWikipediaSummary(topic);
       const extract = payload.extract?.trim();
       if (!extract) {
-        notes.push(`${topic}: empty summary`);
+        notes.push(`${topic}: no reference summary found`);
         continue;
       }
       notes.push(`${topic}: ${extract.slice(0, 220)}`);
     } catch (error) {
-      notes.push(`${topic}: ${error instanceof Error ? error.message : "research failed"}`);
+      notes.push(`${topic}: reference lookup failed (${error instanceof Error ? error.message : "unknown error"})`);
     }
   }
   return notes.join("\n");
+}
+
+async function fetchWikipediaSummary(topic: string): Promise<{ extract?: string }> {
+  const directUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(topic)}`;
+  const direct = await fetch(directUrl);
+  if (direct.ok) {
+    return (await direct.json()) as { extract?: string };
+  }
+  const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(topic)}&utf8=1&format=json&srlimit=1`;
+  const search = await fetch(searchUrl);
+  if (!search.ok) {
+    return {};
+  }
+  const searchPayload = (await search.json()) as { query?: { search?: Array<{ title?: string }> } };
+  const fallbackTitle = searchPayload.query?.search?.[0]?.title?.trim();
+  if (!fallbackTitle) {
+    return {};
+  }
+  const fallbackUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(fallbackTitle)}`;
+  const fallback = await fetch(fallbackUrl);
+  if (!fallback.ok) {
+    return {};
+  }
+  return (await fallback.json()) as { extract?: string };
 }

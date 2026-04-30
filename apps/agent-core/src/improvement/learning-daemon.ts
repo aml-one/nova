@@ -67,10 +67,12 @@ export class LearningDaemon {
         enabled: configured?.enabled,
         minFailuresForAutoImprove: configured?.minFailuresForAutoImprove
       });
+      const details = buildLatestLearningDetails(this.improvement.getLearningHistory());
       this.thoughtLog.append({
         category: "learning",
         title: "Idle learning cycle completed",
-        content: result
+        content: [result, details.summary].filter(Boolean).join("\n"),
+        metadata: details.metadata
       });
     } catch {
       this.thoughtLog.append({
@@ -92,4 +94,40 @@ export class LearningDaemon {
       content: reason
     });
   }
+}
+
+function buildLatestLearningDetails(history: Array<Record<string, unknown>>): {
+  summary: string;
+  metadata: Record<string, unknown>;
+} {
+  const recent = history.slice(-10).reverse();
+  const latestResearch = recent.find((item) => item.category === "research");
+  const latestImprovement = recent.find((item) => item.category === "improvement");
+  const researchResult = typeof latestResearch?.result === "string" ? latestResearch.result : "";
+  const improvementResult = typeof latestImprovement?.result === "string" ? latestImprovement.result : "";
+  const researchDetails =
+    latestResearch && typeof latestResearch.details === "object" && latestResearch.details !== null
+      ? (latestResearch.details as Record<string, unknown>)
+      : undefined;
+  const topics = Array.isArray(researchDetails?.topics)
+    ? (researchDetails.topics as unknown[]).map((item) => String(item))
+    : [];
+  const summaryParts: string[] = [];
+  if (topics.length > 0) {
+    summaryParts.push(`Researched: ${topics.join(", ")}`);
+  }
+  if (researchResult) {
+    summaryParts.push(`Notes: ${researchResult.split("\n").slice(0, 2).join(" | ")}`);
+  }
+  if (improvementResult) {
+    summaryParts.push(`Improvement: ${improvementResult}`);
+  }
+  return {
+    summary: summaryParts.join("\n"),
+    metadata: {
+      researchTopics: topics,
+      researchSummary: researchResult,
+      improvementSummary: improvementResult
+    }
+  };
 }

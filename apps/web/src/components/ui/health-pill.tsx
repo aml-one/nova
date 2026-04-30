@@ -1,6 +1,14 @@
 import { cn } from "../../lib/cn";
 
-export function HealthPill({ level, label }: { level: "green" | "orange" | "red"; label?: string }) {
+export function HealthPill({
+  level,
+  label,
+  className
+}: {
+  level: "green" | "orange" | "red";
+  label?: string;
+  className?: string;
+}) {
   const map = {
     green: "bg-pastelGreen border-emerald-500/70",
     orange: "bg-pastelOrange border-orange-500/70",
@@ -12,7 +20,7 @@ export function HealthPill({ level, label }: { level: "green" | "orange" | "red"
     red: "Failed / Not Configured"
   } as const;
   return (
-    <span className={cn("inline-flex rounded-ui border px-2 py-1 text-xs font-semibold text-slate-900", map[level])}>
+    <span className={cn("inline-flex rounded-ui border px-2 py-1 text-xs font-semibold text-slate-900", map[level], className)}>
       {label ?? labelMap[level]}
     </span>
   );

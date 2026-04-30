@@ -122,6 +122,7 @@ export default function SettingsPage() {
   const [websites, setWebsites] = useState<WebsiteProject[]>([]);
   const [channelsSetupOutput, setChannelsSetupOutput] = useState<string>("");
   const [copilotSetupOutput, setCopilotSetupOutput] = useState<string>("");
+  const [channelsSetupMode, setChannelsSetupMode] = useState<"signal" | "whatsapp" | "both">("both");
 
   useEffect(() => {
     void (async () => {
@@ -256,6 +257,16 @@ export default function SettingsPage() {
     setStatus("Channel setup checked. Review result and save settings.");
   }
 
+  async function copyChannelsSetupOutput(): Promise<void> {
+    if (!channelsSetupOutput.trim()) return;
+    try {
+      await navigator.clipboard.writeText(channelsSetupOutput);
+      setStatus("Copied channel setup output to clipboard.");
+    } catch {
+      setError("Could not copy to clipboard. Please copy manually.");
+    }
+  }
+
   async function runCopilotSetupValidation(): Promise<void> {
     setError(null);
     setStatus(null);
@@ -296,7 +307,7 @@ export default function SettingsPage() {
   );
 
   return (
-    <form onSubmit={save} className="grid gap-4 lg:grid-cols-[1fr_320px]">
+    <form onSubmit={save} className="grid gap-4 lg:grid-cols-[1fr_380px]">
       <div className="space-y-4">
         <div>
           <h1 className="text-2xl font-semibold">Settings</h1>
@@ -489,45 +500,132 @@ export default function SettingsPage() {
         {tab === "channels" ? (
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">WhatsApp / Signal Bridge Setup</h2>
-            <p className="text-xs text-muted">
-              One-click setup helper: enter values below, click the setup button, and Nova validates both bridges and generates an environment block you can paste into your deployment.
-            </p>
+            <p className="text-xs text-muted">Beginner-friendly setup flow inspired by OpenClaw-style onboarding.</p>
+            <div className="rounded-ui border bg-surface p-3 text-xs text-muted">
+              <div className="mb-1 font-semibold text-slate-700 dark:text-slate-200">Recommended order</div>
+              <ol className="list-inside list-decimal space-y-1">
+                <li>Choose which channel to configure first (Signal, WhatsApp, or both).</li>
+                <li>Fill the credentials below (Nova auto-uses your phone number where possible).</li>
+                <li>Run one-click validation to test connectivity and generate a ready-to-paste env block.</li>
+                <li>Save settings, restart services once, then send a test message from your phone.</li>
+              </ol>
+            </div>
+            <label className="grid gap-1 text-sm">
+              Setup target
+              <Select value={channelsSetupMode} onChange={(e) => setChannelsSetupMode(e.target.value as "signal" | "whatsapp" | "both")}>
+                <option value="both">Validate Signal + WhatsApp</option>
+                <option value="signal">Validate Signal only</option>
+                <option value="whatsapp">Validate WhatsApp only</option>
+              </Select>
+            </label>
             <label className="grid gap-1 text-sm">Nova phone number<Input value={settings.messagingAccess.novaPhoneNumber} onChange={(e) => setSettings((p) => ({ ...p, messagingAccess: { ...p.messagingAccess, novaPhoneNumber: e.target.value } }))} /></label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.messagingAccess.denyUnknownNumbers} onChange={(e) => setSettings((p) => ({ ...p, messagingAccess: { ...p.messagingAccess, denyUnknownNumbers: e.target.checked } }))} /> Silent deny unknown numbers</label>
-            <div className="grid gap-2 md:grid-cols-2">
-              <Input
-                value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.signalApiUrl ?? "")}
-                onChange={(e) => updateChannelSetup({ signalApiUrl: e.target.value })}
-                placeholder="SIGNAL_API_URL (example: http://127.0.0.1:8080)"
-              />
-              <Input
-                value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "")}
-                onChange={(e) => updateChannelSetup({ signalAccountNumber: e.target.value })}
-                placeholder="SIGNAL_ACCOUNT_NUMBER"
-              />
-              <Input
-                value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppPhoneNumberId ?? "")}
-                onChange={(e) => updateChannelSetup({ whatsAppPhoneNumberId: e.target.value })}
-                placeholder="WHATSAPP_PHONE_NUMBER_ID"
-              />
-              <Input
-                value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppToken ?? "")}
-                onChange={(e) => updateChannelSetup({ whatsAppToken: e.target.value })}
-                placeholder="WHATSAPP_TOKEN"
-              />
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2 rounded-ui border bg-surface p-3">
+                <h3 className="text-sm font-semibold">Signal setup (self-hosted)</h3>
+                <p className="text-xs text-muted">
+                  Install and run <a className="underline" href="https://github.com/bbernhard/signal-cli-rest-api" target="_blank" rel="noreferrer">signal-cli-rest-api</a>, then register/link your number and use the API URL below.
+                </p>
+                <Input
+                  value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.signalApiUrl ?? "")}
+                  onChange={(e) => updateChannelSetup({ signalApiUrl: e.target.value })}
+                  placeholder="SIGNAL_API_URL (example: http://127.0.0.1:8080)"
+                />
+                <Input
+                  value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "")}
+                  onChange={(e) => updateChannelSetup({ signalAccountNumber: e.target.value })}
+                  placeholder="SIGNAL_ACCOUNT_NUMBER"
+                />
+                <div className="text-[11px] text-muted">
+                  Install guide: run Docker container from project docs, open REST API, verify account registration, then paste URL + account number here.
+                </div>
+              </div>
+              <div className="space-y-2 rounded-ui border bg-surface p-3">
+                <h3 className="text-sm font-semibold">WhatsApp setup (Meta Cloud API)</h3>
+                <p className="text-xs text-muted">
+                  Create an app in <a className="underline" href="https://developers.facebook.com/" target="_blank" rel="noreferrer">Meta for Developers</a>, add WhatsApp product, then copy credentials.
+                </p>
+                <Input
+                  value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppPhoneNumberId ?? "")}
+                  onChange={(e) => updateChannelSetup({ whatsAppPhoneNumberId: e.target.value })}
+                  placeholder="WHATSAPP_PHONE_NUMBER_ID"
+                />
+                <Input
+                  value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppToken ?? "")}
+                  onChange={(e) => updateChannelSetup({ whatsAppToken: e.target.value })}
+                  placeholder="WHATSAPP_TOKEN"
+                />
+                <Input
+                  value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppAppSecret ?? "")}
+                  onChange={(e) => updateChannelSetup({ whatsAppAppSecret: e.target.value })}
+                  placeholder="WHATSAPP_APP_SECRET (optional)"
+                />
+              </div>
             </div>
-            <Input
-              value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppAppSecret ?? "")}
-              onChange={(e) => updateChannelSetup({ whatsAppAppSecret: e.target.value })}
-              placeholder="WHATSAPP_APP_SECRET (optional)"
-            />
             <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
-              <div><strong>Where to get WhatsApp credentials:</strong> Meta for Developers → create app → add WhatsApp product → copy Phone Number ID and generate permanent token.</div>
-              <div><strong>Where to get Signal credentials:</strong> Run `signal-cli-rest-api`, link your phone number once, then use the bridge URL and account number.</div>
+              <div><strong>Signal quick checklist:</strong> install `signal-cli-rest-api` {"->"} register/link number {"->"} verify API responds {"->"} paste URL/account {"->"} run validation.</div>
+              <div><strong>WhatsApp quick checklist:</strong> create Meta app {"->"} add WhatsApp {"->"} generate permanent token {"->"} get phone number ID {"->"} run validation.</div>
             </div>
-            <Button type="button" tone="green" onClick={() => void runOneClickChannelSetup()}>One-click validate + generate env</Button>
+            <Button
+              type="button"
+              tone="green"
+              onClick={async () => {
+                if (channelsSetupMode === "signal") {
+                  const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
+                  const response = await fetch("/api/setup/channels/test", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({
+                      signalApiUrl: values.signalApiUrl ?? "",
+                      signalAccountNumber: values.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "",
+                      whatsAppPhoneNumberId: "",
+                      whatsAppToken: "",
+                      whatsAppAppSecret: ""
+                    })
+                  });
+                  const data = (await response.json()) as { signal?: SetupCheckResult; suggestedEnv?: string; error?: string };
+                  if (!response.ok) {
+                    setError(data.error ?? "Signal setup test failed");
+                    return;
+                  }
+                  const signalLine = `Signal: ${data.signal?.ok ? "OK" : "Needs attention"} - ${data.signal?.detail ?? "-"}`;
+                  setChannelsSetupOutput([signalLine, "", data.suggestedEnv ?? ""].join("\n"));
+                  setStatus("Signal setup checked.");
+                  return;
+                }
+                if (channelsSetupMode === "whatsapp") {
+                  const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
+                  const response = await fetch("/api/setup/channels/test", {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({
+                      signalApiUrl: "",
+                      signalAccountNumber: "",
+                      whatsAppPhoneNumberId: values.whatsAppPhoneNumberId ?? "",
+                      whatsAppToken: values.whatsAppToken ?? "",
+                      whatsAppAppSecret: values.whatsAppAppSecret ?? ""
+                    })
+                  });
+                  const data = (await response.json()) as { whatsApp?: SetupCheckResult; suggestedEnv?: string; error?: string };
+                  if (!response.ok) {
+                    setError(data.error ?? "WhatsApp setup test failed");
+                    return;
+                  }
+                  const waLine = `WhatsApp: ${data.whatsApp?.ok ? "OK" : "Needs attention"} - ${data.whatsApp?.detail ?? "-"}`;
+                  setChannelsSetupOutput([waLine, "", data.suggestedEnv ?? ""].join("\n"));
+                  setStatus("WhatsApp setup checked.");
+                  return;
+                }
+                await runOneClickChannelSetup();
+              }}
+            >
+              Validate selected setup + generate env
+            </Button>
             {channelsSetupOutput ? (
-              <textarea className="h-32 w-full rounded-ui border bg-white p-2 font-mono text-xs" value={channelsSetupOutput} readOnly />
+              <div className="space-y-2">
+                <textarea className="h-32 w-full rounded-ui border bg-white p-2 font-mono text-xs" value={channelsSetupOutput} readOnly />
+                <Button type="button" tone="blue" onClick={() => void copyChannelsSetupOutput()}>Copy env block</Button>
+              </div>
             ) : null}
             <div className="grid gap-3 md:grid-cols-2">
               <BridgeGuide title="SignalBridge" item={catalog?.setup?.signalBridge} />
@@ -686,7 +784,7 @@ export default function SettingsPage() {
               <article key={check.id} className="rounded-ui border bg-surface p-2 text-xs">
                 <div className="flex items-center justify-between gap-2">
                   <strong>{check.name}</strong>
-                  <HealthPill level={check.level} label={healthLabelForCheck(check)} />
+                  <HealthPill level={check.level} label={healthLabelForCheck(check)} className="w-40 justify-center whitespace-nowrap" />
                 </div>
                 <div className="text-muted">{check.detail}</div>
                 <div className="text-muted">Last OK: {check.lastSuccessfulAt ? new Date(check.lastSuccessfulAt).toLocaleString() : "-"}</div>

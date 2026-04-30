@@ -499,8 +499,10 @@ export default function HomePage() {
             </Button>
             </div>
           </div>
-          <Badge tone="blue">/run supports shell tasks</Badge>
-          <Badge tone="pink">{uploadedMedia.length} media ready</Badge>
+          <p className="text-xs text-muted">
+            Tip: commands like <code>/run ...</code> can execute shell tasks when command mode is enabled.
+          </p>
+          {uploadedMedia.length > 0 ? <Badge tone="pink">{uploadedMedia.length} media ready</Badge> : null}
           <label className="flex items-center gap-2 text-xs text-muted">
             <input
               type="checkbox"

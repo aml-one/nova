@@ -37,8 +37,14 @@ type RuntimeSkillModule = {
 };
 
 export async function loadWorkspaceSkills(registry: InMemorySkillRegistry): Promise<void> {
-  const skillsRoot = resolve(process.cwd(), "skills");
-  if (!existsSync(skillsRoot)) {
+  const skillsRootCandidates = [
+    resolve(process.cwd(), "skills"),
+    resolve(process.cwd(), "..", "..", "skills"),
+    resolve(process.cwd(), "..", "skills")
+  ];
+  const skillsRoot = skillsRootCandidates.find((path) => existsSync(path));
+  if (!skillsRoot) {
+    console.warn("workspace skills directory not found", { candidates: skillsRootCandidates });
     return;
   }
   const entries = readdirSync(skillsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory());

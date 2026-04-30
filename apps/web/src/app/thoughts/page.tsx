@@ -10,6 +10,7 @@ type ThoughtItem = {
   category: "chat" | "learning" | "system";
   title: string;
   content: string;
+  metadata?: unknown;
   createdAt: string;
 };
 
@@ -90,6 +91,11 @@ export default function ThoughtsPage() {
               </div>
               <h3 className="text-sm font-semibold">{item.title}</h3>
               <p className="whitespace-pre-wrap text-sm text-muted">{item.content}</p>
+              {item.metadata ? (
+                <pre className="mt-2 overflow-x-auto rounded-ui border bg-surface2 p-2 text-xs text-muted">
+                  {formatThoughtMetadata(item.metadata)}
+                </pre>
+              ) : null}
             </article>
           ))}
         </div>
@@ -104,4 +110,14 @@ function dedupeById(items: ThoughtItem[]): ThoughtItem[] {
     map.set(item.id, item);
   }
   return Array.from(map.values()).sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+}
+
+function formatThoughtMetadata(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }

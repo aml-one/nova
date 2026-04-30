@@ -14,6 +14,9 @@ export default function OcrPage() {
       <Card>
         <h1 className="text-2xl font-semibold">OCR + Table Extraction</h1>
         <p className="text-sm text-muted">Extract text/tables from images or PDFs (command-backed).</p>
+        <p className="text-xs text-muted">
+          Provide a local file path, run extract, then review recognized text and table structure. Use strict JSON mode only if integrating with automation.
+        </p>
         <p className="mt-1 text-xs text-muted">
           Preferred adapter output: JSON object with <code>text</code> and <code>tables</code> fields. Set{" "}
           <code>NOVA_OCR_OUTPUT_MODE=json</code> for strict contract mode.

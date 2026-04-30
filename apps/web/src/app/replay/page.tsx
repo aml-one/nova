@@ -37,6 +37,9 @@ export default function ReplayPage() {
       <Card>
         <h1 className="text-2xl font-semibold">Time Travel Replay</h1>
         <p className="text-sm text-muted">Fork from any past run and branch the conversation.</p>
+        <p className="text-xs text-muted">
+          Enter a previous run ID to create a branch, then continue that branch without affecting your main timeline.
+        </p>
       </Card>
       <Card className="space-y-2">
         <Input value={fromRunId} onChange={(e) => setFromRunId(e.target.value)} placeholder="Source run_id for fork" />

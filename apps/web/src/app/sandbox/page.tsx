@@ -14,6 +14,9 @@ export default function SandboxPage() {
       <Card>
         <h1 className="text-2xl font-semibold">Sandbox Simulation</h1>
         <p className="text-sm text-muted">Preview risky commands without executing them.</p>
+        <p className="text-xs text-muted">
+          Use this as a safety check before allowing real command execution. It estimates side effects and risk without making changes.
+        </p>
       </Card>
       <Card className="space-y-2">
         <Textarea rows={4} value={command} onChange={(e) => setCommand(e.target.value)} placeholder="Command to simulate..." />

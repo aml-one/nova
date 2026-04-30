@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { Card } from "../../components/ui/card";
-import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
 
 type EmotionEvent = {
@@ -21,7 +21,7 @@ type EmotionEvent = {
 export default function EmotionPage() {
   const [itemsByDate, setItemsByDate] = useState<Record<string, EmotionEvent[]>>({});
   const [loading, setLoading] = useState(true);
-  const [userId, setUserId] = useState("nova-system");
+  const systemUserId = "nova-system";
 
   async function load(targetUserId?: string): Promise<void> {
     setLoading(true);
@@ -33,8 +33,8 @@ export default function EmotionPage() {
   }
 
   useEffect(() => {
-    void load(userId);
-  }, [userId]);
+    void load(systemUserId);
+  }, []);
 
   const dates = Object.keys(itemsByDate).sort((a, b) => (a < b ? 1 : -1));
 
@@ -43,16 +43,14 @@ export default function EmotionPage() {
       <div>
         <h1 className="text-2xl font-semibold">Emotion Timeline</h1>
         <p className="text-sm text-muted">Track emotional transitions over time and what triggered them.</p>
+        <p className="text-xs text-muted">Showing system emotion stream for <code>{systemUserId}</code>.</p>
+        <p className="text-xs text-muted">
+          `v` means valence (how positive/pleasant the feeling is), and `a` means arousal (how energized/active it is).
+        </p>
         <p className="text-sm text-muted"><Link href="/learning" className="underline">Back to Learning</Link></p>
       </div>
       <div className="flex gap-2">
-        <Input
-          value={userId}
-          onChange={(event) => setUserId(event.target.value)}
-          placeholder="user id (e.g. nova-system)"
-          className="max-w-sm"
-        />
-        <Button type="button" tone="purple" onClick={() => void load(userId)}>
+        <Button type="button" tone="purple" onClick={() => void load(systemUserId)}>
           Refresh
         </Button>
       </div>
@@ -71,12 +69,28 @@ export default function EmotionPage() {
                     <strong>{item.label}</strong> (v={item.valence.toFixed(2)}, a={item.arousal.toFixed(2)})
                   </div>
                   <div>Trigger: {item.trigger}</div>
-                  {item.metadata ? <pre className="m-0 overflow-x-auto text-xs">{JSON.stringify(item.metadata, null, 2)}</pre> : null}
+                  {renderEmotionMetadata(item.metadata)}
                 </article>
               ))}
             </div>
           </section>
         ))}
+    </div>
+  );
+}
+
+function renderEmotionMetadata(metadata?: Record<string, unknown>): ReactNode | null {
+  if (!metadata || Object.keys(metadata).length === 0) return null;
+  const event = typeof metadata.event === "string" ? metadata.event : undefined;
+  const source = typeof metadata.source === "string" ? metadata.source : undefined;
+  const reason = typeof metadata.reason === "string" ? metadata.reason : undefined;
+  const confidence = typeof metadata.confidence === "number" ? metadata.confidence : undefined;
+  return (
+    <div className="mt-1 space-y-1 text-xs text-muted">
+      {event ? <div>Event: {event}</div> : null}
+      {source ? <div>Source detail: {source}</div> : null}
+      {reason ? <div>Reason: {reason}</div> : null}
+      {confidence !== undefined ? <div>Confidence: {confidence.toFixed(2)}</div> : null}
     </div>
   );
 }

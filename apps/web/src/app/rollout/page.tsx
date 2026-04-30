@@ -28,6 +28,9 @@ export default function RolloutPage() {
       <Card>
         <h1 className="text-2xl font-semibold">Rollout & Checkpoints</h1>
         <p className="text-sm text-muted">Create checkpoints, stage rollout percentage, rollback safely.</p>
+        <p className="text-xs text-muted">
+          Best for safe configuration changes: create a checkpoint first, stage to a small percent, and rollback quickly if behavior degrades.
+        </p>
       </Card>
       <Card className="space-y-2">
         <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Checkpoint label" />

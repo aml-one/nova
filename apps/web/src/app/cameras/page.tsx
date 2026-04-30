@@ -34,6 +34,9 @@ export default function CamerasPage() {
         <div>
           <h1 className="text-2xl font-semibold">Camera Mosaic</h1>
           <p className="text-sm text-muted">Live semantic alerts from camera timeline detections.</p>
+          <p className="text-xs text-muted">
+            This page shows recent detections across connected camera feeds, including guessed label, color, and license plate if available.
+          </p>
         </div>
         <Button type="button" tone="blue" onClick={() => void load()}>Refresh</Button>
       </Card>
