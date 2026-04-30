@@ -3,3 +3,8 @@ node_modules/
 dist/
 .next/
 data/identity-archive/
+api_keys/
+*.env
+!.env.example
+apps/mobile_flutter/android/app/google-services.json
+apps/mobile_flutter/ios/Runner/GoogleService-Info.plist

@@ -47,6 +47,128 @@ Local-first headless AI agent framework for macOS, Windows, and Ubuntu.
    - `http://localhost:3000/login`
    - `http://localhost:3000/settings`
 
+## Installation Guide
+
+### Prerequisites (all platforms)
+- Git 2.40+
+- Node.js 22 LTS (recommended)
+- Corepack enabled (`corepack enable`)
+- `pnpm` via Corepack (no global install required)
+
+### macOS (Apple Silicon + Intel)
+1. Install required tools (Homebrew):
+   - `brew install git node`
+2. Clone repository:
+   - `git clone <your-repo-url> Nova`
+   - `cd Nova`
+3. Enable Corepack:
+   - `corepack enable`
+4. Install workspace dependencies:
+   - `corepack pnpm install`
+5. (Optional) Create `.env` values for provider/channel credentials.
+6. Start the full local stack:
+   - `bash ./scripts/start-local.sh`
+7. Open UI:
+   - `http://localhost:3000`
+8. First-time setup:
+   - create admin user at `/login`
+   - configure models/channels at `/settings`
+
+### Windows 10/11 (PowerShell)
+1. Install required tools:
+   - Git for Windows
+   - Node.js 22 LTS
+2. Open **PowerShell** and clone:
+   - `git clone <your-repo-url> Nova`
+   - `cd Nova`
+3. Enable Corepack:
+   - `corepack enable`
+4. Install dependencies:
+   - `corepack pnpm install`
+5. (Optional) Configure `.env` credentials for models/channels.
+6. Start services:
+   - `powershell ./scripts/start-local.ps1`
+7. Open UI:
+   - `http://localhost:3000`
+8. Complete login/settings setup in WebUI.
+
+### Ubuntu (22.04/24.04)
+1. Install prerequisites:
+   - `sudo apt update`
+   - `sudo apt install -y git curl ca-certificates`
+2. Install Node.js 22 (NodeSource):
+   - `curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -`
+   - `sudo apt install -y nodejs`
+3. Clone project:
+   - `git clone <your-repo-url> Nova`
+   - `cd Nova`
+4. Enable Corepack + install deps:
+   - `corepack enable`
+   - `corepack pnpm install`
+5. (Optional) Configure `.env` credentials.
+6. Start local stack:
+   - `bash ./scripts/start-local.sh`
+7. Open UI:
+   - `http://localhost:3000`
+
+### Verify installation
+- Backend health:
+  - `http://localhost:8787/health`
+- Web UI:
+  - `http://localhost:3000`
+- If checks fail:
+  - run `corepack pnpm -r typecheck`
+  - run `corepack pnpm -r test`
+
+### Start Nova at system boot
+
+Recommended production approach: run Nova as OS services (agent-core + web) and let the OS restart them automatically.
+
+#### macOS (`launchd`)
+1. Build once:
+   - `corepack pnpm -r build`
+2. Prepare logs dir:
+   - `mkdir -p data/logs`
+3. Copy templates:
+   - `cp deploy/launchd/com.aml.nova.agent-core.plist ~/Library/LaunchAgents/`
+   - `cp deploy/launchd/com.aml.nova.web.plist ~/Library/LaunchAgents/`
+4. Replace `__NOVA_PATH__` in both plist files with your absolute Nova path.
+5. Load and start:
+   - `launchctl unload ~/Library/LaunchAgents/com.aml.nova.agent-core.plist 2>/dev/null || true`
+   - `launchctl unload ~/Library/LaunchAgents/com.aml.nova.web.plist 2>/dev/null || true`
+   - `launchctl load ~/Library/LaunchAgents/com.aml.nova.agent-core.plist`
+   - `launchctl load ~/Library/LaunchAgents/com.aml.nova.web.plist`
+6. Verify:
+   - `launchctl list | rg "com.aml.nova"`
+
+#### Windows (Task Scheduler)
+1. Build once:
+   - `corepack pnpm -r build`
+2. Open elevated PowerShell and install startup tasks from template:
+   - `powershell -ExecutionPolicy Bypass -File .\deploy\windows\install-startup-tasks.ps1`
+3. Verify tasks:
+   - `Get-ScheduledTask -TaskName "Nova Agent Core","Nova Web UI"`
+4. Test run once:
+   - `Start-ScheduledTask -TaskName "Nova Agent Core"`
+   - `Start-ScheduledTask -TaskName "Nova Web UI"`
+
+#### Ubuntu (systemd)
+1. Build once:
+   - `corepack pnpm -r build`
+2. Copy service templates:
+   - `sudo cp deploy/systemd/nova-agent-core.service /etc/systemd/system/`
+   - `sudo cp deploy/systemd/nova-web.service /etc/systemd/system/`
+3. Edit placeholders:
+   - replace `__NOVA_PATH__` with your absolute Nova path
+   - replace `__USER__` with your Linux user
+4. Enable and start:
+   - `sudo systemctl daemon-reload`
+   - `sudo systemctl enable nova-agent-core.service nova-web.service`
+   - `sudo systemctl start nova-agent-core.service nova-web.service`
+5. Verify:
+   - `systemctl status nova-agent-core.service`
+   - `systemctl status nova-web.service`
+
 ## Configuration
 - Persona files: `config/personas/*.persona.yaml`
 - Camera aliases and RTSP mapping: `config/cameras/cameras.yaml`

@@ -7,17 +7,21 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
     "lint": "echo \"No linter configured yet for @nova/agent-core\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --maxWorkers=1"
   },
   "dependencies": {
     "@nova/sdk": "workspace:*",
+    "firebase-admin": "^13.5.0",
+    "ws": "^8.20.0",
     "yaml": "^2.8.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.15.17",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.20.3",
     "typescript": "^5.8.3",
     "vitest": "^3.2.4"

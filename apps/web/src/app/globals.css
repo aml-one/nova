@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --surface: 220 100% 99%;
+  --surface-2: 214 78% 97%;
+  --text: 222 30% 16%;
+  --muted: 221 20% 40%;
+  --border: 220 26% 84%;
+  --pastel-blue: 211 85% 73%;
+  --pastel-orange: 27 92% 73%;
+  --pastel-pink: 329 78% 78%;
+  --pastel-green: 145 55% 71%;
+  --pastel-red: 358 75% 74%;
+  --pastel-yellow: 48 95% 76%;
+  --pastel-purple: 268 78% 77%;
+}
+
+.dark {
+  --surface: 225 22% 17%;
+  --surface-2: 225 19% 21%;
+  --text: 220 18% 92%;
+  --muted: 221 13% 66%;
+  --border: 223 15% 34%;
+  --pastel-blue: 211 71% 60%;
+  --pastel-orange: 27 85% 62%;
+  --pastel-pink: 331 70% 66%;
+  --pastel-green: 145 46% 56%;
+  --pastel-red: 358 67% 62%;
+  --pastel-yellow: 46 80% 60%;
+  --pastel-purple: 268 66% 65%;
+}
+
+html,
+body {
+  @apply bg-surface text-text;
+}
+
+* {
+  @apply border-border;
+}

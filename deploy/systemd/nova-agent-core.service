@@ -1,0 +1,16 @@
+[Unit]
+Description=Nova Agent Core
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__NOVA_PATH__
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node __NOVA_PATH__/apps/agent-core/dist/index.js
+Restart=always
+RestartSec=5
+User=__USER__
+Group=__USER__
+
+[Install]
+WantedBy=multi-user.target

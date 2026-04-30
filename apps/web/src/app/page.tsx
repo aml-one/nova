@@ -1,576 +1,583 @@
 /* eslint-disable react/no-unescaped-entities */
 "use client";
 
-import { DragEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { Card } from "../components/ui/card";
+import { Textarea } from "../components/ui/textarea";
+import { Input } from "../components/ui/input";
+import { Select } from "../components/ui/select";
+import { Button } from "../components/ui/button";
+import { Badge } from "../components/ui/badge";
+import { cn } from "../lib/cn";
+import { ChatMarkdown } from "../components/chat-markdown";
 
-type ChatMedia = {
+type MediaItem = {
   url: string;
   kind: "image" | "video";
   posterUrl?: string;
+  name?: string;
 };
 
 type ChatTurn = {
+  id: string;
   role: "user" | "assistant";
   text: string;
-  medias?: ChatMedia[];
+  attachments?: MediaItem[];
+  thinkingText?: string;
+  thinkingCollapsed?: boolean;
+  stats?: {
+    tokensPerSecond: number;
+    elapsedMs: number;
+    tokenCount: number;
+    firstTokenMs?: number;
+    provider?: string;
+    model?: string;
+    hideProviderModel?: boolean;
+    providerTps?: number;
+  };
+  isPending?: boolean;
 };
-
 type PendingUpload = {
   id: string;
   file: File;
   progress: number;
-  status: "pending" | "uploading" | "done" | "error";
-  uploaded?: ChatMedia;
-};
-
-type LightboxState = {
-  medias: ChatMedia[];
-  index: number;
+  status: "queued" | "uploading" | "done" | "failed";
+  uploaded?: MediaItem;
+  error?: string;
 };
 
 export default function HomePage() {
   const [message, setMessage] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
-  const [dragOver, setDragOver] = useState(false);
+  const [model, setModel] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [uploads, setUploads] = useState<PendingUpload[]>([]);
   const [loading, setLoading] = useState(false);
-  const [lightbox, setLightbox] = useState<LightboxState | null>(null);
-  const [draggedUploadId, setDraggedUploadId] = useState<string | null>(null);
-  const [selectedUploadId, setSelectedUploadId] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [lightbox, setLightbox] = useState<{ items: MediaItem[]; index: number } | null>(null);
+  const [showThinkingInChat, setShowThinkingInChat] = useState(true);
+  const [liveThinkingCollapsed, setLiveThinkingCollapsed] = useState(false);
+  const [liveThinking, setLiveThinking] = useState("Analyzing your request...");
+  const [hideProviderModelInStats, setHideProviderModelInStats] = useState(false);
+  const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
+  const [editingText, setEditingText] = useState("");
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const trimmed = message.trim();
-    if (!trimmed || loading) {
-      return;
-    }
-    const uploadedMedias = await uploadAllPending();
-    const inlineUrl = imageUrl.trim() || undefined;
-    const allUserMedia: ChatMedia[] = [
-      ...uploadedMedias,
-      ...(inlineUrl ? [{ url: inlineUrl, kind: inferMediaKind(inlineUrl) ?? "image" }] : [])
-    ];
-    const firstVisionUrl = allUserMedia.find((item) => item.kind === "image" || item.kind === "video")?.url;
-    setTurns((prev) => [
-      ...prev,
-      {
-        role: "user",
-        text: trimmed,
-        medias: allUserMedia
-      }
-    ]);
-    setMessage("");
-    setPendingUploads([]);
-    setLoading(true);
-    try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          message: trimmed,
-          phoneNumber: phoneNumber.trim() || undefined,
-          imageUrl: firstVisionUrl
-        })
-      });
-      const data = (await response.json()) as { reply?: string; error?: string };
-      if (!response.ok) {
-        setTurns((prev) => [...prev, { role: "assistant", text: `Error: ${data.error ?? "Request failed"}` }]);
-        return;
-      }
-      const reply = data.reply ?? "";
-      const mediaFromReply = extractMediaUrls(reply);
-      setTurns((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          text: reply,
-          medias: mediaFromReply
-        }
-      ]);
-    } catch (error) {
-      setTurns((prev) => [
-        ...prev,
-        { role: "assistant", text: `Error: ${error instanceof Error ? error.message : "Unknown error"}` }
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function uploadAllPending(): Promise<ChatMedia[]> {
-    const medias: ChatMedia[] = [];
-    for (const item of pendingUploads) {
-      if (item.status === "done" && item.uploaded) {
-        medias.push(item.uploaded);
-        continue;
-      }
-      const uploaded = await uploadOneFile(item.id, item.file);
-      if (uploaded) {
-        medias.push(uploaded);
-      }
-    }
-    return medias;
-  }
-
-  async function uploadOneFile(uploadId: string, file: File): Promise<ChatMedia | undefined> {
-    setPendingUploads((prev) =>
-      prev.map((item) => (item.id === uploadId ? { ...item, status: "uploading", progress: 1 } : item))
-    );
-    const base64 = await fileToBase64(file);
-    const uploaded = await uploadSelectedFileWithProgress(file.name, base64, (progress) => {
-      setPendingUploads((prev) =>
-        prev.map((item) => (item.id === uploadId ? { ...item, progress, status: "uploading" } : item))
-      );
-    });
-    if (!uploaded) {
-      setPendingUploads((prev) =>
-        prev.map((item) => (item.id === uploadId ? { ...item, status: "error", progress: 0 } : item))
-      );
-      return undefined;
-    }
-    setPendingUploads((prev) =>
-      prev.map((item) =>
-        item.id === uploadId ? { ...item, status: "done", progress: 100, uploaded } : item
-      )
-    );
-    return uploaded;
-  }
-
-  function addFiles(files: FileList | File[]): void {
-    const list = Array.from(files);
-    const mapped = list.map<PendingUpload>((file) => ({
-      id: `${file.name}-${file.size}-${Math.random().toString(36).slice(2, 8)}`,
-      file,
-      progress: 0,
-      status: "pending"
-    }));
-    setPendingUploads((prev) => [...prev, ...mapped]);
-  }
-
-  function removePendingUpload(id: string): void {
-    setPendingUploads((prev) => prev.filter((item) => item.id !== id));
-    setSelectedUploadId((prev) => (prev === id ? null : prev));
-  }
-
-  function movePendingUpload(id: string, direction: -1 | 1): void {
-    setPendingUploads((prev) => {
-      const index = prev.findIndex((item) => item.id === id);
-      if (index < 0) return prev;
-      const target = index + direction;
-      if (target < 0 || target >= prev.length) return prev;
-      const copy = [...prev];
-      const [item] = copy.splice(index, 1);
-      copy.splice(target, 0, item);
-      return copy;
-    });
-  }
-
-  function movePendingUploadToTarget(sourceId: string, targetId: string): void {
-    if (sourceId === targetId) {
-      return;
-    }
-    setPendingUploads((prev) => {
-      const sourceIndex = prev.findIndex((item) => item.id === sourceId);
-      const targetIndex = prev.findIndex((item) => item.id === targetId);
-      if (sourceIndex < 0 || targetIndex < 0) {
-        return prev;
-      }
-      const copy = [...prev];
-      const [sourceItem] = copy.splice(sourceIndex, 1);
-      copy.splice(targetIndex, 0, sourceItem);
-      return copy;
-    });
-  }
-
-  function onDrop(event: DragEvent<HTMLDivElement>): void {
-    event.preventDefault();
-    setDragOver(false);
-    if (event.dataTransfer.files?.length) {
-      addFiles(event.dataTransfer.files);
-    }
-  }
-
-  const hasUploads = useMemo(() => pendingUploads.length > 0, [pendingUploads.length]);
+  const uploadedMedia = useMemo(
+    () =>
+      uploads
+        .filter((item) => item.status === "done" && item.uploaded)
+        .map((item) => item.uploaded as MediaItem),
+    [uploads]
+  );
 
   useEffect(() => {
-    if (!lightbox) {
-      return;
-    }
-    const onKeyDown = (event: KeyboardEvent) => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!lightbox) return;
       if (event.key === "Escape") {
         setLightbox(null);
         return;
       }
+      if (event.key === "ArrowRight") {
+        setLightbox((prev) => (prev ? { ...prev, index: (prev.index + 1) % prev.items.length } : prev));
+      }
       if (event.key === "ArrowLeft") {
         setLightbox((prev) =>
-          prev ? { ...prev, index: Math.max(0, prev.index - 1) } : prev
-        );
-        return;
-      }
-      if (event.key === "ArrowRight") {
-        setLightbox((prev) =>
-          prev ? { ...prev, index: Math.min(prev.medias.length - 1, prev.index + 1) } : prev
+          prev
+            ? { ...prev, index: (prev.index - 1 + prev.items.length) % prev.items.length }
+            : prev
         );
       }
-    };
+    }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [lightbox]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!selectedUploadId || loading || lightbox) {
-        return;
-      }
-      const selected = pendingUploads.find((item) => item.id === selectedUploadId);
-      if (!selected || selected.status === "uploading") {
-        return;
-      }
-      if (event.altKey && event.key === "ArrowUp") {
-        event.preventDefault();
-        movePendingUpload(selectedUploadId, -1);
-        return;
-      }
-      if (event.altKey && event.key === "ArrowDown") {
-        event.preventDefault();
-        movePendingUpload(selectedUploadId, 1);
-        return;
-      }
-      if (event.key === "Delete") {
-        event.preventDefault();
-        removePendingUpload(selectedUploadId);
+    if (!loading) return;
+    let active = true;
+    const loadThought = async () => {
+      const response = await fetch("/api/thoughts?limit=8");
+      const data = (await response.json()) as {
+        items?: Array<{ title?: string; content?: string; category?: string }>;
+      };
+      if (!active || !response.ok) return;
+      const latest = data.items?.[0];
+      if (latest?.title || latest?.content) {
+        setLiveThinking(`${latest.title ?? "Thinking"}\n${latest.content ?? ""}`.trim());
       }
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedUploadId, loading, lightbox, pendingUploads]);
+    void loadThought();
+    const timer = setInterval(() => void loadThought(), 1200);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [loading]);
+
+  useEffect(() => {
+    void (async () => {
+      const response = await fetch("/api/settings");
+      const data = (await response.json()) as { settings?: { web?: { hideProviderModelInStats?: boolean } } };
+      if (response.ok) {
+        setHideProviderModelInStats(data.settings?.web?.hideProviderModelInStats === true);
+      }
+    })();
+  }, []);
+
+  async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    const trimmed = message.trim();
+    if (!trimmed || loading) return;
+    const readyUploads = await ensureUploads();
+    const attachmentLines = readyUploads.length
+      ? `\n\nAttached media:\n${readyUploads.map((item) => `- ${item.kind}: ${item.url}`).join("\n")}`
+      : "";
+    const composedMessage = `${trimmed}${attachmentLines}`;
+    const userTurn: ChatTurn = { id: randomId(), role: "user", text: trimmed, attachments: readyUploads, isPending: true };
+    setTurns((prev) => [...prev, userTurn]);
+    setMessage("");
+    setLoading(true);
+    setLiveThinking("Planning response...");
+    const assistantId = randomId();
+    setTurns((prev) => [
+      ...prev,
+      {
+        id: assistantId,
+        role: "assistant",
+        text: "",
+        thinkingText: "Thinking...",
+        thinkingCollapsed: false
+      }
+    ]);
+    try {
+      const startedAt = Date.now();
+      const response = await fetch("/api/chat/stream", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message: composedMessage,
+          phoneNumber: phoneNumber.trim() || undefined,
+          imageUrl: readyUploads.find((item) => item.kind === "image")?.url,
+          model: model.trim() || undefined
+        })
+      });
+      if (!response.ok || !response.body) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        setTurns((prev) =>
+          prev.map((turn) =>
+            turn.id === assistantId
+              ? { ...turn, text: `Error: ${data.error ?? "Request failed"}`, thinkingText: undefined }
+              : turn
+          )
+        );
+        return;
+      }
+      const streamResult = await readSseStream(response.body, (partialText) => {
+        const { visible, thinking } = extractThinking({ text: partialText });
+        setTurns((prev) =>
+          prev.map((turn) =>
+            turn.id === assistantId
+              ? {
+                  ...turn,
+                  text: visible,
+                  attachments: extractMediaFromText(visible),
+                  thinkingText: thinking || undefined
+                }
+              : turn
+          )
+        );
+      });
+      const { visible, thinking, firstTokenMs, provider, model: modelName, hideProviderModel, providerTps } = extractThinking(streamResult);
+      const elapsedMs = Math.max(1, Date.now() - startedAt);
+      const tokenCount = estimateTokens(visible);
+      const tokensPerSecond = Number(((tokenCount * 1000) / elapsedMs).toFixed(1));
+      setTurns((prev) =>
+        prev.map((turn) =>
+          turn.id === assistantId
+            ? {
+                ...turn,
+                text: visible,
+                attachments: extractMediaFromText(visible),
+                thinkingText: thinking || undefined,
+                stats: {
+                  tokenCount,
+                  elapsedMs,
+                  tokensPerSecond,
+                  firstTokenMs,
+                  provider,
+                  model: modelName,
+                  hideProviderModel: hideProviderModel || hideProviderModelInStats,
+                  providerTps
+                }
+              }
+            : turn
+        )
+      );
+      setTurns((prev) => prev.map((turn) => (turn.id === userTurn.id ? { ...turn, isPending: false } : turn)));
+      setUploads([]);
+    } catch (error) {
+      setTurns((prev) =>
+        prev.map((turn) =>
+          turn.id === assistantId
+            ? { ...turn, text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`, thinkingText: undefined }
+            : turn
+        )
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function ensureUploads(): Promise<MediaItem[]> {
+    const latestDone = uploads
+      .map((item) => item.uploaded)
+      .filter((item): item is MediaItem => Boolean(item));
+    const queued = uploads.filter((item) => item.status === "queued" || item.status === "failed");
+    if (!queued.length) return latestDone;
+    const newlyUploaded: MediaItem[] = [];
+    for (const item of queued) {
+      const uploaded = await uploadOne(item);
+      if (uploaded) newlyUploaded.push(uploaded);
+    }
+    return [...latestDone, ...newlyUploaded];
+  }
+
+  async function uploadOne(target: PendingUpload): Promise<MediaItem | null> {
+    setUploads((prev) =>
+      prev.map((item) => (item.id === target.id ? { ...item, status: "uploading", progress: Math.max(item.progress, 5) } : item))
+    );
+    const pulse = setInterval(() => {
+      setUploads((prev) =>
+        prev.map((item) =>
+          item.id === target.id && item.status === "uploading"
+            ? { ...item, progress: Math.min(item.progress + 8, 92) }
+            : item
+        )
+      );
+    }, 140);
+    try {
+      const base64 = await fileToBase64(target.file);
+      const response = await fetch("/api/media/upload", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ filename: target.file.name, base64 })
+      });
+      const data = (await response.json()) as {
+        url?: string;
+        posterUrl?: string;
+        kind?: "image" | "video" | "other";
+        error?: string;
+      };
+      if (!response.ok || !data.url || (data.kind !== "image" && data.kind !== "video")) {
+        throw new Error(data.error ?? "Upload failed");
+      }
+      const uploaded: MediaItem = {
+        url: data.url,
+        posterUrl: data.posterUrl || undefined,
+        kind: data.kind,
+        name: target.file.name
+      };
+      setUploads((prev) =>
+        prev.map((item) => (item.id === target.id ? { ...item, status: "done", progress: 100, uploaded } : item))
+      );
+      return uploaded;
+    } catch (error) {
+      setUploads((prev) =>
+        prev.map((item) =>
+          item.id === target.id
+            ? { ...item, status: "failed", error: error instanceof Error ? error.message : "Upload error" }
+            : item
+        )
+      );
+      return null;
+    } finally {
+      clearInterval(pulse);
+    }
+  }
+
+  function addFiles(list: FileList | File[]): void {
+    const files = Array.from(list).filter((file) => inferMediaKind(file.name));
+    if (!files.length) return;
+    const next = files.map<PendingUpload>((file) => ({
+      id: `${file.name}-${file.size}-${Math.random().toString(16).slice(2)}`,
+      file,
+      progress: 0,
+      status: "queued"
+    }));
+    setUploads((prev) => [...prev, ...next]);
+  }
+
+  function moveUpload(id: string, direction: -1 | 1): void {
+    setUploads((prev) => {
+      const index = prev.findIndex((item) => item.id === id);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= prev.length) return prev;
+      const copy = [...prev];
+      const temp = copy[index];
+      copy[index] = copy[target];
+      copy[target] = temp;
+      return copy;
+    });
+  }
 
   return (
-    <main style={{ fontFamily: "sans-serif", margin: "2rem auto", maxWidth: 760 }}>
-      <h1>Nova Agent Platform</h1>
-      <p>Local-first agent control surface for chat, channels, and autonomous tasks.</p>
-      <ul>
-        <li>Channels: web, WhatsApp, Signal</li>
-        <li>Models: Ollama, LM Studio, Copilot-compatible</li>
-        <li>Use /run &lt;command&gt; to execute shell commands</li>
-        <li>
-          <Link href="/dashboard">Open dashboard</Link>
-        </li>
-        <li>
-          <Link href="/settings">Open settings</Link>
-        </li>
-        <li>
-          <Link href="/learning">Open learning timeline</Link>
-        </li>
-        <li>
-          <Link href="/emotion">Open emotion timeline</Link>
-        </li>
-        <li>
-          <Link href="/security">Open Security Center</Link>
-        </li>
-      </ul>
-      <form onSubmit={onSubmit} style={{ display: "grid", gap: 10, marginTop: 16 }}>
-        <input
-          value={phoneNumber}
-          onChange={(event) => setPhoneNumber(event.target.value)}
-          placeholder="Optional phone number (for identity simulation)"
-          style={{ padding: 8 }}
-        />
-        <textarea
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-          placeholder="Ask Nova to do something..."
-          rows={4}
-          style={{ padding: 8 }}
-        />
-        <input
-          value={imageUrl}
-          onChange={(event) => setImageUrl(event.target.value)}
-          placeholder="Optional image URL for automatic vision analysis"
-          style={{ padding: 8 }}
-        />
-        <input
-          type="file"
-          accept="image/*,video/*"
-          multiple
-          onChange={(event) => addFiles(event.target.files ?? [])}
-          style={{ padding: 8 }}
-        />
-        <div
-          onDragOver={(event) => {
-            event.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
-          style={{
-            border: "2px dashed #999",
-            borderRadius: 8,
-            padding: 12,
-            background: dragOver ? "#eef5ff" : "#fafafa"
-          }}
-        >
-          Drop images/videos here for multi-file upload
+    <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
+      <Card className="h-fit">
+        <h2 className="mb-2 text-lg font-semibold">Session</h2>
+        <div className="space-y-2">
+          <label className="text-xs text-muted">Phone Number</label>
+          <Input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="+15551234567" />
+          <label className="text-xs text-muted">Model override (optional)</label>
+          <Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="llama3.1 or gpt-4o" />
+          <Badge tone="blue">/run supports shell tasks</Badge>
+          <Badge tone="pink">{uploadedMedia.length} media ready</Badge>
+          <label className="flex items-center gap-2 text-xs text-muted">
+            <input
+              type="checkbox"
+              checked={showThinkingInChat}
+              onChange={(event) => setShowThinkingInChat(event.target.checked)}
+            />
+            Show thinking in chat
+          </label>
+          <Link href="/thoughts" className="inline-block rounded-ui border bg-pastelPurple px-2 py-1 text-xs text-slate-900">
+            Open Live Thoughts
+          </Link>
         </div>
-        {hasUploads ? (
-          <section style={{ display: "grid", gap: 8 }}>
-            <div style={{ fontSize: 12, color: "#555" }}>
-              Tip: drag cards to reorder, or select a card then use <code>Alt+Up</code>/<code>Alt+Down</code>. Press{" "}
-              <code>Delete</code> to remove selected.
-            </div>
-            {pendingUploads.map((item, index) => (
-              <div
-                key={item.id}
-                draggable={item.status !== "uploading" && !loading}
-                tabIndex={0}
-                onClick={() => setSelectedUploadId(item.id)}
-                onFocus={() => setSelectedUploadId(item.id)}
-                onDragStart={() => setDraggedUploadId(item.id)}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  if (draggedUploadId) {
-                    movePendingUploadToTarget(draggedUploadId, item.id);
-                  }
-                  setDraggedUploadId(null);
-                }}
-                onDragEnd={() => setDraggedUploadId(null)}
-                style={{
-                  border: selectedUploadId === item.id ? "2px solid #2b7cff" : "1px solid #ddd",
-                  borderRadius: 8,
-                  padding: 8,
-                  background: draggedUploadId === item.id ? "#f0f7ff" : "#fff"
-                }}
+      </Card>
+      <Card>
+        <h1 className="mb-2 text-2xl font-semibold">Nova Chat</h1>
+        <div className="mb-4 max-h-[55vh] space-y-2 overflow-y-auto rounded-xl border bg-surface p-3">
+          {turns.length === 0 ? <div className="text-sm text-muted">Start chatting with Nova.</div> : null}
+          {loading && showThinkingInChat ? (
+            <article className="mr-auto max-w-[85%] rounded-ui border border-slate-500/60 bg-slate-200/60 p-3 text-slate-700 dark:bg-slate-700/45 dark:text-slate-200">
+              <div className="mb-1 text-xs font-semibold">Thinking</div>
+              <button
+                type="button"
+                className="mb-1 rounded-ui border bg-surface2 px-2 py-0.5 text-xs"
+                onClick={() => setLiveThinkingCollapsed((prev) => !prev)}
               >
-                <div style={{ fontSize: 13, marginBottom: 6, display: "flex", justifyContent: "space-between", gap: 8 }}>
-                  <span>
-                    {item.file.name} ({Math.ceil(item.file.size / 1024)} KB) - {item.status}
-                  </span>
-                  <span style={{ display: "flex", gap: 6 }}>
-                    <button
+                {liveThinkingCollapsed ? "Expand" : "Collapse"}
+              </button>
+              {!liveThinkingCollapsed ? <div className="whitespace-pre-wrap text-xs">{liveThinking}</div> : null}
+            </article>
+          ) : null}
+          {turns.map((turn, index) => (
+            <article
+              key={turn.id}
+              className={turn.role === "user" ? "ml-auto max-w-[85%] rounded-ui border border-blue-500/70 bg-pastelBlue p-3 text-slate-900" : "mr-auto max-w-[85%] rounded-ui border border-purple-500/70 bg-pastelPurple p-3 text-slate-900"}
+            >
+              <div className="mb-1 text-xs font-semibold">{turn.role === "user" ? "You" : "Nova"}</div>
+              {editingTurnId === turn.id ? (
+                <div className="space-y-2">
+                  <Textarea value={editingText} onChange={(event) => setEditingText(event.target.value)} rows={3} />
+                  <div className="flex gap-2">
+                    <Button
                       type="button"
-                      onClick={() => movePendingUpload(item.id, -1)}
-                      disabled={index === 0 || item.status === "uploading" || loading}
+                      tone="green"
+                      onClick={() => {
+                        const next = editingText.trim();
+                        if (!next) return;
+                        setTurns((prev) => prev.map((item) => (item.id === turn.id ? { ...item, text: next } : item)));
+                        setMessage(next);
+                        setEditingTurnId(null);
+                      }}
                     >
-                      Up
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => movePendingUpload(item.id, 1)}
-                      disabled={index === pendingUploads.length - 1 || item.status === "uploading" || loading}
-                    >
-                      Down
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => removePendingUpload(item.id)}
-                      disabled={item.status === "uploading" || loading}
-                    >
-                      Remove
-                    </button>
-                  </span>
+                      Save
+                    </Button>
+                    <Button type="button" tone="red" onClick={() => setEditingTurnId(null)}>
+                      Cancel
+                    </Button>
+                  </div>
                 </div>
-                <div style={{ height: 8, background: "#eee", borderRadius: 4, overflow: "hidden" }}>
-                  <div
-                    style={{
-                      width: `${item.progress}%`,
-                      height: "100%",
-                      background: item.status === "error" ? "#d9534f" : "#2b7cff"
+              ) : (
+                <div className="text-sm">
+                  <ChatMarkdown content={turn.text || (turn.role === "assistant" && loading ? "..." : "")} />
+                </div>
+              )}
+              {turn.role === "user" ? (
+                <div className="mt-2 flex gap-2">
+                  <Button
+                    type="button"
+                    tone="yellow"
+                    onClick={() => {
+                      setEditingTurnId(turn.id);
+                      setEditingText(turn.text);
                     }}
-                  />
+                  >
+                    Edit
+                  </Button>
+                  <Button
+                    type="button"
+                    tone="orange"
+                    onClick={() => {
+                      setMessage(turn.text);
+                      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+                    }}
+                  >
+                    Regenerate
+                  </Button>
                 </div>
-              </div>
-            ))}
-          </section>
-        ) : null}
-        <button type="submit" disabled={loading} style={{ padding: "8px 12px" }}>
-          {loading ? "Sending..." : "Send"}
-        </button>
-      </form>
-      <section style={{ marginTop: 20 }}>
-        {turns.map((turn, index) => (
-          <article
-            key={`${turn.role}-${index}`}
-            style={{
-              background: turn.role === "user" ? "#eef5ff" : "#f6f6f6",
-              borderRadius: 8,
-              padding: 10,
-              marginBottom: 10
+              ) : null}
+              {turn.role === "assistant" && showThinkingInChat && turn.thinkingText ? (
+                <div className="mt-2 rounded-ui border border-slate-500/60 bg-slate-200/60 p-2 text-xs text-slate-700 dark:bg-slate-700/45 dark:text-slate-200">
+                  <button
+                    type="button"
+                    className="mb-1 rounded-ui border bg-surface2 px-2 py-0.5 text-xs"
+                    onClick={() =>
+                      setTurns((prev) =>
+                        prev.map((item) =>
+                          item.id === turn.id
+                            ? { ...item, thinkingCollapsed: !item.thinkingCollapsed }
+                            : item
+                        )
+                      )
+                    }
+                  >
+                    {turn.thinkingCollapsed ? "Show thinking" : "Hide thinking"}
+                  </button>
+                  {!turn.thinkingCollapsed ? <div className="whitespace-pre-wrap">{turn.thinkingText}</div> : null}
+                </div>
+              ) : null}
+              {turn.role === "assistant" && turn.stats ? (
+                <div className="mt-2 text-[11px] text-slate-700/80 dark:text-slate-200/80">
+                  {turn.stats.tokensPerSecond} t/s · {turn.stats.tokenCount} tok · {(turn.stats.elapsedMs / 1000).toFixed(2)}s
+                  {typeof turn.stats.firstTokenMs === "number" ? ` · first ${(turn.stats.firstTokenMs / 1000).toFixed(2)}s` : ""}
+                  {typeof turn.stats.providerTps === "number" ? ` · provider ${turn.stats.providerTps} t/s` : ""}
+                  {!turn.stats.hideProviderModel && (turn.stats.provider || turn.stats.model)
+                    ? ` · ${turn.stats.provider ?? "provider"}${turn.stats.model ? `/${turn.stats.model}` : ""}`
+                    : ""}
+                </div>
+              ) : null}
+              {turn.attachments?.length ? (
+                <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-3">
+                  {turn.attachments.map((item, mediaIndex) => (
+                    <button
+                      key={`${item.url}-${mediaIndex}`}
+                      type="button"
+                      className="overflow-hidden rounded-ui border bg-surface/70"
+                      onClick={() => setLightbox({ items: turn.attachments ?? [], index: mediaIndex })}
+                    >
+                      {item.kind === "image" ? (
+                        <img src={item.url} alt={item.name ?? "attachment"} className="h-24 w-full object-cover" />
+                      ) : (
+                        <img src={item.posterUrl || item.url} alt={item.name ?? "video"} className="h-24 w-full object-cover" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </article>
+          ))}
+        </div>
+        <form onSubmit={onSubmit} className="space-y-2">
+          <div
+            className={cn(
+              "rounded-ui border border-dashed p-3 text-sm transition",
+              dragging ? "border-blue-500 bg-pastelBlue/50" : "bg-surface2"
+            )}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={(event) => {
+              event.preventDefault();
+              setDragging(false);
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragging(false);
+              addFiles(event.dataTransfer.files);
             }}
           >
-            <strong>{turn.role === "user" ? "You" : "Nova"}:</strong> {turn.text}
-            {turn.medias?.length ? (
-              <MediaGallery
-                medias={turn.medias}
-                onOpen={(index) => setLightbox({ medias: turn.medias ?? [], index })}
-              />
-            ) : null}
-          </article>
-        ))}
-      </section>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span>Drop images/videos here, or choose files.</span>
+              <label className="cursor-pointer rounded-ui border bg-pastelGreen px-2 py-1 text-slate-900">
+                Add files
+                <input
+                  type="file"
+                  className="hidden"
+                  multiple
+                  accept="image/*,video/*"
+                  onChange={(event) => {
+                    if (!event.target.files) return;
+                    addFiles(event.target.files);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+            </div>
+          </div>
+          {uploads.length ? (
+            <div className="space-y-2 rounded-ui border bg-surface2 p-2">
+              {uploads.map((item, idx) => (
+                <div key={item.id} className="rounded-ui border bg-surface p-2 text-xs">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <span className="truncate">{item.file.name}</span>
+                    <div className="flex gap-1">
+                      <Button type="button" tone="blue" onClick={() => moveUpload(item.id, -1)} disabled={idx === 0}>
+                        Up
+                      </Button>
+                      <Button type="button" tone="blue" onClick={() => moveUpload(item.id, 1)} disabled={idx === uploads.length - 1}>
+                        Down
+                      </Button>
+                      <Button type="button" tone="red" onClick={() => setUploads((prev) => prev.filter((u) => u.id !== item.id))}>
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-ui border bg-surface">
+                    <div className="h-full bg-pastelGreen transition-all" style={{ width: `${item.progress}%` }} />
+                  </div>
+                  <div className="mt-1 text-muted">
+                    {item.status === "failed" ? `Upload failed: ${item.error ?? "unknown error"}` : `${item.status} (${item.progress}%)`}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+          <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={4} placeholder="Ask Nova to do something..." />
+          <div className="flex justify-end gap-2">
+            <Select value={model ? "custom" : "default"} onChange={(event) => {
+              if (event.target.value === "default") setModel("");
+            }} className="max-w-[180px]">
+              <option value="default">Default Model</option>
+              <option value="custom">Custom Override</option>
+            </Select>
+            <Button type="submit" tone="green" disabled={loading}>
+              {loading ? "Streaming..." : "Send"}
+            </Button>
+          </div>
+        </form>
+      </Card>
       {lightbox ? (
-        <Lightbox
-          media={lightbox.medias[lightbox.index]}
-          hasPrev={lightbox.index > 0}
-          hasNext={lightbox.index < lightbox.medias.length - 1}
-          onClose={() => setLightbox(null)}
-          onPrev={() =>
-            setLightbox((prev) =>
-              prev ? { ...prev, index: Math.max(0, prev.index - 1) } : prev
-            )
-          }
-          onNext={() =>
-            setLightbox((prev) =>
-              prev ? { ...prev, index: Math.min(prev.medias.length - 1, prev.index + 1) } : prev
-            )
-          }
-        />
-      ) : null}
-    </main>
-  );
-}
-
-function MediaGallery({
-  medias,
-  onOpen
-}: {
-  medias: ChatMedia[];
-  onOpen: (index: number) => void;
-}) {
-  return (
-    <div
-      style={{
-        marginTop: 10,
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-        gap: 8
-      }}
-    >
-      {medias.map((media, index) => (
-        <button
-          key={`${media.url}-${index}`}
-          type="button"
-          onClick={() => onOpen(index)}
-          style={{
-            border: "1px solid #ddd",
-            borderRadius: 8,
-            overflow: "hidden",
-            padding: 0,
-            background: "#fff",
-            cursor: "pointer"
-          }}
-        >
-          {media.kind === "image" ? (
-            <img src={media.url} alt="chat media" style={{ width: "100%", height: 120, objectFit: "cover" }} />
-          ) : media.posterUrl ? (
-            <img src={media.posterUrl} alt="video poster" style={{ width: "100%", height: 120, objectFit: "cover" }} />
-          ) : (
-            <video
-              src={media.url}
-              style={{ width: "100%", height: 120, objectFit: "cover", background: "#000" }}
-              muted
-            />
-          )}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Lightbox({
-  media,
-  hasPrev,
-  hasNext,
-  onClose,
-  onPrev,
-  onNext
-}: {
-  media?: ChatMedia;
-  hasPrev: boolean;
-  hasNext: boolean;
-  onClose: () => void;
-  onPrev: () => void;
-  onNext: () => void;
-}) {
-  if (!media) {
-    return null;
-  }
-  return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.8)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 2000
-      }}
-    >
-      <div
-        onClick={(event) => event.stopPropagation()}
-        style={{ maxWidth: "90vw", maxHeight: "90vh", display: "grid", gap: 10 }}
-      >
-        {media.kind === "image" ? (
-          <img src={media.url} alt="lightbox media" style={{ maxWidth: "90vw", maxHeight: "80vh", objectFit: "contain" }} />
-        ) : (
-          <video
-            src={media.url}
-            poster={media.posterUrl}
-            controls
-            autoPlay
-            style={{ maxWidth: "90vw", maxHeight: "80vh", objectFit: "contain", background: "#000" }}
-          />
-        )}
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-          <button type="button" onClick={onClose} style={{ padding: "8px 12px" }}>
-            Close
-          </button>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" onClick={onPrev} disabled={!hasPrev} style={{ padding: "8px 12px" }}>
-              Prev
-            </button>
-            <button type="button" onClick={onNext} disabled={!hasNext} style={{ padding: "8px 12px" }}>
-              Next
-            </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
+          <div className="max-h-[92vh] w-full max-w-5xl rounded-ui border bg-surface p-3">
+            <div className="mb-2 flex items-center justify-between text-sm">
+              <span>
+                {lightbox.index + 1}/{lightbox.items.length}
+              </span>
+              <Button type="button" tone="red" onClick={() => setLightbox(null)}>
+                Close
+              </Button>
+            </div>
+            <div className="flex items-center justify-center">
+              {lightbox.items[lightbox.index]?.kind === "video" ? (
+                <video src={lightbox.items[lightbox.index]?.url} controls className="max-h-[78vh] w-full rounded-ui" />
+              ) : (
+                <img src={lightbox.items[lightbox.index]?.url} alt="preview" className="max-h-[78vh] rounded-ui object-contain" />
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const raw = String(reader.result ?? "");
-      const base64 = raw.includes(",") ? raw.split(",")[1] : raw;
-      resolve(base64);
-    };
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
-function extractMediaUrls(text: string): ChatMedia[] {
-  const matches = text.match(/https?:\/\/\S+/g) ?? [];
-  return matches
-    .map((url) => {
-      const kind = inferMediaKind(url);
-      if (!kind) return undefined;
-      return { url, kind };
-    })
-    .filter((item): item is ChatMedia => Boolean(item));
-}
-
-function inferMediaKind(url?: string): "image" | "video" | undefined {
-  if (!url) return undefined;
-  const lower = url.toLowerCase();
+function inferMediaKind(value?: string): "image" | "video" | undefined {
+  if (!value) return undefined;
+  const lower = value.toLowerCase();
   if (/\.(png|jpg|jpeg|webp|gif)(\?|$)/.test(lower) || lower.includes("/view?filename=")) {
     return "image";
   }
@@ -580,47 +587,142 @@ function inferMediaKind(url?: string): "image" | "video" | undefined {
   return undefined;
 }
 
-async function uploadSelectedFileWithProgress(
-  filename: string,
-  base64: string,
-  onProgress: (percent: number) => void
-): Promise<ChatMedia | undefined> {
-  return new Promise((resolve) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/api/media/upload");
-    xhr.setRequestHeader("content-type", "application/json");
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) {
-        onProgress(Math.max(1, Math.round((event.loaded / event.total) * 100)));
-      }
-    };
-    xhr.onerror = () => resolve(undefined);
-    xhr.onload = () => {
-      if (xhr.status < 200 || xhr.status >= 300) {
-        resolve(undefined);
-        return;
-      }
-      try {
-        const payload = JSON.parse(xhr.responseText) as {
-          url?: string;
-          posterUrl?: string;
-          kind?: "image" | "video" | "other";
-        };
-        const url = payload.url;
-        const inferred = payload.kind === "video" || payload.kind === "image" ? payload.kind : inferMediaKind(url);
-        if (!url || !inferred) {
-          resolve(undefined);
-          return;
-        }
-        resolve({
-          url,
-          kind: inferred,
-          posterUrl: payload.posterUrl
-        });
-      } catch {
-        resolve(undefined);
-      }
-    };
-    xhr.send(JSON.stringify({ filename, base64 }));
+function extractMediaFromText(text: string): MediaItem[] {
+  const urls = Array.from(
+    new Set(
+      (text.match(/https?:\/\/[^\s)]+|\/v1\/media\/files\/[^\s)]+/g) ?? []).map((item) => item.trim())
+    )
+  );
+  return urls
+    .map((url) => {
+      const kind = inferMediaKind(url);
+      if (!kind) return undefined;
+      return { url, kind } satisfies MediaItem;
+    })
+    .filter((item): item is MediaItem => Boolean(item));
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+function extractThinking(input: {
+  text: string;
+  firstTokenMs?: number;
+  provider?: string;
+  model?: string;
+  hideProviderModel?: boolean;
+  providerTps?: number;
+}): {
+  visible: string;
+  thinking: string;
+  firstTokenMs?: number;
+  provider?: string;
+  model?: string;
+  hideProviderModel?: boolean;
+  providerTps?: number;
+} {
+  const text = input.text;
+  const pattern = /<thinking>([\s\S]*?)<\/thinking>/gi;
+  const thinkingParts: string[] = [];
+  const visible = text.replace(pattern, (_, thought: string) => {
+    thinkingParts.push(thought.trim());
+    return "";
   });
+  return {
+    visible: visible.trim(),
+    thinking: thinkingParts.join("\n\n").trim(),
+    firstTokenMs: input.firstTokenMs,
+    provider: input.provider,
+    model: input.model,
+    hideProviderModel: input.hideProviderModel,
+    providerTps: input.providerTps
+  };
+}
+
+function randomId(): string {
+  return Math.random().toString(16).slice(2);
+}
+
+function estimateTokens(text: string): number {
+  return Math.max(1, Math.ceil(text.length / 4));
+}
+
+async function readSseStream(
+  body: ReadableStream<Uint8Array>,
+  onPartial: (text: string) => void
+): Promise<{ text: string; firstTokenMs?: number; provider?: string; model?: string; hideProviderModel?: boolean; providerTps?: number }> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let sseBuffer = "";
+  let eventName = "";
+  let currentData = "";
+  let fullText = "";
+  let startedAt = Date.now();
+  let firstTokenMs: number | undefined;
+  let provider: string | undefined;
+  let model: string | undefined;
+  let hideProviderModel = false;
+  let providerTps: number | undefined;
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    sseBuffer += decoder.decode(value, { stream: true });
+    const lines = sseBuffer.split(/\r?\n/);
+    sseBuffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        eventName = line.slice(6).trim();
+        continue;
+      }
+      if (line.startsWith("data:")) {
+        currentData += line.slice(5).trim();
+        continue;
+      }
+      if (line.trim() === "") {
+        if (eventName && currentData) {
+          const payload = JSON.parse(currentData) as {
+            token?: string;
+            reply?: string;
+            provider?: string;
+            model?: string;
+            hideProviderModelInStats?: boolean;
+            firstTokenMs?: number;
+            tokensPerSecond?: number;
+          };
+          if (eventName === "start") {
+            startedAt = Date.now();
+            provider = payload.provider;
+            model = payload.model;
+            hideProviderModel = payload.hideProviderModelInStats === true;
+          }
+          if (eventName === "token" && payload.token) {
+            if (firstTokenMs === undefined) {
+              firstTokenMs = Date.now() - startedAt;
+            }
+            fullText += payload.token;
+            onPartial(fullText);
+          }
+          if (eventName === "done" && payload.reply) {
+            fullText = payload.reply;
+            provider = payload.provider ?? provider;
+            firstTokenMs = payload.firstTokenMs ?? firstTokenMs;
+            providerTps = payload.tokensPerSecond ?? providerTps;
+            onPartial(fullText);
+          }
+        }
+        eventName = "";
+        currentData = "";
+      }
+    }
+  }
+  return { text: fullText, firstTokenMs, provider, model, hideProviderModel, providerTps };
 }

@@ -7,8 +7,20 @@ export async function middleware(request: NextRequest) {
   const protectedPath =
     pathname === "/" ||
     pathname.startsWith("/dashboard") ||
+    pathname.startsWith("/memory") ||
+    pathname.startsWith("/reports") ||
+    pathname.startsWith("/knowledge") ||
+    pathname.startsWith("/workflows") ||
+    pathname.startsWith("/cameras") ||
+    pathname.startsWith("/replay") ||
+    pathname.startsWith("/sandbox") ||
+    pathname.startsWith("/rollout") ||
+    pathname.startsWith("/voice") ||
+    pathname.startsWith("/ocr") ||
+    pathname.startsWith("/lab") ||
     pathname.startsWith("/settings") ||
     pathname.startsWith("/learning") ||
+    pathname.startsWith("/thoughts") ||
     pathname.startsWith("/emotion") ||
     pathname.startsWith("/security");
   let loginEnabled = true;
@@ -38,5 +50,25 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/login", "/dashboard/:path*", "/settings/:path*", "/learning/:path*", "/emotion/:path*", "/security/:path*"]
+  matcher: [
+    "/",
+    "/login",
+    "/dashboard/:path*",
+    "/memory/:path*",
+    "/reports/:path*",
+    "/knowledge/:path*",
+    "/workflows/:path*",
+    "/cameras/:path*",
+    "/replay/:path*",
+    "/sandbox/:path*",
+    "/rollout/:path*",
+    "/voice/:path*",
+    "/ocr/:path*",
+    "/lab/:path*",
+    "/settings/:path*",
+    "/learning/:path*",
+    "/thoughts/:path*",
+    "/emotion/:path*",
+    "/security/:path*"
+  ]
 };

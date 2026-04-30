@@ -2,6 +2,9 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Card } from "../../components/ui/card";
+import { Input } from "../../components/ui/input";
+import { Button } from "../../components/ui/button";
 
 type EmotionEvent = {
   id: string;
@@ -36,32 +39,31 @@ export default function EmotionPage() {
   const dates = Object.keys(itemsByDate).sort((a, b) => (a < b ? 1 : -1));
 
   return (
-    <main style={{ fontFamily: "sans-serif", margin: "2rem auto", maxWidth: 980 }}>
-      <h1>Emotion Timeline</h1>
-      <p>Track emotional transitions over time and what triggered them.</p>
-      <p>
-        <Link href="/dashboard">Dashboard</Link> · <Link href="/learning">Learning</Link> ·{" "}
-        <Link href="/settings">Settings</Link>
-      </p>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <input
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-2xl font-semibold">Emotion Timeline</h1>
+        <p className="text-sm text-muted">Track emotional transitions over time and what triggered them.</p>
+        <p className="text-sm text-muted"><Link href="/learning" className="underline">Back to Learning</Link></p>
+      </div>
+      <div className="flex gap-2">
+        <Input
           value={userId}
           onChange={(event) => setUserId(event.target.value)}
           placeholder="user id (e.g. nova-system)"
-          style={{ minWidth: 260, padding: 8 }}
+          className="max-w-sm"
         />
-        <button type="button" onClick={() => void load(userId)}>
+        <Button type="button" tone="purple" onClick={() => void load(userId)}>
           Refresh
-        </button>
+        </Button>
       </div>
-      {loading ? <p>Loading...</p> : null}
+      {loading ? <Card>Loading...</Card> : null}
       {!loading &&
         dates.map((date) => (
-          <section key={date} style={{ marginBottom: 18 }}>
-            <h2>{date}</h2>
-            <div style={{ display: "grid", gap: 10 }}>
+          <section key={date} className="space-y-2">
+            <h2 className="text-lg font-semibold">{date}</h2>
+            <div className="grid gap-2">
               {itemsByDate[date]?.map((item) => (
-                <article key={item.id} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 10 }}>
+                <article key={item.id} className="rounded-ui border bg-surface2 p-3">
                   <div>
                     <strong>{new Date(item.createdAt).toLocaleTimeString()}</strong> · {item.userId} · {item.source}
                   </div>
@@ -69,12 +71,12 @@ export default function EmotionPage() {
                     <strong>{item.label}</strong> (v={item.valence.toFixed(2)}, a={item.arousal.toFixed(2)})
                   </div>
                   <div>Trigger: {item.trigger}</div>
-                  {item.metadata ? <pre style={{ margin: 0 }}>{JSON.stringify(item.metadata, null, 2)}</pre> : null}
+                  {item.metadata ? <pre className="m-0 overflow-x-auto text-xs">{JSON.stringify(item.metadata, null, 2)}</pre> : null}
                 </article>
               ))}
             </div>
           </section>
         ))}
-    </main>
+    </div>
   );
 }

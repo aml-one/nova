@@ -1,5 +1,5 @@
 import type { ChatRequest, ModelProvider, ModelResponse, ProviderHealth } from "@nova/sdk/provider";
-import { chatViaOpenAICompatible } from "./openai-compatible.js";
+import { chatViaOpenAICompatible, streamViaOpenAICompatible } from "./openai-compatible.js";
 
 export class LMStudioProvider implements ModelProvider {
   readonly name = "lmstudio";
@@ -32,5 +32,19 @@ export class LMStudioProvider implements ModelProvider {
       temperature: request.temperature,
       maxTokens: request.maxTokens
     });
+  }
+
+  async streamChat(request: ChatRequest, onToken: (token: string) => void): Promise<ModelResponse> {
+    return streamViaOpenAICompatible(
+      {
+        provider: this.name,
+        endpoint: `${this.baseUrl}/chat/completions`,
+        model: request.model ?? this.model,
+        messages: request.messages,
+        temperature: request.temperature,
+        maxTokens: request.maxTokens
+      },
+      onToken
+    );
   }
 }

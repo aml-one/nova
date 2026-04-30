@@ -17,13 +17,27 @@ const DEFAULT_SETTINGS: AppSettings = {
     maxMemoryMb: Number(process.env.NOVA_SKILL_MAX_MB ?? "256")
   },
   web: {
-    loginEnabled: true
+    loginEnabled: true,
+    hideProviderModelInStats: false
   },
   learning: {
     enabled: process.env.NOVA_LEARNING_ENABLED === "true" || process.env.NOVA_LEARNING_ENABLED === undefined,
     idleMinutes: Number(process.env.NOVA_LEARNING_IDLE_MINUTES ?? "3"),
     intervalMs: Number(process.env.NOVA_LEARNING_INTERVAL_MS ?? "120000"),
     minFailuresForAutoImprove: Number(process.env.NOVA_LEARNING_MIN_FAILURES ?? "2")
+  },
+  costGovernor: {
+    enabled: process.env.NOVA_COST_GOVERNOR_ENABLED === "true",
+    dailyBudgetUsd: Number(process.env.NOVA_COST_GOVERNOR_DAILY_BUDGET_USD ?? "5"),
+    qualityTier:
+      process.env.NOVA_COST_GOVERNOR_QUALITY_TIER === "high" || process.env.NOVA_COST_GOVERNOR_QUALITY_TIER === "economy"
+        ? process.env.NOVA_COST_GOVERNOR_QUALITY_TIER
+        : "balanced",
+    providerPricing: {
+      ollamaPer1k: Number(process.env.NOVA_COST_OLLAMA_PER_1K ?? "0.0002"),
+      lmstudioPer1k: Number(process.env.NOVA_COST_LMSTUDIO_PER_1K ?? "0.001"),
+      copilotPer1k: Number(process.env.NOVA_COST_COPILOT_PER_1K ?? "0.008")
+    }
   },
   messagingAccess: {
     novaPhoneNumber: process.env.NOVA_PHONE_NUMBER ?? "",
@@ -44,7 +58,32 @@ const DEFAULT_SETTINGS: AppSettings = {
     enabled: process.env.NOVA_IDENTITY_BACKUP_ENABLED === "true",
     intervalDays: Number(process.env.NOVA_IDENTITY_BACKUP_INTERVAL_DAYS ?? "1"),
     labelPrefix: process.env.NOVA_IDENTITY_BACKUP_LABEL_PREFIX ?? "nova-core"
+  },
+  models: {
+    defaultByProvider: {
+      ollama: process.env.OLLAMA_MODEL ?? "",
+      lmstudio: process.env.LMSTUDIO_MODEL ?? "",
+      copilot: process.env.COPILOT_MODEL ?? ""
+    }
+  },
+  copilot: {
+    baseUrl: process.env.COPILOT_BASE_URL ?? "",
+    apiKey: process.env.COPILOT_API_KEY ?? "",
+    defaultModel: process.env.COPILOT_MODEL ?? "gpt-4o-mini"
+  },
+  updates: {
+    enabled: process.env.NOVA_UPDATES_ENABLED === "true",
+    checkIntervalMs: Number(process.env.NOVA_UPDATES_INTERVAL_MS ?? String(30 * 60 * 1000)),
+    repoOwner: process.env.NOVA_UPDATES_REPO_OWNER ?? "",
+    repoName: process.env.NOVA_UPDATES_REPO_NAME ?? "",
+    channel: process.env.NOVA_UPDATES_CHANNEL === "beta" ? "beta" : "stable",
+    autoApply: process.env.NOVA_UPDATES_AUTO_APPLY === "true"
+  },
+  offlineMode: {
+    enabled: process.env.NOVA_OFFLINE_MODE === "true"
   }
+  ,
+  skillSettings: {}
 };
 
 export class SettingsService {
@@ -81,7 +120,8 @@ export class SettingsService {
         maxMemoryMb: update.skills?.maxMemoryMb ?? current.skills.maxMemoryMb
       },
       web: {
-        loginEnabled: update.web?.loginEnabled ?? current.web.loginEnabled
+        loginEnabled: update.web?.loginEnabled ?? current.web.loginEnabled,
+        hideProviderModelInStats: update.web?.hideProviderModelInStats ?? current.web.hideProviderModelInStats
       },
       learning: {
         enabled: update.learning?.enabled ?? current.learning.enabled,
@@ -89,6 +129,16 @@ export class SettingsService {
         intervalMs: update.learning?.intervalMs ?? current.learning.intervalMs,
         minFailuresForAutoImprove:
           update.learning?.minFailuresForAutoImprove ?? current.learning.minFailuresForAutoImprove
+      },
+      costGovernor: {
+        enabled: update.costGovernor?.enabled ?? current.costGovernor.enabled,
+        dailyBudgetUsd: update.costGovernor?.dailyBudgetUsd ?? current.costGovernor.dailyBudgetUsd,
+        qualityTier: update.costGovernor?.qualityTier ?? current.costGovernor.qualityTier,
+        providerPricing: {
+          ollamaPer1k: update.costGovernor?.providerPricing?.ollamaPer1k ?? current.costGovernor.providerPricing.ollamaPer1k,
+          lmstudioPer1k: update.costGovernor?.providerPricing?.lmstudioPer1k ?? current.costGovernor.providerPricing.lmstudioPer1k,
+          copilotPer1k: update.costGovernor?.providerPricing?.copilotPer1k ?? current.costGovernor.providerPricing.copilotPer1k
+        }
       },
       messagingAccess: {
         novaPhoneNumber: update.messagingAccess?.novaPhoneNumber ?? current.messagingAccess.novaPhoneNumber,
@@ -106,7 +156,31 @@ export class SettingsService {
         enabled: update.identityBackup?.enabled ?? current.identityBackup.enabled,
         intervalDays: update.identityBackup?.intervalDays ?? current.identityBackup.intervalDays,
         labelPrefix: update.identityBackup?.labelPrefix ?? current.identityBackup.labelPrefix
-      }
+      },
+      models: {
+        defaultByProvider: {
+          ollama: update.models?.defaultByProvider?.ollama ?? current.models.defaultByProvider.ollama,
+          lmstudio: update.models?.defaultByProvider?.lmstudio ?? current.models.defaultByProvider.lmstudio,
+          copilot: update.models?.defaultByProvider?.copilot ?? current.models.defaultByProvider.copilot
+        }
+      },
+      copilot: {
+        baseUrl: update.copilot?.baseUrl ?? current.copilot.baseUrl,
+        apiKey: update.copilot?.apiKey ?? current.copilot.apiKey,
+        defaultModel: update.copilot?.defaultModel ?? current.copilot.defaultModel
+      },
+      updates: {
+        enabled: update.updates?.enabled ?? current.updates.enabled,
+        checkIntervalMs: update.updates?.checkIntervalMs ?? current.updates.checkIntervalMs,
+        repoOwner: update.updates?.repoOwner ?? current.updates.repoOwner,
+        repoName: update.updates?.repoName ?? current.updates.repoName,
+        channel: update.updates?.channel ?? current.updates.channel,
+        autoApply: update.updates?.autoApply ?? current.updates.autoApply
+      },
+      offlineMode: {
+        enabled: update.offlineMode?.enabled ?? current.offlineMode.enabled
+      },
+      skillSettings: update.skillSettings ?? current.skillSettings
     });
     this.repo.upsert(next);
     return next;
@@ -132,7 +206,8 @@ export class SettingsService {
         maxMemoryMb: clampInt(settings.skills?.maxMemoryMb, 64, 4096, DEFAULT_SETTINGS.skills.maxMemoryMb)
       },
       web: {
-        loginEnabled: settings.web?.loginEnabled !== false
+        loginEnabled: settings.web?.loginEnabled !== false,
+        hideProviderModelInStats: settings.web?.hideProviderModelInStats === true
       },
       learning: {
         enabled: settings.learning?.enabled !== false,
@@ -144,6 +219,19 @@ export class SettingsService {
           20,
           DEFAULT_SETTINGS.learning.minFailuresForAutoImprove
         )
+      },
+      costGovernor: {
+        enabled: settings.costGovernor?.enabled === true,
+        dailyBudgetUsd: clampInt(Math.floor(settings.costGovernor?.dailyBudgetUsd ?? 0), 1, 1000, 5),
+        qualityTier:
+          settings.costGovernor?.qualityTier === "high" || settings.costGovernor?.qualityTier === "economy"
+            ? settings.costGovernor.qualityTier
+            : "balanced",
+        providerPricing: {
+          ollamaPer1k: clampFloat(settings.costGovernor?.providerPricing?.ollamaPer1k, 0, 1, 0.0002),
+          lmstudioPer1k: clampFloat(settings.costGovernor?.providerPricing?.lmstudioPer1k, 0, 1, 0.001),
+          copilotPer1k: clampFloat(settings.costGovernor?.providerPricing?.copilotPer1k, 0, 1, 0.008)
+        }
       },
       messagingAccess: {
         novaPhoneNumber: normalizePhone(settings.messagingAccess?.novaPhoneNumber),
@@ -164,7 +252,34 @@ export class SettingsService {
         enabled: settings.identityBackup?.enabled === true,
         intervalDays: clampInt(settings.identityBackup?.intervalDays, 1, 30, 1),
         labelPrefix: normalizeLabelPrefix(settings.identityBackup?.labelPrefix)
-      }
+      },
+      models: {
+        defaultByProvider: {
+          ollama: String(settings.models?.defaultByProvider?.ollama ?? "").trim(),
+          lmstudio: String(settings.models?.defaultByProvider?.lmstudio ?? "").trim(),
+          copilot: String(settings.models?.defaultByProvider?.copilot ?? "").trim()
+        }
+      },
+      copilot: {
+        baseUrl: String(settings.copilot?.baseUrl ?? "").trim(),
+        apiKey: String(settings.copilot?.apiKey ?? "").trim(),
+        defaultModel: String(settings.copilot?.defaultModel ?? "gpt-4o-mini").trim()
+      },
+      updates: {
+        enabled: settings.updates?.enabled === true,
+        checkIntervalMs: clampInt(settings.updates?.checkIntervalMs, 60_000, 24 * 60 * 60 * 1000, 30 * 60 * 1000),
+        repoOwner: String(settings.updates?.repoOwner ?? "").trim(),
+        repoName: String(settings.updates?.repoName ?? "").trim(),
+        channel: settings.updates?.channel === "beta" ? "beta" : "stable",
+        autoApply: settings.updates?.autoApply === true
+      },
+      offlineMode: {
+        enabled: settings.offlineMode?.enabled === true
+      },
+      skillSettings:
+        settings.skillSettings && typeof settings.skillSettings === "object"
+          ? settings.skillSettings
+          : {}
     };
   }
 }
@@ -232,6 +347,16 @@ function clampInt(value: number | undefined, min: number, max: number, fallback:
   if (intValue < min) return min;
   if (intValue > max) return max;
   return intValue;
+}
+
+function clampFloat(value: number | undefined, min: number, max: number, fallback: number): number {
+  const numberValue = Number(value);
+  if (!Number.isFinite(numberValue)) {
+    return fallback;
+  }
+  if (numberValue < min) return min;
+  if (numberValue > max) return max;
+  return Number(numberValue.toFixed(6));
 }
 
 function normalizePhone(value: string | undefined): string {

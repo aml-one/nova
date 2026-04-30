@@ -18,12 +18,23 @@ type AppSettingsPayload = {
   };
   web?: {
     loginEnabled?: boolean;
+    hideProviderModelInStats?: boolean;
   };
   learning?: {
     enabled?: boolean;
     idleMinutes?: number;
     intervalMs?: number;
     minFailuresForAutoImprove?: number;
+  };
+  costGovernor?: {
+    enabled?: boolean;
+    dailyBudgetUsd?: number;
+    qualityTier?: "high" | "balanced" | "economy";
+    providerPricing?: {
+      ollamaPer1k?: number;
+      lmstudioPer1k?: number;
+      copilotPer1k?: number;
+    };
   };
   messagingAccess?: {
     novaPhoneNumber?: string;
@@ -50,6 +61,30 @@ type AppSettingsPayload = {
     intervalDays?: number;
     labelPrefix?: string;
   };
+  models?: {
+    defaultByProvider?: {
+      ollama?: string;
+      lmstudio?: string;
+      copilot?: string;
+    };
+  };
+  copilot?: {
+    baseUrl?: string;
+    apiKey?: string;
+    defaultModel?: string;
+  };
+  updates?: {
+    enabled?: boolean;
+    checkIntervalMs?: number;
+    repoOwner?: string;
+    repoName?: string;
+    channel?: "stable" | "beta";
+    autoApply?: boolean;
+  };
+  offlineMode?: {
+    enabled?: boolean;
+  };
+  skillSettings?: Record<string, Record<string, unknown>>;
 };
 
 export async function GET(request: Request) {

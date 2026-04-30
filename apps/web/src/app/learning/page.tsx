@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Card } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
 
 type LearningItem = {
   id: string;
@@ -44,41 +46,43 @@ export default function LearningPage() {
   const dates = Object.keys(itemsByDate).sort((a, b) => (a < b ? 1 : -1));
 
   return (
-    <main style={{ fontFamily: "sans-serif", margin: "2rem auto", maxWidth: 980 }}>
-      <h1>Learning Timeline</h1>
-      <p>Detailed self-improvement events grouped by date.</p>
-      <p>
-        <Link href="/dashboard">Dashboard</Link> · <Link href="/settings">Settings</Link> · <Link href="/emotion">Emotion</Link>
-      </p>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button type="button" onClick={() => void load()}>
-          Refresh
-        </button>
-        <button type="button" onClick={() => void runCycleNow()} disabled={running}>
-          {running ? "Running..." : "Run Learning Cycle Now"}
-        </button>
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-2xl font-semibold">Learning Timeline</h1>
+        <p className="text-sm text-muted">Detailed self-improvement events grouped by date.</p>
+        <p className="text-sm text-muted">
+          <Link href="/emotion" className="underline">Open Emotion Timeline</Link>
+        </p>
       </div>
-      {status ? <p>{status}</p> : null}
-      {loading ? <p>Loading...</p> : null}
+      <div className="flex gap-2">
+        <Button type="button" tone="blue" onClick={() => void load()}>
+          Refresh
+        </Button>
+        <Button type="button" tone="green" onClick={() => void runCycleNow()} disabled={running}>
+          {running ? "Running..." : "Run Learning Cycle"}
+        </Button>
+      </div>
+      {status ? <Card>{status}</Card> : null}
+      {loading ? <Card>Loading...</Card> : null}
       {!loading &&
         dates.map((date) => (
-          <section key={date} style={{ marginBottom: 18 }}>
-            <h2>{date}</h2>
-            <div style={{ display: "grid", gap: 10 }}>
+          <section key={date} className="space-y-2">
+            <h2 className="text-lg font-semibold">{date}</h2>
+            <div className="grid gap-2">
               {itemsByDate[date]?.map((item) => (
-                <article key={item.id} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 10 }}>
+                <article key={item.id} className="rounded-ui border bg-surface2 p-3">
                   <div>
                     <strong>{new Date(item.at).toLocaleTimeString()}</strong> · {item.category} ·{" "}
                     {item.accepted ? "accepted" : "not accepted"}
                   </div>
                   <div>{item.proposal}</div>
-                  {item.result ? <div style={{ color: "#444" }}>Result: {item.result}</div> : null}
-                  {item.details ? <pre style={{ margin: 0 }}>{JSON.stringify(item.details, null, 2)}</pre> : null}
+                  {item.result ? <div className="text-muted">Result: {item.result}</div> : null}
+                  {item.details ? <pre className="m-0 overflow-x-auto text-xs">{JSON.stringify(item.details, null, 2)}</pre> : null}
                 </article>
               ))}
             </div>
           </section>
         ))}
-    </main>
+    </div>
   );
 }

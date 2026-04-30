@@ -6,6 +6,12 @@ export type RegisteredSkill = {
   name: string;
   description: string;
   permissions: string[];
+  settingsTab?: {
+    id: string;
+    label: string;
+    tone?: "blue" | "purple" | "orange" | "green" | "pink" | "yellow";
+    description?: string;
+  };
   run: (input: unknown) => Promise<unknown>;
   sourcePath?: string;
 };

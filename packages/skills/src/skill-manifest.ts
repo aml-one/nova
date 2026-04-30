@@ -15,4 +15,10 @@ export type SkillManifest = {
   version: string;
   inputSchema?: JsonSchema;
   outputSchema?: JsonSchema;
+  settingsTab?: {
+    id: string;
+    label: string;
+    tone?: "blue" | "purple" | "orange" | "green" | "pink" | "yellow";
+    description?: string;
+  };
 };

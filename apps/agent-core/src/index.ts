@@ -20,6 +20,8 @@ import { LearningDaemon } from "./improvement/learning-daemon.js";
 import { EmotionService } from "./emotion/emotion-service.js";
 import { IdentityBackupService } from "./backup/identity-backup-service.js";
 import { IdentityBackupDaemon } from "./backup/identity-backup-daemon.js";
+import { UpdateManager } from "./update/update-manager.js";
+import { InstallStateService } from "./update/install-state.js";
 
 async function bootstrap(): Promise<void> {
   const settings = new SettingsService();
@@ -38,6 +40,9 @@ async function bootstrap(): Promise<void> {
   const mediaGeneration = new MediaGenerationRouter();
   const emotionService = new EmotionService();
   const identityBackupService = new IdentityBackupService();
+  const installState = new InstallStateService();
+  installState.ensureInitialized();
+  const currentVersion = process.env.NOVA_APP_VERSION ?? "0.1.0";
   const improvement = new SelfImprovementLoop(gitOps, skillRegistry, emotionService);
   await loadWorkspaceSkills(skillRegistry);
 
@@ -66,8 +71,25 @@ async function bootstrap(): Promise<void> {
     getSettings: () => settings.get().identityBackup
   });
   identityBackupDaemon.start();
+  const updateManager = new UpdateManager(
+    () => settings.get().updates,
+    () => installState.getInstalledAt(),
+    (isoTime) => installState.setInstalledAt(isoTime),
+    () => setTimeout(() => process.exit(0), 200)
+  );
+  updateManager.start();
   await orchestrator.start();
-  await startHttpServer({ orchestrator, settings, auth, modelRouter: router, improvement, skillRegistry });
+  await startHttpServer({
+    orchestrator,
+    settings,
+    auth,
+    modelRouter: router,
+    improvement,
+    skillRegistry,
+    updateManager,
+    appVersion: currentVersion,
+    installedAt: installState.getInstalledAt()
+  });
 }
 
 bootstrap().catch((error) => {

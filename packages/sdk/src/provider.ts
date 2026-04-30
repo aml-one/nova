@@ -14,6 +14,7 @@ export type ModelResponse = {
   content: string;
   provider: string;
   model?: string;
+  firstTokenMs?: number;
 };
 
 export type ProviderHealth = {
@@ -26,4 +27,5 @@ export interface ModelProvider {
   readonly name: string;
   health(): Promise<ProviderHealth>;
   chat(request: ChatRequest): Promise<ModelResponse>;
+  streamChat(request: ChatRequest, onToken: (token: string) => void): Promise<ModelResponse>;
 }

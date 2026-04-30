@@ -2,6 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { Card } from "../../components/ui/card";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { Select } from "../../components/ui/select";
 
 type Anomaly = {
   type: string;
@@ -89,24 +93,26 @@ export default function SecurityPage() {
   }
 
   return (
-    <main style={{ fontFamily: "sans-serif", margin: "2rem auto", maxWidth: 980 }}>
-      <h1>Security Center</h1>
-      <p>
-        <Link href="/dashboard">Dashboard</Link> · <Link href="/settings">Settings</Link>
-      </p>
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button type="button" onClick={() => void load()}>
-          Refresh
-        </button>
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-2xl font-semibold">Security Center</h1>
+        <p className="text-sm text-muted">
+          <Link href="/settings" className="underline">Open Settings</Link>
+        </p>
       </div>
-      {status ? <p>{status}</p> : null}
+      <div className="flex gap-2">
+        <Button type="button" tone="orange" onClick={() => void load()}>
+          Refresh
+        </Button>
+      </div>
+      {status ? <Card>{status}</Card> : null}
 
-      <section style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, marginBottom: 14 }}>
-        <h2>Live Anomalies</h2>
+      <Card>
+        <h2 className="mb-2 text-lg font-semibold">Live Anomalies</h2>
         {(analyze?.anomalies ?? []).length === 0 ? <p>No major anomalies detected.</p> : null}
-        <div style={{ display: "grid", gap: 8 }}>
+        <div className="grid gap-2">
           {(analyze?.anomalies ?? []).map((item, index) => (
-            <article key={`${item.type}-${index}`} style={{ border: "1px solid #eee", borderRadius: 6, padding: 10 }}>
+            <article key={`${item.type}-${index}`} className="rounded-ui border bg-surface p-3">
               <div>
                 <strong>{item.type}</strong> · {item.severity}
               </div>
@@ -114,81 +120,79 @@ export default function SecurityPage() {
             </article>
           ))}
         </div>
-        <h3>Recommendations</h3>
+        <h3 className="mt-3 font-semibold">Recommendations</h3>
         <ul>
           {(analyze?.recommendations ?? []).map((item, index) => (
             <li key={`${index}-${item}`}>{item}</li>
           ))}
         </ul>
-      </section>
+      </Card>
 
-      <section style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, marginBottom: 14 }}>
-        <h2>One-Click Actions (Approval Gated)</h2>
-        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr auto auto" }}>
-          <input
+      <Card>
+        <h2 className="mb-2 text-lg font-semibold">One-Click Actions</h2>
+        <div className="grid gap-2 md:grid-cols-[1fr_auto_auto]">
+          <Input
             value={ipToBlock}
             onChange={(event) => setIpToBlock(event.target.value)}
             placeholder="IP to block (e.g. 203.0.113.5)"
-            style={{ padding: 8 }}
           />
-          <button type="button" onClick={() => void runAction({ action: "block_ip", ipToBlock })}>
+          <Button type="button" tone="red" onClick={() => void runAction({ action: "block_ip", ipToBlock })}>
             Block IP
-          </button>
-          <button type="button" onClick={() => void runAction({ action: "harden" })}>
+          </Button>
+          <Button type="button" tone="yellow" onClick={() => void runAction({ action: "harden" })}>
             Harden Host
-          </button>
+          </Button>
         </div>
-        <input
+        <Input
           value={approvalId}
           onChange={(event) => setApprovalId(event.target.value)}
           placeholder="Optional approved approval ID"
-          style={{ marginTop: 8, width: "100%", padding: 8 }}
+          className="mt-2"
         />
-      </section>
+      </Card>
 
-      <section style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12, marginBottom: 14 }}>
-        <h2>Role Policy Tester</h2>
-        <p style={{ marginTop: 0, color: "#555" }}>
+      <Card>
+        <h2 className="mb-1 text-lg font-semibold">Role Policy Tester</h2>
+        <p className="text-sm text-muted">
           Simulate how a WhatsApp/Signal number is classified and what it can do.
         </p>
-        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "160px 1fr" }}>
-          <select value={simChannel} onChange={(event) => setSimChannel(event.target.value as "whatsapp" | "signal")} style={{ padding: 8 }}>
+        <div className="grid gap-2 md:grid-cols-[160px_1fr]">
+          <Select value={simChannel} onChange={(event) => setSimChannel(event.target.value as "whatsapp" | "signal")}>
             <option value="whatsapp">WhatsApp</option>
             <option value="signal">Signal</option>
-          </select>
-          <input
+          </Select>
+          <Input
             value={simPhone}
             onChange={(event) => setSimPhone(event.target.value)}
             placeholder="+15551234567"
-            style={{ padding: 8 }}
           />
         </div>
-        <input
+        <Input
           value={simText}
           onChange={(event) => setSimText(event.target.value)}
           placeholder="Optional test message (e.g. /run ipconfig)"
-          style={{ marginTop: 8, width: "100%", padding: 8 }}
+          className="mt-2"
         />
-        <button type="button" onClick={() => void runRoleTest()} style={{ marginTop: 8 }}>
+        <Button type="button" tone="pink" onClick={() => void runRoleTest()} className="mt-2">
           Run Role Test
-        </button>
-        {simResult ? <pre style={{ marginTop: 8 }}>{JSON.stringify(simResult, null, 2)}</pre> : null}
-      </section>
+        </Button>
+        {simResult ? <pre className="mt-2 overflow-x-auto text-xs">{JSON.stringify(simResult, null, 2)}</pre> : null}
+      </Card>
 
-      <section style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
-        <h2>Security Audit History</h2>
-        <div style={{ display: "grid", gap: 8 }}>
+      <Card>
+        <h2 className="mb-2 text-lg font-semibold">Security Audit History</h2>
+        <div className="grid gap-2">
           {history.map((item) => (
-            <article key={item.id} style={{ border: "1px solid #eee", borderRadius: 6, padding: 10 }}>
+            <article key={item.id} className="rounded-ui border bg-surface p-3">
               <div>
                 <strong>{item.action}</strong> · {item.status} · {new Date(item.createdAt).toLocaleString()}
               </div>
               <div>Actor: {item.actor ?? "-"}</div>
-              {item.details ? <pre style={{ margin: 0 }}>{JSON.stringify(item.details, null, 2)}</pre> : null}
+              {item.details ? <pre className="m-0 overflow-x-auto text-xs">{JSON.stringify(item.details, null, 2)}</pre> : null}
             </article>
           ))}
         </div>
-      </section>
-    </main>
+      </Card>
+    </div>
   );
 }

@@ -54,16 +54,16 @@ export function EmotionBadge() {
       }
       style={{
         position: "fixed",
-        top: 10,
-        right: 10,
+        top: 64,
+        right: 16,
         zIndex: 3000,
         display: "flex",
         alignItems: "center",
         gap: 8,
-        border: "1px solid #ddd",
-        borderRadius: 999,
+        border: "1px solid var(--border-color, #ddd)",
+        borderRadius: 8,
         padding: "6px 10px",
-        background: "#fff",
+        background: "hsl(var(--surface-2))",
         boxShadow: "0 1px 4px rgba(0,0,0,0.08)"
       }}
     >

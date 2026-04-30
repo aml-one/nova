@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { EmotionBadge } from "../components/emotion-badge";
+import { ThemeProvider } from "../components/theme-provider";
+import { AppShell } from "../components/app-shell";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Nova Agent Platform",
@@ -11,8 +14,10 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <EmotionBadge />
-        {children}
+        <ThemeProvider>
+          <EmotionBadge />
+          <AppShell>{children}</AppShell>
+        </ThemeProvider>
       </body>
     </html>
   );

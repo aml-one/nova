@@ -1,5 +1,5 @@
 import type { ChatRequest, ModelProvider, ModelResponse, ProviderHealth } from "@nova/sdk/provider";
-import { chatViaOpenAICompatible } from "./openai-compatible.js";
+import { chatViaOpenAICompatible, streamViaOpenAICompatible } from "./openai-compatible.js";
 
 export class CopilotProvider implements ModelProvider {
   readonly name = "copilot";
@@ -48,5 +48,23 @@ export class CopilotProvider implements ModelProvider {
       temperature: request.temperature,
       maxTokens: request.maxTokens
     });
+  }
+
+  async streamChat(request: ChatRequest, onToken: (token: string) => void): Promise<ModelResponse> {
+    if (!this.baseUrl || !this.apiKey) {
+      throw new Error("copilot provider is not configured");
+    }
+    return streamViaOpenAICompatible(
+      {
+        provider: this.name,
+        endpoint: `${this.baseUrl}/chat/completions`,
+        model: request.model ?? this.model,
+        apiKey: this.apiKey,
+        messages: request.messages,
+        temperature: request.temperature,
+        maxTokens: request.maxTokens
+      },
+      onToken
+    );
   }
 }

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ChatMessage } from "@nova/sdk/provider";
 import { ModelRouter } from "../providers/router.js";
 import { MemoryService } from "../memory/memory-service.js";
 import { PersonaLoader } from "../persona/persona-loader.js";
@@ -17,6 +18,9 @@ import { MediaGenerationRouter } from "../media/media-generation-router.js";
 import { SettingsService } from "../settings/settings-service.js";
 import type { ChannelAccessProfile } from "../security/phone-access.js";
 import { EmotionService } from "../emotion/emotion-service.js";
+import { ThoughtRepository } from "../storage/repositories/thought-repository.js";
+import { getDatabase } from "../storage/sqlite.js";
+import type { AppSettings } from "../storage/repositories/settings-repository.js";
 
 type TaskOrchestratorDeps = {
   modelRouter: ModelRouter;
@@ -38,6 +42,7 @@ type TaskOrchestratorDeps = {
 export class TaskOrchestrator {
   private readonly runHistory = new RunHistoryRepository();
   private readonly approvals = new ApprovalService();
+  private readonly thoughtLog = new ThoughtRepository();
   private inFlightCount = 0;
   private lastActivityAt = Date.now();
 
@@ -55,21 +60,28 @@ export class TaskOrchestrator {
     correlationId?: string;
     imageUrl?: string;
     accessProfile?: ChannelAccessProfile;
+    model?: string;
+    onToken?: (token: string) => void;
   }): Promise<string> {
     this.inFlightCount += 1;
     this.lastActivityAt = Date.now();
     try {
     const startedAt = Date.now();
-    const runtimeSettings = this.deps.settingsService.get();
+    this.thoughtLog.append({
+      category: "chat",
+      title: "Incoming message",
+      content: `Channel=${input.channel}, text=${input.text.slice(0, 180)}`
+    });
+    const userId = this.deps.identityResolver.resolve({
+      channel: input.channel,
+      phoneNumber: input.phoneNumber
+    });
+    const runtimeSettings = applyRolloutCohortSettings(userId, this.deps.settingsService.get());
     if (this.deps.modelRouter.getActiveProvider() !== runtimeSettings.activeProvider) {
       this.deps.modelRouter.setActiveProvider(runtimeSettings.activeProvider);
     }
     this.deps.visionRouter.setProviderPriority(runtimeSettings.visionProviderPriority);
     this.deps.mediaGeneration.setProviderPriority(runtimeSettings.mediaProviderPriority);
-    const userId = this.deps.identityResolver.resolve({
-      channel: input.channel,
-      phoneNumber: input.phoneNumber
-    });
 
     const profile = this.deps.userProfiles.get(userId);
     const persona = this.deps.personaLoader.getPersonaForUser(userId, input.channel, profile);
@@ -84,6 +96,11 @@ export class TaskOrchestrator {
         return "You do not have permission to run shell commands.";
       }
       const command = input.text.replace("/run ", "").trim();
+      this.thoughtLog.append({
+        category: "chat",
+        title: "Shell task requested",
+        content: command
+      });
       return this.executeShellTask(runId, correlationId, userId, input.channel, command);
     }
 
@@ -97,13 +114,45 @@ export class TaskOrchestrator {
 
     if (input.text.startsWith("/multi ")) {
       const userPrompt = input.text.replace("/multi ", "").trim();
+      this.thoughtLog.append({
+        category: "chat",
+        title: "Multi-agent mode",
+        content: userPrompt.slice(0, 220)
+      });
       const multi = await this.runMultiAgent(userPrompt, persona.systemPrompt);
       this.deps.memoryService.appendTurn(userId, input.text, multi);
       return multi;
     }
 
+    if (isWebsiteCommand(input.text) || mentionsKnownWebsite(input.text)) {
+      const websiteSkill = this.deps.skillRegistry.get("website-builder");
+      if (websiteSkill) {
+        const mode = /\b(deploy|upload|publish)\b/i.test(input.text)
+          ? "deploy"
+          : /\b(delete|remove)\b/i.test(input.text)
+            ? "delete"
+            : /\b(list|show websites|what websites)\b/i.test(input.text)
+              ? "list"
+              : /\b(change|redesign|modify|update|background|button)\b/i.test(input.text)
+                ? "modify"
+                : "create";
+        const response = (await this.deps.skillRegistry.run("website-builder", { mode, prompt: input.text })) as
+          | { error?: string }
+          | undefined;
+        if (response?.error) {
+          return `Website builder error: ${response.error}`;
+        }
+        return typeof response === "string" ? response : JSON.stringify(response);
+      }
+    }
+
     const generation = await this.tryAutoMediaGeneration(input.text);
     if (generation) {
+      this.thoughtLog.append({
+        category: "chat",
+        title: "Auto media generation",
+        content: generation
+      });
       this.deps.memoryService.appendTurn(userId, input.text, generation);
       this.recordRunHistory({
         runId,
@@ -122,13 +171,31 @@ export class TaskOrchestrator {
       return generation;
     }
 
-    const result = await this.deps.modelRouter.chat([
+    const activeProvider = runtimeSettings.activeProvider;
+    const modelFromSettings =
+      runtimeSettings.models.defaultByProvider[
+        activeProvider as keyof typeof runtimeSettings.models.defaultByProvider
+      ];
+    const budgetExceeded = isBudgetExceeded(runtimeSettings.costGovernor);
+    const selectedModel =
+      runtimeSettings.costGovernor.enabled && budgetExceeded && runtimeSettings.costGovernor.qualityTier === "economy"
+        ? runtimeSettings.models.defaultByProvider.ollama || undefined
+        : input.model?.trim() || modelFromSettings || undefined;
+    this.thoughtLog.append({
+      category: "chat",
+      title: "Generating assistant response",
+      content: `provider=${activeProvider}, model=${selectedModel ?? "default"}`
+    });
+    const promptMessages: ChatMessage[] = [
       { role: "system", content: persona.systemPrompt },
       ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
       ...memoryContext,
       ...(await this.buildVisionContextIfNeeded(input.text, input.imageUrl, input.accessProfile)),
       { role: "user", content: input.text }
-    ]);
+    ];
+    const result = input.onToken
+      ? await this.deps.modelRouter.chatStream(promptMessages, input.onToken, selectedModel)
+      : await this.deps.modelRouter.chat(promptMessages, selectedModel);
 
     this.deps.memoryService.appendTurn(userId, input.text, result.content);
     this.recordRunHistory({
@@ -141,8 +208,12 @@ export class TaskOrchestrator {
       correlationId,
       latencyMs: Date.now() - startedAt,
       provider: result.provider,
+      modelName: result.model,
       tokenInCount: estimateTokens([persona.systemPrompt, ...memoryContext.map((m) => m.content), input.text].join(" ")),
       tokenOutCount: estimateTokens(result.content),
+      firstTokenMs: result.firstTokenMs,
+      tokensPerSecond: computeTokensPerSecond(result.content, Date.now() - startedAt),
+      costUsd: estimateCostUsd(result.provider, estimateTokens(result.content), runtimeSettings.costGovernor),
       toolTimingsMs: {}
     });
     this.deps.improvement.recordOutcome({
@@ -150,6 +221,12 @@ export class TaskOrchestrator {
       userId,
       task: input.text,
       success: true
+    });
+    this.thoughtLog.append({
+      category: "chat",
+      title: "Response generated",
+      content: result.content.slice(0, 280),
+      metadata: { provider: result.provider, latencyMs: Date.now() - startedAt }
     });
 
     return result.content;
@@ -316,6 +393,10 @@ export class TaskOrchestrator {
     provider?: string;
     tokenInCount?: number;
     tokenOutCount?: number;
+    modelName?: string;
+    firstTokenMs?: number;
+    tokensPerSecond?: number;
+    costUsd?: number;
     toolTimingsMs?: Record<string, number>;
   }): void {
     this.runHistory.save(input);
@@ -325,15 +406,15 @@ export class TaskOrchestrator {
     const planner = await this.deps.modelRouter.chat([
       { role: "system", content: `${systemPrompt}\nYou are the planner agent.` },
       { role: "user", content: prompt }
-    ]);
+    ], undefined);
     const executor = await this.deps.modelRouter.chat([
       { role: "system", content: `${systemPrompt}\nYou are the executor agent.` },
       { role: "user", content: planner.content }
-    ]);
+    ], undefined);
     const reviewer = await this.deps.modelRouter.chat([
       { role: "system", content: `${systemPrompt}\nYou are the reviewer agent.` },
       { role: "user", content: executor.content }
-    ]);
+    ], undefined);
     return reviewer.content;
   }
 
@@ -422,6 +503,49 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+function computeTokensPerSecond(text: string, elapsedMs: number): number {
+  if (elapsedMs <= 0) return 0;
+  const tokens = Math.max(1, estimateTokens(text));
+  return Number(((tokens * 1000) / elapsedMs).toFixed(2));
+}
+
+function estimateCostUsd(
+  provider: string,
+  tokenOut: number,
+  costGovernor: {
+    qualityTier: "high" | "balanced" | "economy";
+    providerPricing: { ollamaPer1k: number; lmstudioPer1k: number; copilotPer1k: number };
+  }
+): number {
+  const basePer1k =
+    provider === "copilot"
+      ? costGovernor.providerPricing.copilotPer1k
+      : provider === "lmstudio"
+        ? costGovernor.providerPricing.lmstudioPer1k
+        : costGovernor.providerPricing.ollamaPer1k;
+  const multiplier = costGovernor.qualityTier === "high" ? 1.25 : costGovernor.qualityTier === "economy" ? 0.85 : 1;
+  return Number(((tokenOut / 1000) * basePer1k * multiplier).toFixed(6));
+}
+
+function isBudgetExceeded(costGovernor: {
+  enabled: boolean;
+  dailyBudgetUsd: number;
+  qualityTier: "high" | "balanced" | "economy";
+}): boolean {
+  if (!costGovernor.enabled) return false;
+  const row = getDatabase()
+    .prepare(
+      `
+      SELECT COALESCE(SUM(cost_usd), 0) AS spent
+      FROM run_history
+      WHERE datetime(created_at) >= datetime('now', 'start of day')
+      `
+    )
+    .get() as { spent?: number } | undefined;
+  const spent = Number(row?.spent ?? 0);
+  return spent >= costGovernor.dailyBudgetUsd;
+}
+
 function isVisionIntent(text: string, imageUrl?: string): boolean {
   if (imageUrl) {
     return true;
@@ -461,4 +585,80 @@ function detectMediaGenerationIntent(text: string): "image" | "video" | undefine
     return "image";
   }
   return undefined;
+}
+
+function isWebsiteCommand(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.startsWith("/website") ||
+    (/\b(website|site|landing page|subdomain|caddy|deploy)\b/.test(lower) &&
+      /\b(create|build|deploy|upload|modify|redesign|change|edit|delete|list|publish)\b/.test(lower))
+  );
+}
+
+function mentionsKnownWebsite(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (!/\bwebsite|site\b/.test(lower)) return false;
+  const rows = getDatabase()
+    .prepare("SELECT name, domain, subdomain FROM website_projects ORDER BY datetime(created_at) DESC LIMIT 50")
+    .all() as Array<{ name?: string; domain?: string; subdomain?: string }>;
+  return rows.some((row) => {
+    const host = `${row.subdomain ?? ""}.${row.domain ?? ""}`.toLowerCase();
+    const name = (row.name ?? "").toLowerCase();
+    return (name.length > 2 && lower.includes(name)) || (host.length > 3 && lower.includes(host));
+  });
+}
+
+function applyRolloutCohortSettings(userId: string, base: AppSettings): AppSettings {
+  const row = getDatabase()
+    .prepare(
+      `
+      SELECT payload
+      FROM rollout_checkpoints
+      WHERE kind = 'settings'
+      ORDER BY datetime(created_at) DESC
+      LIMIT 1
+      `
+    )
+    .get() as { payload?: string } | undefined;
+  if (!row?.payload) return base;
+  let parsed: Record<string, unknown> | undefined;
+  try {
+    parsed = JSON.parse(row.payload) as Record<string, unknown>;
+  } catch {
+    return base;
+  }
+  const rolloutPercent = Math.max(0, Math.min(100, Number(parsed?.rolloutPercent ?? 0)));
+  const candidateSettings = (parsed?.candidateSettings ?? undefined) as Partial<AppSettings> | undefined;
+  if (!candidateSettings || rolloutPercent <= 0) return base;
+  const bucket = stableCohortBucket(userId);
+  if (bucket >= rolloutPercent) return base;
+  return {
+    ...base,
+    ...candidateSettings,
+    models: {
+      ...base.models,
+      ...(candidateSettings.models ?? {}),
+      defaultByProvider: {
+        ...base.models.defaultByProvider,
+        ...(candidateSettings.models?.defaultByProvider ?? {})
+      }
+    },
+    costGovernor: {
+      ...base.costGovernor,
+      ...(candidateSettings.costGovernor ?? {}),
+      providerPricing: {
+        ...base.costGovernor.providerPricing,
+        ...(candidateSettings.costGovernor?.providerPricing ?? {})
+      }
+    }
+  };
+}
+
+function stableCohortBucket(userId: string): number {
+  let hash = 0;
+  for (let i = 0; i < userId.length; i += 1) {
+    hash = (hash * 31 + userId.charCodeAt(i)) % 10000;
+  }
+  return hash % 100;
 }

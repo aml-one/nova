@@ -10,6 +10,12 @@ type RuntimeSkillModule = {
       name: string;
       description: string;
       permissions: string[];
+      settingsTab?: {
+        id: string;
+        label: string;
+        tone?: "blue" | "purple" | "orange" | "green" | "pink" | "yellow";
+        description?: string;
+      };
     };
     run: (input: unknown) => Promise<unknown>;
   };
@@ -19,6 +25,12 @@ type RuntimeSkillModule = {
       name: string;
       description: string;
       permissions: string[];
+      settingsTab?: {
+        id: string;
+        label: string;
+        tone?: "blue" | "purple" | "orange" | "green" | "pink" | "yellow";
+        description?: string;
+      };
     };
     run: (input: unknown) => Promise<unknown>;
   };
@@ -50,6 +62,7 @@ export async function loadWorkspaceSkills(registry: InMemorySkillRegistry): Prom
         name: runtimeSkill.manifest.name,
         description: runtimeSkill.manifest.description,
         permissions: runtimeSkill.manifest.permissions,
+        settingsTab: runtimeSkill.manifest.settingsTab,
         run: runtimeSkill.run,
         sourcePath: entryPath
       });

@@ -1,4 +1,5 @@
 import { getDatabase } from "../sqlite.js";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 export type AppSettings = {
   delegatedFolders: string[];
@@ -17,12 +18,23 @@ export type AppSettings = {
   };
   web: {
     loginEnabled: boolean;
+    hideProviderModelInStats: boolean;
   };
   learning: {
     enabled: boolean;
     idleMinutes: number;
     intervalMs: number;
     minFailuresForAutoImprove: number;
+  };
+  costGovernor: {
+    enabled: boolean;
+    dailyBudgetUsd: number;
+    qualityTier: "high" | "balanced" | "economy";
+    providerPricing: {
+      ollamaPer1k: number;
+      lmstudioPer1k: number;
+      copilotPer1k: number;
+    };
   };
   messagingAccess: {
     novaPhoneNumber: string;
@@ -49,6 +61,30 @@ export type AppSettings = {
     intervalDays: number;
     labelPrefix: string;
   };
+  models: {
+    defaultByProvider: {
+      ollama: string;
+      lmstudio: string;
+      copilot: string;
+    };
+  };
+  copilot: {
+    baseUrl: string;
+    apiKey: string;
+    defaultModel: string;
+  };
+  updates: {
+    enabled: boolean;
+    checkIntervalMs: number;
+    repoOwner: string;
+    repoName: string;
+    channel: "stable" | "beta";
+    autoApply: boolean;
+  };
+  offlineMode: {
+    enabled: boolean;
+  };
+  skillSettings: Record<string, Record<string, unknown>>;
 };
 
 const SETTINGS_KEY = "app_settings";
@@ -64,6 +100,10 @@ export class SettingsRepository {
     }
     try {
       const parsed = JSON.parse(row.value) as Partial<AppSettings>;
+      const copilotApiKeyRaw = typeof parsed.copilot?.apiKey === "string" ? parsed.copilot.apiKey : "";
+      const copilotApiKey = copilotApiKeyRaw.startsWith("enc:v1:")
+        ? decryptValue(copilotApiKeyRaw) ?? ""
+        : copilotApiKeyRaw;
       return {
         delegatedFolders: Array.isArray(parsed.delegatedFolders)
           ? parsed.delegatedFolders.filter((entry): entry is string => typeof entry === "string")
@@ -89,13 +129,27 @@ export class SettingsRepository {
           maxMemoryMb: Number(parsed.skills?.maxMemoryMb ?? 0)
         },
         web: {
-          loginEnabled: parsed.web?.loginEnabled !== false
+          loginEnabled: parsed.web?.loginEnabled !== false,
+          hideProviderModelInStats: parsed.web?.hideProviderModelInStats === true
         },
         learning: {
           enabled: parsed.learning?.enabled === true,
           idleMinutes: Number(parsed.learning?.idleMinutes ?? 0),
           intervalMs: Number(parsed.learning?.intervalMs ?? 0),
           minFailuresForAutoImprove: Number(parsed.learning?.minFailuresForAutoImprove ?? 0)
+        },
+        costGovernor: {
+          enabled: parsed.costGovernor?.enabled === true,
+          dailyBudgetUsd: Number(parsed.costGovernor?.dailyBudgetUsd ?? 0),
+          qualityTier:
+            parsed.costGovernor?.qualityTier === "high" || parsed.costGovernor?.qualityTier === "economy"
+              ? parsed.costGovernor.qualityTier
+              : "balanced",
+          providerPricing: {
+            ollamaPer1k: Number(parsed.costGovernor?.providerPricing?.ollamaPer1k ?? 0),
+            lmstudioPer1k: Number(parsed.costGovernor?.providerPricing?.lmstudioPer1k ?? 0),
+            copilotPer1k: Number(parsed.costGovernor?.providerPricing?.copilotPer1k ?? 0)
+          }
         },
         messagingAccess: {
           novaPhoneNumber: typeof parsed.messagingAccess?.novaPhoneNumber === "string" ? parsed.messagingAccess.novaPhoneNumber : "",
@@ -133,7 +187,36 @@ export class SettingsRepository {
           enabled: parsed.identityBackup?.enabled === true,
           intervalDays: Number(parsed.identityBackup?.intervalDays ?? 0),
           labelPrefix: typeof parsed.identityBackup?.labelPrefix === "string" ? parsed.identityBackup.labelPrefix : "nova-core"
-        }
+        },
+        models: {
+          defaultByProvider: {
+            ollama: typeof parsed.models?.defaultByProvider?.ollama === "string" ? parsed.models.defaultByProvider.ollama : "",
+            lmstudio:
+              typeof parsed.models?.defaultByProvider?.lmstudio === "string" ? parsed.models.defaultByProvider.lmstudio : "",
+            copilot:
+              typeof parsed.models?.defaultByProvider?.copilot === "string" ? parsed.models.defaultByProvider.copilot : ""
+          }
+        },
+        copilot: {
+          baseUrl: typeof parsed.copilot?.baseUrl === "string" ? parsed.copilot.baseUrl : "",
+          apiKey: copilotApiKey,
+          defaultModel: typeof parsed.copilot?.defaultModel === "string" ? parsed.copilot.defaultModel : ""
+        },
+        updates: {
+          enabled: parsed.updates?.enabled === true,
+          checkIntervalMs: Number(parsed.updates?.checkIntervalMs ?? 0),
+          repoOwner: typeof parsed.updates?.repoOwner === "string" ? parsed.updates.repoOwner : "",
+          repoName: typeof parsed.updates?.repoName === "string" ? parsed.updates.repoName : "",
+          channel: parsed.updates?.channel === "beta" ? "beta" : "stable",
+          autoApply: parsed.updates?.autoApply === true
+        },
+        offlineMode: {
+          enabled: parsed.offlineMode?.enabled === true
+        },
+        skillSettings:
+          parsed.skillSettings && typeof parsed.skillSettings === "object"
+            ? (parsed.skillSettings as Record<string, Record<string, unknown>>)
+            : {}
       };
     } catch {
       return undefined;
@@ -142,6 +225,13 @@ export class SettingsRepository {
 
   upsert(settings: AppSettings): void {
     const db = getDatabase();
+    const toStore: AppSettings = {
+      ...settings,
+      copilot: {
+        ...settings.copilot,
+        apiKey: settings.copilot.apiKey ? encryptValue(settings.copilot.apiKey) : ""
+      }
+    };
     db.prepare(
       `
       INSERT INTO app_settings (key, value, updated_at)
@@ -150,6 +240,40 @@ export class SettingsRepository {
         value = excluded.value,
         updated_at = CURRENT_TIMESTAMP
       `
-    ).run(SETTINGS_KEY, JSON.stringify(settings));
+    ).run(SETTINGS_KEY, JSON.stringify(toStore));
   }
+}
+
+function encryptValue(value: string): string {
+  const key = getEncryptionKey();
+  if (!key) return value;
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const encrypted = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `enc:v1:${iv.toString("base64")}:${authTag.toString("base64")}:${encrypted.toString("base64")}`;
+}
+
+function decryptValue(payload: string): string | undefined {
+  const key = getEncryptionKey();
+  if (!key) return undefined;
+  const parts = payload.split(":");
+  if (parts.length !== 5) return undefined;
+  try {
+    const iv = Buffer.from(parts[2], "base64");
+    const authTag = Buffer.from(parts[3], "base64");
+    const encrypted = Buffer.from(parts[4], "base64");
+    const decipher = createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(authTag);
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    return decrypted.toString("utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function getEncryptionKey(): Buffer | undefined {
+  const secret = process.env.NOVA_SETTINGS_SECRET?.trim();
+  if (!secret) return undefined;
+  return createHash("sha256").update(secret).digest();
 }

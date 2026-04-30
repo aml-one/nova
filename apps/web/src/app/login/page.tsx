@@ -50,6 +50,7 @@ export default function LoginPage() {
   return (
     <main style={{ fontFamily: "sans-serif", margin: "4rem auto", maxWidth: 460 }}>
       <h1>Nova Access</h1>
+      <p style={{ marginTop: -6, color: "#666" }}>Nova by AmL</p>
       <p>{mode === "setup" ? "Create admin credentials" : "Sign in with your admin credentials"}</p>
       <form onSubmit={onSubmit} style={{ display: "grid", gap: 10, marginTop: 16 }}>
         <input
@@ -73,6 +74,7 @@ export default function LoginPage() {
         </button>
       </form>
       {error ? <p style={{ color: "#b00020", marginTop: 12 }}>{error}</p> : null}
+      <p style={{ marginTop: 18, color: "#666", fontSize: 12 }}>Nova - Made by AmL</p>
     </main>
   );
 }
