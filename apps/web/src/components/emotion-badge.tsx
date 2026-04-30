@@ -53,18 +53,14 @@ export function EmotionBadge() {
           : "Nova emotional state unavailable"
       }
       style={{
-        position: "fixed",
-        top: 64,
-        right: 16,
-        zIndex: 3000,
         display: "flex",
         alignItems: "center",
         gap: 8,
-        border: "1px solid var(--border-color, #ddd)",
-        borderRadius: 8,
-        padding: "6px 10px",
-        background: "hsl(var(--surface-2))",
-        boxShadow: "0 1px 4px rgba(0,0,0,0.08)"
+        border: "1px solid rgba(148,163,184,0.5)",
+        borderRadius: 999,
+        padding: "4px 10px",
+        background: `linear-gradient(135deg, ${color}22, rgba(148,163,184,0.20))`,
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.25)"
       }}
     >
       <span
@@ -76,8 +72,8 @@ export function EmotionBadge() {
           display: "inline-block"
         }}
       />
-      <span style={{ fontSize: 12, fontWeight: 600 }}>
-        {state ? `Nova: ${state.label}` : "Nova: unknown"}
+      <span style={{ fontSize: 12, fontWeight: 700 }}>
+        {state ? `Nova's ${state.label}` : "Nova's unknown"}
       </span>
     </div>
   );

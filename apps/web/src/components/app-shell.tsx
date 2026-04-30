@@ -2,47 +2,59 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import type { IconType } from "react-icons";
+import {
+  FaCamera,
+  FaChartLine,
+  FaDatabase,
+  FaFlask,
+  FaFolderOpen,
+  FaHeart,
+  FaListCheck,
+  FaLock,
+  FaMessage,
+  FaMicrophone,
+  FaRepeat,
+  FaRobot,
+  FaRoute,
+  FaShieldHalved,
+  FaSliders,
+  FaTableList,
+  FaTimeline,
+  FaWandMagicSparkles,
+  FaBookOpen
+} from "react-icons/fa6";
 import { ThemeToggle } from "./theme-toggle";
+import { EmotionBadge } from "./emotion-badge";
 import { cn } from "../lib/cn";
 
 const links = [
-  { href: "/", label: "Chat", icon: "C" },
-  { href: "/dashboard", label: "Dashboard", icon: "D" },
-  { href: "/memory", label: "Memory", icon: "M" },
-  { href: "/reports", label: "Reports", icon: "R" },
-  { href: "/knowledge", label: "Knowledge", icon: "K" },
-  { href: "/workflows", label: "Workflows", icon: "W" },
-  { href: "/cameras", label: "Cameras", icon: "Cam" },
-  { href: "/replay", label: "Replay", icon: "Re" },
-  { href: "/sandbox", label: "Sandbox", icon: "S" },
-  { href: "/rollout", label: "Rollout", icon: "Ro" },
-  { href: "/voice", label: "Voice", icon: "V" },
-  { href: "/ocr", label: "OCR", icon: "O" },
-  { href: "/settings", label: "Settings", icon: "Set" },
-  { href: "/lab", label: "Lab", icon: "L" },
-  { href: "/learning", label: "Learning", icon: "Le" },
-  { href: "/thoughts", label: "Thoughts", icon: "T" },
-  { href: "/emotion", label: "Emotion", icon: "E" },
-  { href: "/security", label: "Security", icon: "Sec" }
-];
+  { href: "/", label: "Chat", icon: FaMessage, subtitle: "Main conversation and media chat with Nova." },
+  { href: "/dashboard", label: "Dashboard", icon: FaChartLine, subtitle: "Run telemetry, latency, throughput, and cost overview." },
+  { href: "/memory", label: "Memory", icon: FaDatabase, subtitle: "Pin and manage durable memory cards for Nova." },
+  { href: "/reports", label: "Reports", icon: FaBookOpen, subtitle: "Weekly learning summaries and overnight digests." },
+  { href: "/knowledge", label: "Knowledge", icon: FaRoute, subtitle: "Entity and relationship graph from long-term memory." },
+  { href: "/workflows", label: "Workflows", icon: FaListCheck, subtitle: "Build if-this-then-that automations for Nova tasks." },
+  { href: "/cameras", label: "Cameras", icon: FaCamera, subtitle: "Camera timeline events and live semantic alerts." },
+  { href: "/replay", label: "Replay", icon: FaRepeat, subtitle: "Fork prior runs and continue alternate chat branches." },
+  { href: "/sandbox", label: "Sandbox", icon: FaShieldHalved, subtitle: "Simulate risky commands before execution." },
+  { href: "/rollout", label: "Rollout", icon: FaTimeline, subtitle: "Stage, checkpoint, and rollback settings changes." },
+  { href: "/voice", label: "Voice", icon: FaMicrophone, subtitle: "Wake-word bridge and voice integration checks." },
+  { href: "/ocr", label: "OCR", icon: FaTableList, subtitle: "Extract text and tables from local documents." },
+  { href: "/skills", label: "Skills", icon: FaWandMagicSparkles, subtitle: "Browse loaded skills and their capabilities." },
+  { href: "/settings", label: "Settings", icon: FaSliders, subtitle: "Configure providers, channels, safety, and UI." },
+  { href: "/lab", label: "Lab", icon: FaFlask, subtitle: "Advanced experiments, policy tests, and diagnostics." },
+  { href: "/learning", label: "Learning", icon: FaRobot, subtitle: "Self-improvement events and autonomous learning runs." },
+  { href: "/thoughts", label: "Thoughts", icon: FaFolderOpen, subtitle: "Live stream of internal thought events." },
+  { href: "/emotion", label: "Emotion", icon: FaHeart, subtitle: "Emotion timeline and state transitions." },
+  { href: "/security", label: "Security", icon: FaLock, subtitle: "Security center actions, anomalies, and audit history." }
+] as const;
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const [version, setVersion] = useState("...");
-  const [installedAt, setInstalledAt] = useState<string | null>(null);
   const [navCollapsed, setNavCollapsed] = useState(false);
-
-  useEffect(() => {
-    void (async () => {
-      const response = await fetch("/api/system/version");
-      const data = (await response.json()) as { version?: string; installedAt?: string };
-      if (response.ok) {
-        setVersion(data.version ?? "0.0.0");
-        setInstalledAt(data.installedAt ?? null);
-      }
-    })();
-  }, []);
+  const activeLink = links.find((link) => link.href === pathname) ?? links[0];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-surface via-surface to-surface2">
@@ -80,19 +92,24 @@ export function AppShell({ children }: { children: ReactNode }) {
               )}
               title={link.label}
             >
-              <span className="inline-flex min-w-[22px] justify-center font-semibold">{link.icon}</span>
+              <span className="inline-flex min-w-[22px] justify-center font-semibold">
+                <link.icon className="h-3.5 w-3.5" />
+              </span>
               {!navCollapsed ? <span>{link.label}</span> : null}
             </Link>
           ))}
         </nav>
       </aside>
       <header className={cn("sticky top-0 z-30 border-b bg-surface/90 backdrop-blur", navCollapsed ? "ml-14" : "ml-56")}>
-        <div className="flex items-center justify-end gap-2 px-4 py-2">
-          <span className="rounded-ui border bg-surface2 px-2 py-1 text-xs text-muted">v{version}</span>
-          <span className="rounded-ui border bg-surface2 px-2 py-1 text-xs text-muted">
-            Installed {installedAt ? new Date(installedAt).toLocaleDateString() : "-"}
-          </span>
+        <div className="flex items-center justify-between gap-2 px-4 py-2">
+          <div>
+            <div className="text-sm font-semibold">{activeLink.label}</div>
+            <div className="text-xs text-slate-500">{activeLink.subtitle}</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <EmotionBadge />
           <ThemeToggle />
+          </div>
         </div>
       </header>
       <main className={cn("px-4 py-6", navCollapsed ? "ml-14" : "ml-56")}>{children}</main>

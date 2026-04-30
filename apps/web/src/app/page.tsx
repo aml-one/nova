@@ -3,9 +3,9 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { FaSpinner } from "react-icons/fa6";
 import { Card } from "../components/ui/card";
 import { Textarea } from "../components/ui/textarea";
-import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -43,7 +43,6 @@ type ChatSession = {
   title: string;
   createdAt: string;
   updatedAt: string;
-  model: string;
   turns: ChatTurn[];
 };
 type PendingUpload = {
@@ -57,7 +56,6 @@ type PendingUpload = {
 
 export default function HomePage() {
   const [message, setMessage] = useState("");
-  const [model, setModel] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
@@ -183,7 +181,6 @@ export default function HomePage() {
         setSessions(parsed);
         setActiveSessionId(parsed[0].id);
         setTurns(parsed[0].turns ?? []);
-        setModel(parsed[0].model ?? "");
       } else {
         const initial = createEmptySession();
         setSessions([initial]);
@@ -203,7 +200,6 @@ export default function HomePage() {
         session.id === activeSessionId
           ? {
               ...session,
-              model,
               turns,
               title: buildSessionTitle(turns),
               updatedAt: new Date().toISOString()
@@ -211,7 +207,7 @@ export default function HomePage() {
           : session
       )
     );
-  }, [turns, model, activeSessionId]);
+  }, [turns, activeSessionId]);
 
   useEffect(() => {
     if (!hasLoadedSessionsRef.current) return;
@@ -256,8 +252,7 @@ export default function HomePage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           message: composedMessage,
-          imageUrl: readyUploads.find((item) => item.kind === "image")?.url,
-          model: model.trim() || undefined
+          imageUrl: readyUploads.find((item) => item.kind === "image")?.url
         })
       });
       if (!response.ok || !response.body) {
@@ -421,11 +416,9 @@ export default function HomePage() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
-      <Card className="h-fit">
+      <Card className="h-fit lg:sticky lg:top-24">
         <h2 className="mb-2 text-lg font-semibold">Session</h2>
         <div className="space-y-2">
-          <label className="text-xs text-muted">Model override (optional)</label>
-          <Input value={model} onChange={(event) => setModel(event.target.value)} placeholder="llama3.1 or gpt-4o" />
           <label className="text-xs text-muted">Session</label>
           <div className="space-y-1.5">
             <Select
@@ -437,7 +430,6 @@ export default function HomePage() {
                 if (!session) return;
                 setActiveSessionId(session.id);
                 setTurns(session.turns ?? []);
-                setModel(session.model ?? "");
               }}
             >
               {sessions.map((session) => (
@@ -476,14 +468,12 @@ export default function HomePage() {
                   setTurns([]);
                   setMessage("");
                   setUploads([]);
-                  setModel("");
                   return;
                 }
                 const nextActive = remaining[0];
                 setSessions(remaining);
                 setActiveSessionId(nextActive.id);
                 setTurns(nextActive.turns ?? []);
-                setModel(nextActive.model ?? "");
                 setMessage("");
                 setUploads([]);
               }}
@@ -502,7 +492,6 @@ export default function HomePage() {
                 setTurns([]);
                 setMessage("");
                 setUploads([]);
-                setModel("");
               }}
               title="Start new session"
             >
@@ -525,11 +514,23 @@ export default function HomePage() {
           </Link>
         </div>
       </Card>
-      <Card>
-        <h1 className="mb-2 text-2xl font-semibold">Nova Chat</h1>
+      <Card className="flex min-h-[calc(100vh-170px)] flex-col">
+        <div className="mb-2 flex items-center justify-between">
+          <h1 className="text-2xl font-semibold">Nova Chat</h1>
+          {loading ? (
+            <button
+              type="button"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-ui border bg-surface2"
+              title="Nova is streaming"
+              disabled
+            >
+              <FaSpinner className="h-3.5 w-3.5 animate-spin text-slate-600" />
+            </button>
+          ) : null}
+        </div>
         <div
           ref={chatScrollRef}
-          className="mb-4 max-h-[55vh] space-y-2 overflow-y-auto rounded-xl border bg-surface p-3"
+          className="mb-4 flex-1 space-y-2 overflow-y-auto rounded-xl border bg-surface p-3"
           onScroll={(event) => {
             const target = event.currentTarget;
             const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 36;
@@ -754,13 +755,7 @@ export default function HomePage() {
             rows={4}
             placeholder="Ask Nova to do something..."
           />
-          <div className="flex justify-end gap-2">
-            <Select value={model ? "custom" : "default"} onChange={(event) => {
-              if (event.target.value === "default") setModel("");
-            }} className="max-w-[180px]">
-              <option value="default">Default Model</option>
-              <option value="custom">Custom Override</option>
-            </Select>
+          <div className="flex items-center justify-between gap-2">
             <label className="flex items-center gap-1 text-xs text-muted">
               <input
                 type="checkbox"
@@ -781,9 +776,7 @@ export default function HomePage() {
               />
               Send on Enter
             </label>
-            <Button type="submit" tone="green" disabled={loading}>
-              {loading ? "Streaming..." : "Send"}
-            </Button>
+            {!loading && message.trim().length > 0 ? <Button type="submit" tone="green">Send</Button> : null}
           </div>
         </form>
       </Card>
@@ -820,7 +813,6 @@ function createEmptySession(): ChatSession {
     title: "New session",
     createdAt: now,
     updatedAt: now,
-    model: "",
     turns: []
   };
 }
