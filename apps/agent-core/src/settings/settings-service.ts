@@ -18,7 +18,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   web: {
     loginEnabled: true,
-    hideProviderModelInStats: false
+    hideProviderModelInStats: false,
+    chatStyle: {
+      userBubbleColor: "#dbeafe",
+      assistantBubbleColor: "#e9d5ff",
+      userTextColor: "#0f172a",
+      assistantTextColor: "#0f172a",
+      bubbleBackgroundEnabled: true
+    }
   },
   learning: {
     enabled: process.env.NOVA_LEARNING_ENABLED === "true" || process.env.NOVA_LEARNING_ENABLED === undefined,
@@ -121,7 +128,15 @@ export class SettingsService {
       },
       web: {
         loginEnabled: update.web?.loginEnabled ?? current.web.loginEnabled,
-        hideProviderModelInStats: update.web?.hideProviderModelInStats ?? current.web.hideProviderModelInStats
+        hideProviderModelInStats: update.web?.hideProviderModelInStats ?? current.web.hideProviderModelInStats,
+        chatStyle: {
+          userBubbleColor: update.web?.chatStyle?.userBubbleColor ?? current.web.chatStyle.userBubbleColor,
+          assistantBubbleColor: update.web?.chatStyle?.assistantBubbleColor ?? current.web.chatStyle.assistantBubbleColor,
+          userTextColor: update.web?.chatStyle?.userTextColor ?? current.web.chatStyle.userTextColor,
+          assistantTextColor: update.web?.chatStyle?.assistantTextColor ?? current.web.chatStyle.assistantTextColor,
+          bubbleBackgroundEnabled:
+            update.web?.chatStyle?.bubbleBackgroundEnabled ?? current.web.chatStyle.bubbleBackgroundEnabled
+        }
       },
       learning: {
         enabled: update.learning?.enabled ?? current.learning.enabled,
@@ -207,7 +222,20 @@ export class SettingsService {
       },
       web: {
         loginEnabled: settings.web?.loginEnabled !== false,
-        hideProviderModelInStats: settings.web?.hideProviderModelInStats === true
+        hideProviderModelInStats: settings.web?.hideProviderModelInStats === true,
+        chatStyle: {
+          userBubbleColor: normalizeHexColor(settings.web?.chatStyle?.userBubbleColor, DEFAULT_SETTINGS.web.chatStyle.userBubbleColor),
+          assistantBubbleColor: normalizeHexColor(
+            settings.web?.chatStyle?.assistantBubbleColor,
+            DEFAULT_SETTINGS.web.chatStyle.assistantBubbleColor
+          ),
+          userTextColor: normalizeHexColor(settings.web?.chatStyle?.userTextColor, DEFAULT_SETTINGS.web.chatStyle.userTextColor),
+          assistantTextColor: normalizeHexColor(
+            settings.web?.chatStyle?.assistantTextColor,
+            DEFAULT_SETTINGS.web.chatStyle.assistantTextColor
+          ),
+          bubbleBackgroundEnabled: settings.web?.chatStyle?.bubbleBackgroundEnabled !== false
+        }
       },
       learning: {
         enabled: settings.learning?.enabled !== false,
@@ -398,4 +426,11 @@ function normalizeLabelPrefix(value: string | undefined): string {
     .replace(/[^a-zA-Z0-9-_]/g, "-")
     .slice(0, 40);
   return normalized.length > 0 ? normalized : "nova-core";
+}
+
+function normalizeHexColor(value: string | undefined, fallback: string): string {
+  const normalized = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  return /^#[0-9a-f]{6}$/.test(normalized) ? normalized : fallback;
 }

@@ -1,7 +1,7 @@
 /* eslint-disable react/no-unescaped-entities */
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Card } from "../components/ui/card";
 import { Textarea } from "../components/ui/textarea";
@@ -60,8 +60,17 @@ export default function HomePage() {
   const [liveThinkingCollapsed, setLiveThinkingCollapsed] = useState(false);
   const [liveThinking, setLiveThinking] = useState("Analyzing your request...");
   const [hideProviderModelInStats, setHideProviderModelInStats] = useState(false);
+  const [chatStyle, setChatStyle] = useState({
+    userBubbleColor: "#dbeafe",
+    assistantBubbleColor: "#e9d5ff",
+    userTextColor: "#0f172a",
+    assistantTextColor: "#0f172a",
+    bubbleBackgroundEnabled: true
+  });
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
 
   const uploadedMedia = useMemo(
     () =>
@@ -118,12 +127,38 @@ export default function HomePage() {
   useEffect(() => {
     void (async () => {
       const response = await fetch("/api/settings");
-      const data = (await response.json()) as { settings?: { web?: { hideProviderModelInStats?: boolean } } };
+      const data = (await response.json()) as {
+        settings?: {
+          web?: {
+            hideProviderModelInStats?: boolean;
+            chatStyle?: {
+              userBubbleColor?: string;
+              assistantBubbleColor?: string;
+              userTextColor?: string;
+              assistantTextColor?: string;
+              bubbleBackgroundEnabled?: boolean;
+            };
+          };
+        };
+      };
       if (response.ok) {
         setHideProviderModelInStats(data.settings?.web?.hideProviderModelInStats === true);
+        setChatStyle((prev) => ({
+          userBubbleColor: data.settings?.web?.chatStyle?.userBubbleColor ?? prev.userBubbleColor,
+          assistantBubbleColor: data.settings?.web?.chatStyle?.assistantBubbleColor ?? prev.assistantBubbleColor,
+          userTextColor: data.settings?.web?.chatStyle?.userTextColor ?? prev.userTextColor,
+          assistantTextColor: data.settings?.web?.chatStyle?.assistantTextColor ?? prev.assistantTextColor,
+          bubbleBackgroundEnabled: data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled
+        }));
       }
     })();
   }, []);
+
+  useEffect(() => {
+    const container = chatScrollRef.current;
+    if (!container || !autoScrollEnabled) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+  }, [turns, liveThinking, loading, autoScrollEnabled]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -347,14 +382,22 @@ export default function HomePage() {
       </Card>
       <Card>
         <h1 className="mb-2 text-2xl font-semibold">Nova Chat</h1>
-        <div className="mb-4 max-h-[55vh] space-y-2 overflow-y-auto rounded-xl border bg-surface p-3">
+        <div
+          ref={chatScrollRef}
+          className="mb-4 max-h-[55vh] space-y-2 overflow-y-auto rounded-xl border bg-surface p-3"
+          onScroll={(event) => {
+            const target = event.currentTarget;
+            const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 36;
+            setAutoScrollEnabled(nearBottom);
+          }}
+        >
           {turns.length === 0 ? <div className="text-sm text-muted">Start chatting with Nova.</div> : null}
           {loading && showThinkingInChat ? (
-            <article className="mr-auto max-w-[85%] rounded-ui border border-slate-500/60 bg-slate-200/60 p-3 text-slate-700 dark:bg-slate-700/45 dark:text-slate-200">
+            <article className="mr-auto max-w-[85%] rounded-ui border border-slate-500/60 bg-slate-200/60 p-2.5 text-slate-700 dark:bg-slate-700/45 dark:text-slate-200">
               <div className="mb-1 text-xs font-semibold">Thinking</div>
               <button
                 type="button"
-                className="mb-1 rounded-ui border bg-surface2 px-2 py-0.5 text-xs"
+                className="mb-1 rounded-ui border bg-surface2 px-1.5 py-0.5 text-xs"
                 onClick={() => setLiveThinkingCollapsed((prev) => !prev)}
               >
                 {liveThinkingCollapsed ? "Expand" : "Collapse"}
@@ -365,7 +408,20 @@ export default function HomePage() {
           {turns.map((turn, index) => (
             <article
               key={turn.id}
-              className={turn.role === "user" ? "ml-auto max-w-[85%] rounded-ui border border-blue-500/70 bg-pastelBlue p-3 text-slate-900" : "mr-auto max-w-[85%] rounded-ui border border-purple-500/70 bg-pastelPurple p-3 text-slate-900"}
+              className={turn.role === "user" ? "ml-auto max-w-[85%] rounded-ui border p-2.5" : "mr-auto max-w-[85%] rounded-ui border p-2.5"}
+              style={
+                turn.role === "user"
+                  ? {
+                      backgroundColor: chatStyle.bubbleBackgroundEnabled ? chatStyle.userBubbleColor : "transparent",
+                      color: chatStyle.userTextColor,
+                      borderColor: chatStyle.userBubbleColor
+                    }
+                  : {
+                      backgroundColor: chatStyle.bubbleBackgroundEnabled ? chatStyle.assistantBubbleColor : "transparent",
+                      color: chatStyle.assistantTextColor,
+                      borderColor: chatStyle.assistantBubbleColor
+                    }
+              }
             >
               <div className="mb-1 text-xs font-semibold">{turn.role === "user" ? "You" : "Nova"}</div>
               {editingTurnId === turn.id ? (
@@ -396,7 +452,7 @@ export default function HomePage() {
                 </div>
               )}
               {turn.role === "user" ? (
-                <div className="mt-2 flex gap-2">
+                <div className="mt-2 flex gap-1.5">
                   <Button
                     type="button"
                     tone="yellow"
@@ -420,10 +476,10 @@ export default function HomePage() {
                 </div>
               ) : null}
               {turn.role === "assistant" && showThinkingInChat && turn.thinkingText ? (
-                <div className="mt-2 rounded-ui border border-slate-500/60 bg-slate-200/60 p-2 text-xs text-slate-700 dark:bg-slate-700/45 dark:text-slate-200">
+                <div className="mt-2 rounded-ui border border-slate-500/60 bg-slate-200/60 p-1.5 text-xs text-slate-700 dark:bg-slate-700/45 dark:text-slate-200">
                   <button
                     type="button"
-                    className="mb-1 rounded-ui border bg-surface2 px-2 py-0.5 text-xs"
+                    className="mb-1 rounded-ui border bg-surface2 px-1.5 py-0.5 text-xs"
                     onClick={() =>
                       setTurns((prev) =>
                         prev.map((item) =>
@@ -492,7 +548,7 @@ export default function HomePage() {
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span>Drop images/videos here, or choose files.</span>
-              <label className="cursor-pointer rounded-ui border bg-pastelGreen px-2 py-1 text-slate-900">
+              <label className="cursor-pointer rounded-ui border bg-pastelGreen px-2 py-0.5 text-xs text-slate-900">
                 Add files
                 <input
                   type="file"

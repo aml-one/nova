@@ -21,7 +21,7 @@ export function Button({ className, tone = "blue", ...props }: Props) {
     <button
       {...props}
       className={cn(
-        "rounded-ui border px-3 py-2 text-sm font-medium shadow-sm transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50",
+        "rounded-ui border px-2.5 py-1.5 text-xs font-medium shadow-sm transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50",
         tones[tone],
         className
       )}

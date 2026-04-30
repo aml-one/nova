@@ -19,6 +19,13 @@ export type AppSettings = {
   web: {
     loginEnabled: boolean;
     hideProviderModelInStats: boolean;
+    chatStyle: {
+      userBubbleColor: string;
+      assistantBubbleColor: string;
+      userTextColor: string;
+      assistantTextColor: string;
+      bubbleBackgroundEnabled: boolean;
+    };
   };
   learning: {
     enabled: boolean;
@@ -130,7 +137,22 @@ export class SettingsRepository {
         },
         web: {
           loginEnabled: parsed.web?.loginEnabled !== false,
-          hideProviderModelInStats: parsed.web?.hideProviderModelInStats === true
+          hideProviderModelInStats: parsed.web?.hideProviderModelInStats === true,
+          chatStyle: {
+            userBubbleColor:
+              typeof parsed.web?.chatStyle?.userBubbleColor === "string" ? parsed.web.chatStyle.userBubbleColor : "#dbeafe",
+            assistantBubbleColor:
+              typeof parsed.web?.chatStyle?.assistantBubbleColor === "string"
+                ? parsed.web.chatStyle.assistantBubbleColor
+                : "#e9d5ff",
+            userTextColor:
+              typeof parsed.web?.chatStyle?.userTextColor === "string" ? parsed.web.chatStyle.userTextColor : "#0f172a",
+            assistantTextColor:
+              typeof parsed.web?.chatStyle?.assistantTextColor === "string"
+                ? parsed.web.chatStyle.assistantTextColor
+                : "#0f172a",
+            bubbleBackgroundEnabled: parsed.web?.chatStyle?.bubbleBackgroundEnabled !== false
+          }
         },
         learning: {
           enabled: parsed.learning?.enabled === true,

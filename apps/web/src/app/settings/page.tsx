@@ -3,7 +3,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card } from "../../components/ui/card";
-import { Tabs } from "../../components/ui/tabs";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Select } from "../../components/ui/select";
@@ -30,7 +29,17 @@ type SettingsState = {
   delegatedFolders: string[];
   requireApprovals: boolean;
   activeProvider: "ollama" | "lmstudio" | "copilot";
-  web: { loginEnabled: boolean; hideProviderModelInStats: boolean };
+  web: {
+    loginEnabled: boolean;
+    hideProviderModelInStats: boolean;
+    chatStyle: {
+      userBubbleColor: string;
+      assistantBubbleColor: string;
+      userTextColor: string;
+      assistantTextColor: string;
+      bubbleBackgroundEnabled: boolean;
+    };
+  };
   learning: { enabled: boolean; idleMinutes: number; intervalMs: number; minFailuresForAutoImprove: number };
   costGovernor: {
     enabled: boolean;
@@ -61,7 +70,17 @@ const DEFAULT_SETTINGS: SettingsState = {
   delegatedFolders: [],
   requireApprovals: false,
   activeProvider: "ollama",
-  web: { loginEnabled: true, hideProviderModelInStats: false },
+  web: {
+    loginEnabled: true,
+    hideProviderModelInStats: false,
+    chatStyle: {
+      userBubbleColor: "#dbeafe",
+      assistantBubbleColor: "#e9d5ff",
+      userTextColor: "#0f172a",
+      assistantTextColor: "#0f172a",
+      bubbleBackgroundEnabled: true
+    }
+  },
   learning: { enabled: true, idleMinutes: 3, intervalMs: 120000, minFailuresForAutoImprove: 2 },
   costGovernor: {
     enabled: false,
@@ -95,6 +114,7 @@ export default function SettingsPage() {
   const [backupLabel, setBackupLabel] = useState("nova-core");
   const [skillManifests, setSkillManifests] = useState<SkillManifest[]>([]);
   const [websites, setWebsites] = useState<WebsiteProject[]>([]);
+  const [tabsCollapsed, setTabsCollapsed] = useState(false);
   const [channelsSetupOutput, setChannelsSetupOutput] = useState<string>("");
   const [copilotSetupOutput, setCopilotSetupOutput] = useState<string>("");
 
@@ -278,14 +298,55 @@ export default function SettingsPage() {
           <p className="text-sm text-muted">Modern control center with setup guidance and live status.</p>
         </div>
         {loading ? <Card>Loading...</Card> : null}
-        <Tabs tabs={tabs} active={tab} onChange={setTab} />
-
+        <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
+          <Card className="h-fit lg:sticky lg:top-24">
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-sm font-semibold">{tabsCollapsed ? "Menu" : "Settings Menu"}</h2>
+              <Button type="button" tone="neutral" onClick={() => setTabsCollapsed((prev) => !prev)}>
+                {tabsCollapsed ? "Expand" : "Collapse"}
+              </Button>
+            </div>
+            <div className="space-y-1">
+              {tabs.map((item) => (
+                <Button
+                  key={item.id}
+                  type="button"
+                  tone={tab === item.id ? item.tone ?? "blue" : "neutral"}
+                  onClick={() => setTab(item.id)}
+                  className={tabsCollapsed ? "h-8 w-8 p-0" : "w-full justify-start text-left"}
+                  title={item.label}
+                >
+                  {tabsCollapsed ? item.label.slice(0, 1).toUpperCase() : item.label}
+                </Button>
+              ))}
+            </div>
+          </Card>
+          <div>
         {tab === "general" ? (
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">General & Safety</h2>
             <label className="flex items-center gap-2"><Checkbox checked={settings.requireApprovals} onChange={(e) => setSettings((p) => ({ ...p, requireApprovals: e.target.checked }))} /> Require approvals</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.loginEnabled} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, loginEnabled: e.target.checked } }))} /> Enable Web login</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.hideProviderModelInStats} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, hideProviderModelInStats: e.target.checked } }))} /> Hide provider/model in chat statistics</label>
+            <label className="flex items-center gap-2"><Checkbox checked={settings.web.chatStyle.bubbleBackgroundEnabled} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, bubbleBackgroundEnabled: e.target.checked } } }))} /> Enable bubble backgrounds in chat</label>
+            <div className="grid gap-2 md:grid-cols-2">
+              <label className="grid gap-1 text-xs">
+                User bubble color
+                <Input type="color" value={settings.web.chatStyle.userBubbleColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBubbleColor: e.target.value } } }))} />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Assistant bubble color
+                <Input type="color" value={settings.web.chatStyle.assistantBubbleColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBubbleColor: e.target.value } } }))} />
+              </label>
+              <label className="grid gap-1 text-xs">
+                User text color
+                <Input type="color" value={settings.web.chatStyle.userTextColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userTextColor: e.target.value } } }))} />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Assistant text color
+                <Input type="color" value={settings.web.chatStyle.assistantTextColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantTextColor: e.target.value } } }))} />
+              </label>
+            </div>
             <label className="flex items-center gap-2"><Checkbox checked={settings.offlineMode.enabled} onChange={(e) => setSettings((p) => ({ ...p, offlineMode: { enabled: e.target.checked } }))} /> Offline mode (blocks cloud provider calls)</label>
             <div className="grid gap-2 md:grid-cols-2">
               <Input type="number" value={settings.shell.timeoutMs} onChange={(e) => setSettings((p) => ({ ...p, shell: { ...p.shell, timeoutMs: Number(e.target.value || 0) } }))} placeholder="Shell timeout ms" />
@@ -557,6 +618,8 @@ export default function SettingsPage() {
             <p className="text-sm text-muted">This tab is contributed by a skill. Custom UI can be added here by that skill.</p>
           </Card>
         ) : null}
+          </div>
+        </div>
 
         <div className="flex items-center gap-2">
           <Button type="submit" tone="green" disabled={saving}>{saving ? "Saving..." : "Save Settings"}</Button>
@@ -614,7 +677,15 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
     activeProvider: value?.activeProvider ?? DEFAULT_SETTINGS.activeProvider,
     web: {
       loginEnabled: value?.web?.loginEnabled ?? DEFAULT_SETTINGS.web.loginEnabled,
-      hideProviderModelInStats: value?.web?.hideProviderModelInStats ?? DEFAULT_SETTINGS.web.hideProviderModelInStats
+      hideProviderModelInStats: value?.web?.hideProviderModelInStats ?? DEFAULT_SETTINGS.web.hideProviderModelInStats,
+      chatStyle: {
+        userBubbleColor: value?.web?.chatStyle?.userBubbleColor ?? DEFAULT_SETTINGS.web.chatStyle.userBubbleColor,
+        assistantBubbleColor: value?.web?.chatStyle?.assistantBubbleColor ?? DEFAULT_SETTINGS.web.chatStyle.assistantBubbleColor,
+        userTextColor: value?.web?.chatStyle?.userTextColor ?? DEFAULT_SETTINGS.web.chatStyle.userTextColor,
+        assistantTextColor: value?.web?.chatStyle?.assistantTextColor ?? DEFAULT_SETTINGS.web.chatStyle.assistantTextColor,
+        bubbleBackgroundEnabled:
+          value?.web?.chatStyle?.bubbleBackgroundEnabled ?? DEFAULT_SETTINGS.web.chatStyle.bubbleBackgroundEnabled
+      }
     },
     learning: {
       enabled: value?.learning?.enabled ?? DEFAULT_SETTINGS.learning.enabled,
