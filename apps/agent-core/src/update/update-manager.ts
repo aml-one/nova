@@ -90,7 +90,9 @@ export class UpdateManager {
     this.record("apply", result.ok ? "success" : "failed", status.installedAt, status.latestPushedAt, result.message);
     if (result.ok) {
       this.setInstalledAt(new Date().toISOString());
-      this.onAppliedRestart();
+      // Defer restart so HTTP response can be sent cleanly.
+      setTimeout(() => this.onAppliedRestart(), 1500);
+      return { ok: true, message: "Update applied. Restarting services..." };
     }
     return result;
   }

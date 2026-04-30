@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@nova/sdk": "workspace:*",
+    "dotenv": "^17.4.2",
     "firebase-admin": "^13.5.0",
     "ws": "^8.20.0",
     "yaml": "^2.8.1",

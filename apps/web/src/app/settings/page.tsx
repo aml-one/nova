@@ -924,7 +924,7 @@ export default function SettingsPage() {
             <HealthPill
               level={health?.level ?? "orange"}
               label={health?.level === "green" ? "Operational" : health?.level === "orange" ? "Not all configured" : undefined}
-              className="w-48 min-w-48 max-w-48 shrink-0 justify-center whitespace-nowrap overflow-hidden text-ellipsis"
+              className="w-[150px] min-w-[150px] max-w-[150px] shrink-0 justify-center whitespace-nowrap overflow-hidden text-ellipsis"
             />
           </div>
           <div className="max-h-[60vh] space-y-2 overflow-y-auto">
@@ -935,7 +935,7 @@ export default function SettingsPage() {
                   <HealthPill
                     level={check.level}
                     label={healthLabelForCheck(check)}
-                    className="w-48 min-w-48 max-w-48 shrink-0 justify-center whitespace-nowrap overflow-hidden text-ellipsis"
+                    className="w-[150px] min-w-[150px] max-w-[150px] shrink-0 justify-center whitespace-nowrap overflow-hidden text-ellipsis"
                   />
                 </div>
                 <div className="text-muted">{check.detail}</div>

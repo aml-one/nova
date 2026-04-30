@@ -3,7 +3,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { FaSpinner } from "react-icons/fa6";
+import { FaBrain, FaPenToSquare, FaPlus, FaSpinner, FaTrash } from "react-icons/fa6";
 import { Card } from "../components/ui/card";
 import { Textarea } from "../components/ui/textarea";
 import { Select } from "../components/ui/select";
@@ -82,6 +82,7 @@ export default function HomePage() {
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const hasLoadedSessionsRef = useRef(false);
+  const compactButtonClass = "h-5 px-1.5 py-0 text-[10px]";
 
   const uploadedMedia = useMemo(
     () =>
@@ -415,14 +416,13 @@ export default function HomePage() {
   }
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
-      <Card className="h-fit self-start">
-        <h2 className="mb-2 text-lg font-semibold">Session</h2>
-        <div className="space-y-2">
-          <label className="text-xs text-muted">Session</label>
-          <div className="space-y-1.5">
+    <div className="grid gap-4">
+      <Card className="flex min-h-[calc(100vh-170px)] flex-col">
+        <div className="mb-2 flex items-center justify-between">
+          <h1 className="text-2xl font-semibold">Nova Chat</h1>
+          <div className="flex items-center gap-1.5">
             <Select
-              className="w-full"
+              className="h-6 min-w-[220px] py-0 text-xs"
               value={activeSessionId}
               onChange={(event) => {
                 const sessionId = event.target.value;
@@ -438,10 +438,26 @@ export default function HomePage() {
                 </option>
               ))}
             </Select>
-            <div className="grid grid-cols-3 gap-1.5">
+            <Button
+              type="button"
+              tone="green"
+              className={compactButtonClass}
+              onClick={() => {
+                const next = createEmptySession();
+                setSessions((prev) => [next, ...prev]);
+                setActiveSessionId(next.id);
+                setTurns([]);
+                setMessage("");
+                setUploads([]);
+              }}
+              title="Start new session"
+            >
+              <FaPlus className="h-2.5 w-2.5" />
+            </Button>
             <Button
               type="button"
               tone="neutral"
+              className={compactButtonClass}
               onClick={() => {
                 const active = sessions.find((item) => item.id === activeSessionId);
                 if (!active) return;
@@ -451,11 +467,12 @@ export default function HomePage() {
               }}
               title="Rename active session"
             >
-              Rename
+              <FaPenToSquare className="h-2.5 w-2.5" />
             </Button>
             <Button
               type="button"
               tone="red"
+              className={compactButtonClass}
               onClick={() => {
                 if (!activeSessionId) return;
                 const ok = window.confirm("Delete this session?");
@@ -479,56 +496,19 @@ export default function HomePage() {
               }}
               title="Delete active session"
             >
-              Delete
+              <FaTrash className="h-2.5 w-2.5" />
             </Button>
-            <Button
-              type="button"
-              tone="green"
-              className="px-2"
-              onClick={() => {
-                const next = createEmptySession();
-                setSessions((prev) => [next, ...prev]);
-                setActiveSessionId(next.id);
-                setTurns([]);
-                setMessage("");
-                setUploads([]);
-              }}
-              title="Start new session"
-            >
-              +
-            </Button>
-            </div>
+            {loading ? (
+              <button
+                type="button"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-ui border bg-surface2"
+                title="Nova is streaming"
+                disabled
+              >
+                <FaSpinner className="h-3 w-3 animate-spin text-slate-600" />
+              </button>
+            ) : null}
           </div>
-          <p className="text-xs text-muted">
-            Tip: commands like <code>/run ...</code> can execute shell tasks when command mode is enabled.
-          </p>
-          {uploadedMedia.length > 0 ? <Badge tone="pink">{uploadedMedia.length} media ready</Badge> : null}
-          <label className="flex items-center gap-2 text-xs text-muted">
-            <input
-              type="checkbox"
-              checked={showThinkingInChat}
-              onChange={(event) => setShowThinkingInChat(event.target.checked)}
-            />
-            Show thinking in chat
-          </label>
-          <Link href="/thoughts" className="inline-block text-xs font-medium text-violet-700 underline underline-offset-2 hover:text-violet-800 dark:text-violet-300 dark:hover:text-violet-200">
-            Open Live Thoughts
-          </Link>
-        </div>
-      </Card>
-      <Card className="flex min-h-[calc(100vh-170px)] flex-col">
-        <div className="mb-2 flex items-center justify-between">
-          <h1 className="text-2xl font-semibold">Nova Chat</h1>
-          {loading ? (
-            <button
-              type="button"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-ui border bg-surface2"
-              title="Nova is streaming"
-              disabled
-            >
-              <FaSpinner className="h-3.5 w-3.5 animate-spin text-slate-600" />
-            </button>
-          ) : null}
         </div>
         <div
           ref={chatScrollRef}
@@ -556,7 +536,11 @@ export default function HomePage() {
           {turns.map((turn, index) => (
             <article
               key={turn.id}
-              className={turn.role === "user" ? "ml-auto max-w-[85%] rounded-ui border p-2.5" : "mr-auto max-w-[85%] rounded-ui border p-2.5"}
+              className={
+                turn.role === "user"
+                  ? "ml-auto w-fit min-w-[250px] max-w-[85%] rounded-ui border p-2.5"
+                  : "mr-auto max-w-[85%] rounded-ui border p-2.5"
+              }
               style={
                 turn.role === "user"
                   ? {
@@ -581,6 +565,7 @@ export default function HomePage() {
                     <Button
                       type="button"
                       tone="green"
+                      className={compactButtonClass}
                       onClick={() => {
                         const next = editingText.trim();
                         if (!next) return;
@@ -591,7 +576,7 @@ export default function HomePage() {
                     >
                       Save
                     </Button>
-                    <Button type="button" tone="red" onClick={() => setEditingTurnId(null)}>
+                    <Button type="button" tone="red" className={compactButtonClass} onClick={() => setEditingTurnId(null)}>
                       Cancel
                     </Button>
                   </div>
@@ -606,6 +591,7 @@ export default function HomePage() {
                   <Button
                     type="button"
                     tone="yellow"
+                    className={compactButtonClass}
                     onClick={() => {
                       setEditingTurnId(turn.id);
                       setEditingText(turn.text);
@@ -616,6 +602,7 @@ export default function HomePage() {
                   <Button
                     type="button"
                     tone="orange"
+                    className={compactButtonClass}
                     onClick={() => {
                       setMessage(turn.text);
                       window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
@@ -721,13 +708,13 @@ export default function HomePage() {
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <span className="truncate">{item.file.name}</span>
                     <div className="flex gap-1">
-                      <Button type="button" tone="blue" onClick={() => moveUpload(item.id, -1)} disabled={idx === 0}>
+                      <Button type="button" tone="blue" className={compactButtonClass} onClick={() => moveUpload(item.id, -1)} disabled={idx === 0}>
                         Up
                       </Button>
-                      <Button type="button" tone="blue" onClick={() => moveUpload(item.id, 1)} disabled={idx === uploads.length - 1}>
+                      <Button type="button" tone="blue" className={compactButtonClass} onClick={() => moveUpload(item.id, 1)} disabled={idx === uploads.length - 1}>
                         Down
                       </Button>
-                      <Button type="button" tone="red" onClick={() => setUploads((prev) => prev.filter((u) => u.id !== item.id))}>
+                      <Button type="button" tone="red" className={compactButtonClass} onClick={() => setUploads((prev) => prev.filter((u) => u.id !== item.id))}>
                         Remove
                       </Button>
                     </div>
@@ -758,27 +745,44 @@ export default function HomePage() {
             placeholder="Ask Nova to do something..."
           />
           <div className="flex items-center justify-between gap-2">
-            <label className="flex items-center gap-1 text-xs text-muted">
-              <input
-                type="checkbox"
-                checked={sendOnEnter}
-                onChange={async (event) => {
-                  const next = event.target.checked;
-                  setSendOnEnter(next);
-                  try {
-                    await fetch("/api/settings", {
-                      method: "PUT",
-                      headers: { "content-type": "application/json" },
-                      body: JSON.stringify({ web: { sendOnEnter: next } })
-                    });
-                  } catch {
-                    // Ignore save failures for this optional UX preference.
-                  }
-                }}
-              />
-              Send on Enter
-            </label>
-            {!loading && message.trim().length > 0 ? <Button type="submit" tone="green">Send</Button> : null}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted">
+                Tip: commands like <code>/run ...</code> can execute shell tasks when command mode is enabled.
+              </span>
+              <label className="flex items-center gap-1 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  checked={sendOnEnter}
+                  onChange={async (event) => {
+                    const next = event.target.checked;
+                    setSendOnEnter(next);
+                    try {
+                      await fetch("/api/settings", {
+                        method: "PUT",
+                        headers: { "content-type": "application/json" },
+                        body: JSON.stringify({ web: { sendOnEnter: next } })
+                      });
+                    } catch {
+                      // Ignore save failures for this optional UX preference.
+                    }
+                  }}
+                />
+                Send on Enter
+              </label>
+              <label className="flex items-center gap-1 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  checked={showThinkingInChat}
+                  onChange={(event) => setShowThinkingInChat(event.target.checked)}
+                />
+                Show thinking
+              </label>
+              <Link href="/thoughts" className="inline-flex items-center text-violet-400 hover:text-violet-300" title="Open Live Thoughts">
+                <FaBrain className="h-3.5 w-3.5" />
+              </Link>
+              {uploadedMedia.length > 0 ? <Badge tone="pink">{uploadedMedia.length} media ready</Badge> : null}
+            </div>
+            {!loading && message.trim().length > 0 ? <Button type="submit" tone="green" className={compactButtonClass}>Send</Button> : null}
           </div>
         </form>
       </Card>
@@ -789,7 +793,7 @@ export default function HomePage() {
               <span>
                 {lightbox.index + 1}/{lightbox.items.length}
               </span>
-              <Button type="button" tone="red" onClick={() => setLightbox(null)}>
+              <Button type="button" tone="red" className={compactButtonClass} onClick={() => setLightbox(null)}>
                 Close
               </Button>
             </div>
