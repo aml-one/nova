@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAgentBaseUrl, getAgentHeaders } from "../../../../../lib/agent-core";
+import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function POST(request: Request) {
   const payload = (await request.json().catch(() => ({}))) as { personaId?: string; version?: number };
