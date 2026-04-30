@@ -35,6 +35,7 @@ import { UpdateManager } from "../update/update-manager.js";
 import { ThoughtRepository } from "../storage/repositories/thought-repository.js";
 import { WebSocketServer, WebSocket } from "ws";
 import { MobilePushService } from "../mobile/push-service.js";
+import { LearningDaemon } from "../improvement/learning-daemon.js";
 const execAsync = promisify(execCallback);
 
 type HttpServerOptions = {
@@ -45,6 +46,7 @@ type HttpServerOptions = {
   improvement: SelfImprovementLoop;
   skillRegistry: InMemorySkillRegistry;
   updateManager: UpdateManager;
+  learningDaemon?: LearningDaemon;
   appVersion: string;
   installedAt: string;
   port?: number;
@@ -562,6 +564,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/improvement/history") {
         return sendJson(response, 200, { itemsByDate: options.improvement.getLearningHistoryGroupedByDate(), correlationId });
+      }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/improvement/status") {
+        return sendJson(response, 200, { status: options.learningDaemon?.getStatus() ?? null, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/improvement/cycle") {
         const result = await options.improvement.runIdleLearningCycle();

@@ -91,6 +91,7 @@ async function bootstrap(): Promise<void> {
     improvement,
     skillRegistry,
     updateManager,
+    learningDaemon,
     appVersion: currentVersion,
     installedAt: installState.getInstalledAt()
   });
