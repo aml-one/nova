@@ -347,6 +347,37 @@ export default function SettingsPage() {
                 <Input type="color" value={settings.web.chatStyle.assistantTextColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantTextColor: e.target.value } } }))} />
               </label>
             </div>
+            <div className="rounded-ui border bg-surface p-3">
+              <div className="mb-2 text-xs font-semibold text-muted">Live chat style preview</div>
+              <div className="space-y-2 rounded-ui border bg-surface2 p-2">
+                <article
+                  className="ml-auto max-w-[85%] rounded-ui border p-2.5"
+                  style={{
+                    backgroundColor: settings.web.chatStyle.bubbleBackgroundEnabled
+                      ? settings.web.chatStyle.userBubbleColor
+                      : "transparent",
+                    color: settings.web.chatStyle.userTextColor,
+                    borderColor: settings.web.chatStyle.userBubbleColor
+                  }}
+                >
+                  <div className="mb-1 text-[11px] font-semibold">You</div>
+                  <div className="text-xs">Can you summarize what changed?</div>
+                </article>
+                <article
+                  className="mr-auto max-w-[85%] rounded-ui border p-2.5"
+                  style={{
+                    backgroundColor: settings.web.chatStyle.bubbleBackgroundEnabled
+                      ? settings.web.chatStyle.assistantBubbleColor
+                      : "transparent",
+                    color: settings.web.chatStyle.assistantTextColor,
+                    borderColor: settings.web.chatStyle.assistantBubbleColor
+                  }}
+                >
+                  <div className="mb-1 text-[11px] font-semibold">Nova</div>
+                  <div className="text-xs">Updated styling preview is now active.</div>
+                </article>
+              </div>
+            </div>
             <label className="flex items-center gap-2"><Checkbox checked={settings.offlineMode.enabled} onChange={(e) => setSettings((p) => ({ ...p, offlineMode: { enabled: e.target.checked } }))} /> Offline mode (blocks cloud provider calls)</label>
             <div className="grid gap-2 md:grid-cols-2">
               <Input type="number" value={settings.shell.timeoutMs} onChange={(e) => setSettings((p) => ({ ...p, shell: { ...p.shell, timeoutMs: Number(e.target.value || 0) } }))} placeholder="Shell timeout ms" />
