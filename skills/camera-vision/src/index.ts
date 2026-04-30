@@ -39,6 +39,12 @@ export const cameraVisionSkill: RuntimeSkill = {
     id: "camera-vision",
     name: "Camera Vision",
     description: "Capture RTSP media and extract object insights.",
+    settingsTab: {
+      id: "camera-vision",
+      label: "Camera Vision",
+      tone: "purple",
+      description: "Manage RTSP camera source URLs."
+    },
     permissions: ["camera", "filesystem"],
     inputSchema: {
       type: "object",

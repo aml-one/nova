@@ -68,6 +68,7 @@ type SkillManifest = {
 };
 type WebsiteProject = { id: string; name: string; domain: string; subdomain: string; local_path: string; remote_www_root: string; remote_subfolder: string };
 type SetupCheckResult = { ok: boolean; detail: string };
+type SshTestResult = { ok: boolean; detail: string } | null;
 
 const DEFAULT_SETTINGS: SettingsState = {
   delegatedFolders: [],
@@ -123,6 +124,7 @@ export default function SettingsPage() {
   const [channelsSetupOutput, setChannelsSetupOutput] = useState<string>("");
   const [copilotSetupOutput, setCopilotSetupOutput] = useState<string>("");
   const [channelsSetupMode, setChannelsSetupMode] = useState<"signal" | "whatsapp" | "both">("both");
+  const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
 
   useEffect(() => {
     void (async () => {
@@ -288,6 +290,25 @@ export default function SettingsPage() {
     setStatus("Copilot setup validated. Review result and save settings.");
   }
 
+  async function testWebsiteBuilderSshConnection(): Promise<void> {
+    setSshTestResult(null);
+    const response = await fetch("/api/websites/test-ssh", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        sshHost: websiteBuilderSettings.sshHost ?? "",
+        sshUser: websiteBuilderSettings.sshUser ?? "",
+        sshPort: Number(websiteBuilderSettings.sshPort ?? 22),
+        sshPrivateKeyPath: websiteBuilderSettings.sshPrivateKeyPath ?? ""
+      })
+    });
+    const data = (await response.json()) as { ok?: boolean; detail?: string; error?: string };
+    setSshTestResult({
+      ok: response.ok && data.ok === true,
+      detail: response.ok ? (data.detail ?? "SSH connection test completed.") : (data.error ?? "SSH connection test failed.")
+    });
+  }
+
   const modelOptions = catalog?.models ?? {};
   const websiteBuilderSettings = (settings.skillSettings["website-builder"] ?? {}) as Record<string, unknown>;
   const cameraVisionSettings = (settings.skillSettings["camera-vision"] ?? {}) as Record<string, unknown>;
@@ -309,11 +330,11 @@ export default function SettingsPage() {
     { id: "updates", label: "Updates", tone: "yellow" as const }
   ].concat(
     skillManifests
-      .filter((item) => item.settingsTab)
+      .filter((item) => item.settingsTab || item.id === "camera-vision")
       .map((item) => ({
-        id: `skill:${item.settingsTab!.id}`,
-        label: item.settingsTab!.label,
-        tone: item.settingsTab!.tone ?? ("purple" as const)
+        id: `skill:${item.settingsTab?.id ?? item.id}`,
+        label: item.settingsTab?.label ?? item.name,
+        tone: item.settingsTab?.tone ?? ("purple" as const)
       }))
   );
 
@@ -658,10 +679,20 @@ export default function SettingsPage() {
             <h2 className="text-lg font-semibold">Learning & Emotion</h2>
             <label className="flex items-center gap-2"><Checkbox checked={settings.learning.enabled} onChange={(e) => setSettings((p) => ({ ...p, learning: { ...p.learning, enabled: e.target.checked } }))} /> Enable background learning</label>
             <div className="grid gap-2 md:grid-cols-3">
-              <Input type="number" value={settings.learning.idleMinutes} onChange={(e) => setSettings((p) => ({ ...p, learning: { ...p.learning, idleMinutes: Number(e.target.value || 0) } }))} placeholder="Idle minutes" />
-              <Input type="number" value={settings.learning.intervalMs} onChange={(e) => setSettings((p) => ({ ...p, learning: { ...p.learning, intervalMs: Number(e.target.value || 0) } }))} placeholder="Cycle interval ms" />
-              <Input type="number" value={settings.learning.minFailuresForAutoImprove} onChange={(e) => setSettings((p) => ({ ...p, learning: { ...p.learning, minFailuresForAutoImprove: Number(e.target.value || 0) } }))} placeholder="Failures threshold" />
+              <label className="grid gap-1 text-xs">
+                Idle minutes before cycle
+                <Input type="number" value={settings.learning.idleMinutes} onChange={(e) => setSettings((p) => ({ ...p, learning: { ...p.learning, idleMinutes: Number(e.target.value || 0) } }))} placeholder="Idle minutes" />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Cycle interval (ms)
+                <Input type="number" value={settings.learning.intervalMs} onChange={(e) => setSettings((p) => ({ ...p, learning: { ...p.learning, intervalMs: Number(e.target.value || 0) } }))} placeholder="Cycle interval ms" />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Auto-improve failure threshold
+                <Input type="number" value={settings.learning.minFailuresForAutoImprove} onChange={(e) => setSettings((p) => ({ ...p, learning: { ...p.learning, minFailuresForAutoImprove: Number(e.target.value || 0) } }))} placeholder="Failures threshold" />
+              </label>
             </div>
+            <p className="text-xs text-muted">Lower values run learning more often. Auto-improvement triggers only when recent failure count reaches the threshold.</p>
             <label className="flex items-center gap-2"><Checkbox checked={settings.emotions.enabled} onChange={(e) => setSettings((p) => ({ ...p, emotions: { ...p.emotions, enabled: e.target.checked } }))} /> Enable emotion core</label>
             <Select value={settings.emotions.expressionStyle} onChange={(e) => setSettings((p) => ({ ...p, emotions: { ...p.emotions, expressionStyle: e.target.value as SettingsState["emotions"]["expressionStyle"] } }))}>
               <option value="subtle">Subtle</option>
@@ -718,7 +749,7 @@ export default function SettingsPage() {
           </Card>
         ) : null}
 
-        {tab === "skill:camera-vision" ? (
+        {tab === "skill:camera-vision" || tab === "skill:cameraVision" ? (
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">Camera Vision Skill</h2>
             <p className="text-xs text-muted">
@@ -726,13 +757,14 @@ export default function SettingsPage() {
             </p>
             <textarea
               className="min-h-[120px] w-full rounded-ui border bg-surface px-2 py-1 text-sm"
-              value={String(cameraVisionSettings.rtspUrls ?? "")}
+                value={String(cameraVisionSettings.rtspUrls ?? cameraVisionSettings.rtsp_urls ?? "")}
               onChange={(e) =>
                 setSettings((p) => ({
                   ...p,
                   skillSettings: {
                     ...p.skillSettings,
-                    ["camera-vision"]: { ...p.skillSettings["camera-vision"], rtspUrls: e.target.value }
+                      ["camera-vision"]: { ...p.skillSettings["camera-vision"], rtspUrls: e.target.value },
+                      ["cameraVision"]: { ...(p.skillSettings["cameraVision"] ?? {}), rtspUrls: e.target.value }
                   }
                 }))
               }
@@ -740,7 +772,7 @@ export default function SettingsPage() {
             />
             <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
               <div className="font-semibold">Detected camera entries</div>
-              {String(cameraVisionSettings.rtspUrls ?? "")
+              {String(cameraVisionSettings.rtspUrls ?? cameraVisionSettings.rtsp_urls ?? "")
                 .split(/\r?\n/)
                 .map((line) => line.trim())
                 .filter(Boolean)
@@ -833,6 +865,14 @@ export default function SettingsPage() {
                 </Select>
               </label>
             </div>
+            <div className="flex items-center gap-2">
+              <Button type="button" tone="blue" onClick={() => void testWebsiteBuilderSshConnection()}>
+                Test SSH connection
+              </Button>
+              {sshTestResult ? (
+                <span className={`text-xs ${sshTestResult.ok ? "text-emerald-600" : "text-rose-600"}`}>{sshTestResult.detail}</span>
+              ) : null}
+            </div>
             <div className="space-y-2">
               <h3 className="font-semibold">Built Websites</h3>
               {websites.length === 0 ? <p className="text-xs text-muted">No websites found yet.</p> : null}
@@ -862,7 +902,7 @@ export default function SettingsPage() {
           </Card>
         ) : null}
 
-        {tab.startsWith("skill:") && tab !== "skill:website-builder" ? (
+        {tab.startsWith("skill:") && tab !== "skill:website-builder" && tab !== "skill:camera-vision" && tab !== "skill:cameraVision" ? (
           <Card>
             <h2 className="text-lg font-semibold">Skill Settings</h2>
             <p className="text-sm text-muted">This tab is contributed by a skill. Custom UI can be added here by that skill.</p>
@@ -880,14 +920,22 @@ export default function SettingsPage() {
             <Button type="button" tone="blue" onClick={() => void loadHealth()}>Refresh</Button>
           </div>
           <div className="mb-2">
-            <HealthPill level={health?.level ?? "orange"} label={health?.level === "green" ? "Operational" : undefined} className="w-48 justify-center whitespace-nowrap" />
+            <HealthPill
+              level={health?.level ?? "orange"}
+              label={health?.level === "green" ? "Operational" : health?.level === "orange" ? "Not all configured" : undefined}
+              className="w-48 justify-center whitespace-nowrap overflow-hidden text-ellipsis"
+            />
           </div>
           <div className="max-h-[60vh] space-y-2 overflow-y-auto">
             {(health?.checks ?? []).map((check) => (
               <article key={check.id} className="rounded-ui border bg-surface p-2 text-xs">
                 <div className="flex items-center justify-between gap-2">
                   <strong>{check.name}</strong>
-                  <HealthPill level={check.level} label={healthLabelForCheck(check)} className="w-48 justify-center whitespace-nowrap" />
+                  <HealthPill
+                    level={check.level}
+                    label={healthLabelForCheck(check)}
+                    className="w-48 justify-center whitespace-nowrap overflow-hidden text-ellipsis"
+                  />
                 </div>
                 <div className="text-muted">{check.detail}</div>
                 <div className="text-muted">Last OK: {check.lastSuccessfulAt ? new Date(check.lastSuccessfulAt).toLocaleString() : "-"}</div>
@@ -933,7 +981,10 @@ function normalizeUpdateError(value?: string): string | undefined {
       (line) =>
         line.length > 0 &&
         !line.startsWith("From https://github.com/") &&
+        !line.includes("main -> origin/main") &&
+        !/^[0-9a-f]{7,}\.\.[0-9a-f]{7,}\s+main\s+->\s+origin\/main$/i.test(line) &&
         !line.includes("[DEP0169]") &&
+        !line.includes("Use `node --trace-deprecation") &&
         !line.includes("url.parse() behavior is not standardized")
     );
   if (cleaned.length === 0) return undefined;

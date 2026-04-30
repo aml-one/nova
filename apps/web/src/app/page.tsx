@@ -416,7 +416,7 @@ export default function HomePage() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[260px_1fr]">
-      <Card className="h-fit lg:sticky lg:top-24">
+      <Card className="h-fit self-start">
         <h2 className="mb-2 text-lg font-semibold">Session</h2>
         <div className="space-y-2">
           <label className="text-xs text-muted">Session</label>
@@ -511,7 +511,7 @@ export default function HomePage() {
             />
             Show thinking in chat
           </label>
-          <Link href="/thoughts" className="inline-block rounded-ui border bg-pastelPurple px-2 py-1 text-xs text-slate-900">
+          <Link href="/thoughts" className="inline-block text-xs font-medium text-violet-700 underline underline-offset-2 hover:text-violet-800 dark:text-violet-300 dark:hover:text-violet-200">
             Open Live Thoughts
           </Link>
         </div>

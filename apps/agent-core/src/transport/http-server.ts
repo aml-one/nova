@@ -1307,6 +1307,49 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         getDatabase().prepare("DELETE FROM website_projects WHERE id = ?").run(payload.id);
         return sendJson(response, 200, { ok: true, correlationId });
       }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/websites/test-ssh") {
+        const payload = (await readJson(request)) as {
+          sshHost?: string;
+          sshUser?: string;
+          sshPort?: number;
+          sshPrivateKeyPath?: string;
+        };
+        const sshHost = payload.sshHost?.trim();
+        const sshUser = payload.sshUser?.trim() || "root";
+        const sshPort = Number.isFinite(payload.sshPort) ? Number(payload.sshPort) : 22;
+        const sshPrivateKeyPath = payload.sshPrivateKeyPath?.trim();
+        if (!sshHost) {
+          return sendJson(response, 400, { error: "sshHost is required", correlationId });
+        }
+        const keyArg = sshPrivateKeyPath ? `-i "${sshPrivateKeyPath.replace(/"/g, '\\"')}"` : "";
+        const command = [
+          "ssh",
+          "-o BatchMode=yes",
+          "-o StrictHostKeyChecking=accept-new",
+          "-o ConnectTimeout=8",
+          `-p ${Math.max(1, sshPort)}`,
+          keyArg,
+          `${sshUser}@${sshHost}`,
+          `"echo nova-ssh-ok"`
+        ]
+          .filter(Boolean)
+          .join(" ");
+        try {
+          const run = await runLocalCommand(command);
+          const ok = /nova-ssh-ok/i.test(`${run.stdout} ${run.stderr}`);
+          return sendJson(response, ok ? 200 : 400, {
+            ok,
+            detail: ok ? "SSH connection succeeded." : (run.stderr || run.stdout || "SSH connection failed").trim(),
+            correlationId
+          });
+        } catch (error) {
+          return sendJson(response, 400, {
+            ok: false,
+            detail: error instanceof Error ? error.message : "SSH connection failed",
+            correlationId
+          });
+        }
+      }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/ocr/extract") {
         const payload = (await readJson(request)) as { filePath?: string };
         if (!payload.filePath) {
