@@ -5,10 +5,19 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 NOW="$(date +%Y%m%d-%H%M%S)"
-BACKUP_DIR="$ROOT_DIR/data/reset-backups"
-STATE_DIR="$ROOT_DIR/data/state"
-IDENTITY_ARCHIVE_DIR="$ROOT_DIR/data/identity-archive"
 PERSONAS_DIR="$ROOT_DIR/config/personas"
+BACKUP_ROOTS=(
+  "$ROOT_DIR/data/reset-backups"
+  "$ROOT_DIR/apps/agent-core/data/reset-backups"
+)
+STATE_DIRS=(
+  "$ROOT_DIR/data/state"
+  "$ROOT_DIR/apps/agent-core/data/state"
+)
+IDENTITY_ARCHIVE_DIRS=(
+  "$ROOT_DIR/data/identity-archive"
+  "$ROOT_DIR/apps/agent-core/data/identity-archive"
+)
 
 RED="\033[31m"
 YELLOW="\033[33m"
@@ -30,21 +39,38 @@ warn_destructive() {
 
 stop_local_processes() {
   echo "Stopping local Nova processes (if running)..."
+  pkill -f "scripts/start-local.sh" >/dev/null 2>&1 || true
+  pkill -f "start-local.sh" >/dev/null 2>&1 || true
   pkill -f "tsx watch src/index.ts" >/dev/null 2>&1 || true
   pkill -f "next dev" >/dev/null 2>&1 || true
+  pkill -f "@nova/agent-core@0.1.0 dev" >/dev/null 2>&1 || true
+  pkill -f "@nova/web@0.1.0 dev" >/dev/null 2>&1 || true
+  sleep 1
 }
 
 create_backups() {
-  mkdir -p "$BACKUP_DIR"
   echo "Creating safety backup snapshot..."
-  if [[ -d "$STATE_DIR" ]]; then
-    cp -R "$STATE_DIR" "$BACKUP_DIR/state-$NOW"
-    echo "  - backed up data/state -> data/reset-backups/state-$NOW"
-  fi
-  if [[ -d "$IDENTITY_ARCHIVE_DIR" ]]; then
-    cp -R "$IDENTITY_ARCHIVE_DIR" "$BACKUP_DIR/identity-archive-$NOW"
-    echo "  - backed up data/identity-archive -> data/reset-backups/identity-archive-$NOW"
-  fi
+  for backup_dir in "${BACKUP_ROOTS[@]}"; do
+    mkdir -p "$backup_dir"
+  done
+  local index=0
+  for state_dir in "${STATE_DIRS[@]}"; do
+    local backup_dir="${BACKUP_ROOTS[$index]}"
+    if [[ -d "$state_dir" ]]; then
+      cp -R "$state_dir" "$backup_dir/state-$NOW"
+      echo "  - backed up $state_dir -> $backup_dir/state-$NOW"
+    fi
+    index=$((index + 1))
+  done
+  index=0
+  for archive_dir in "${IDENTITY_ARCHIVE_DIRS[@]}"; do
+    local backup_dir="${BACKUP_ROOTS[$index]}"
+    if [[ -d "$archive_dir" ]]; then
+      cp -R "$archive_dir" "$backup_dir/identity-archive-$NOW"
+      echo "  - backed up $archive_dir -> $backup_dir/identity-archive-$NOW"
+    fi
+    index=$((index + 1))
+  done
 }
 
 confirm_yes_no() {
@@ -65,22 +91,32 @@ confirm_typed() {
 
 perform_soft_reset() {
   echo "Running soft reset..."
-  rm -f "$STATE_DIR/learning-log.json"
-  rm -f "$STATE_DIR/curiosity-store.json"
+  for state_dir in "${STATE_DIRS[@]}"; do
+    rm -f "$state_dir/learning-log.json"
+    rm -f "$state_dir/curiosity-store.json"
+  done
   echo -e "${GREEN}Soft reset complete.${RESET}"
 }
 
 perform_hard_reset() {
   echo "Running hard reset..."
-  rm -rf "$STATE_DIR"
-  rm -rf "$IDENTITY_ARCHIVE_DIR"
+  for state_dir in "${STATE_DIRS[@]}"; do
+    rm -rf "$state_dir"
+  done
+  for archive_dir in "${IDENTITY_ARCHIVE_DIRS[@]}"; do
+    rm -rf "$archive_dir"
+  done
   echo -e "${GREEN}Hard reset complete.${RESET}"
 }
 
 perform_factory_reset() {
   echo "Running factory reset..."
-  rm -rf "$STATE_DIR"
-  rm -rf "$IDENTITY_ARCHIVE_DIR"
+  for state_dir in "${STATE_DIRS[@]}"; do
+    rm -rf "$state_dir"
+  done
+  for archive_dir in "${IDENTITY_ARCHIVE_DIRS[@]}"; do
+    rm -rf "$archive_dir"
+  done
   rm -rf "$PERSONAS_DIR"
   echo -e "${GREEN}Factory reset complete.${RESET}"
 }
@@ -144,9 +180,29 @@ main() {
   esac
 
   echo
+  echo "Post-reset verification:"
+  for state_dir in "${STATE_DIRS[@]}"; do
+    if [[ -d "$state_dir" ]]; then
+      echo "  - still present: $state_dir (will be recreated on next start if services are running)"
+    else
+      echo "  - removed: $state_dir"
+    fi
+  done
+  for archive_dir in "${IDENTITY_ARCHIVE_DIRS[@]}"; do
+    if [[ -d "$archive_dir" ]]; then
+      echo "  - still present: $archive_dir"
+    else
+      echo "  - removed: $archive_dir"
+    fi
+  done
+
+  echo
   echo -e "${GREEN}Done.${RESET} You can restart Nova with:"
   echo "  bash ./scripts/start-local.sh"
+  echo
+  echo "If old chat/session UI data remains, clear browser localStorage for http://localhost:3000."
 }
 
 main "$@"
+
 
