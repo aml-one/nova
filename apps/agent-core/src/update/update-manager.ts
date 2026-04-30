@@ -180,10 +180,35 @@ export class UpdateManager {
   ): Promise<{ pushedAt?: string; sha?: string; url?: string; error?: string }> {
     const url = `https://api.github.com/repos/${owner}/${repo}/commits?per_page=1`;
     try {
+      const githubToken = process.env.GITHUB_TOKEN?.trim();
       const response = await fetch(url, {
-        headers: { "user-agent": "nova-agent-core" }
+        headers: {
+          "user-agent": "nova-agent-core",
+          accept: "application/vnd.github+json",
+          "x-github-api-version": "2022-11-28",
+          ...(githubToken ? { authorization: `Bearer ${githubToken}` } : {})
+        }
       });
       if (!response.ok) {
+        const rateLimitRemaining = response.headers.get("x-ratelimit-remaining");
+        const rateLimitReset = response.headers.get("x-ratelimit-reset");
+        if (response.status === 403) {
+          const resetAt =
+            rateLimitReset && Number.isFinite(Number(rateLimitReset))
+              ? new Date(Number(rateLimitReset) * 1000).toISOString()
+              : undefined;
+          if (rateLimitRemaining === "0") {
+            return {
+              error: `GitHub rate limit reached (403).${resetAt ? ` Resets at ${resetAt}.` : ""}`
+            };
+          }
+          return {
+            error: "GitHub returned 403 (forbidden). Check GITHUB_TOKEN validity/permissions and repo visibility."
+          };
+        }
+        if (response.status === 401) {
+          return { error: "GitHub returned 401 (unauthorized). Check GITHUB_TOKEN." };
+        }
         return { error: `GitHub returned ${response.status}` };
       }
       const payload = (await response.json()) as Array<{

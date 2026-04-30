@@ -83,7 +83,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   updates: {
     enabled: process.env.NOVA_UPDATES_ENABLED === "true",
-    checkIntervalMs: Number(process.env.NOVA_UPDATES_INTERVAL_MS ?? String(30 * 60 * 1000)),
+    checkIntervalMs: Number(process.env.NOVA_UPDATES_INTERVAL_MS ?? String(24 * 60 * 60 * 1000)),
     repoOwner: process.env.NOVA_UPDATES_REPO_OWNER ?? "",
     repoName: process.env.NOVA_UPDATES_REPO_NAME ?? "",
     channel: process.env.NOVA_UPDATES_CHANNEL === "beta" ? "beta" : "stable",
@@ -304,7 +304,12 @@ export class SettingsService {
       },
       updates: {
         enabled: settings.updates?.enabled === true,
-        checkIntervalMs: clampInt(settings.updates?.checkIntervalMs, 60_000, 24 * 60 * 60 * 1000, 30 * 60 * 1000),
+        checkIntervalMs: clampInt(
+          settings.updates?.checkIntervalMs,
+          24 * 60 * 60 * 1000,
+          7 * 24 * 60 * 60 * 1000,
+          24 * 60 * 60 * 1000
+        ),
         repoOwner: String(settings.updates?.repoOwner ?? "").trim(),
         repoName: String(settings.updates?.repoName ?? "").trim(),
         channel: settings.updates?.channel === "beta" ? "beta" : "stable",

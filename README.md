@@ -170,11 +170,17 @@ Recommended production approach: run Nova as OS services (agent-core + web) and 
    - `systemctl status nova-web.service`
 
 ## Configuration
+- Put your `.env` file in the repository root (same folder as `README.md`, `apps/`, `skills/`, and `scripts/`).
 - Persona files: `config/personas/*.persona.yaml`
 - Camera aliases and RTSP mapping: `config/cameras/cameras.yaml`
 - Improvement policy: `config/improvement/policy.yaml`
 - GitOps policy: `config/gitops/policy.yaml`
 - SQLite state DB: `data/state/nova.db`
+
+### Update Check Authentication
+- To avoid GitHub API 403/rate-limit issues, set:
+  - `GITHUB_TOKEN=<your_github_pat>`
+- This token is used for update checks against the GitHub commits API.
 
 ### Messaging Delivery Environment
 - WhatsApp outbound:

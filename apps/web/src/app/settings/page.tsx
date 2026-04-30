@@ -720,6 +720,7 @@ export default function SettingsPage() {
         {tab === "updates" ? (
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">Auto Updates</h2>
+            <p className="text-xs text-muted">Automatic checks run at most once per day. Use "Check now" anytime for a manual check.</p>
             <label className="flex items-center gap-2"><Checkbox checked={settings.updates.enabled} onChange={(e) => setSettings((p) => ({ ...p, updates: { ...p.updates, enabled: e.target.checked } }))} /> Enable update checks</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.updates.autoApply} onChange={(e) => setSettings((p) => ({ ...p, updates: { ...p.updates, autoApply: e.target.checked } }))} /> Auto apply updates in background</label>
             <div className="grid gap-2 md:grid-cols-3">
