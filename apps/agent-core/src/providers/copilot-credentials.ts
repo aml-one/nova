@@ -126,12 +126,13 @@ export function resolveCopilotDefaultModelId(): string {
   if (envModel) return envModel;
   try {
     const s = copilotSettingsGetter?.();
-    const fromCopilot = s?.copilot.defaultModel?.trim();
-    if (fromCopilot) return fromCopilot;
-    const fromDefaults = s?.models.defaultByProvider.copilot?.trim();
-    if (fromDefaults) return fromDefaults;
+    const fromDropdown = s?.models.defaultByProvider.copilot?.trim();
+    if (fromDropdown) return fromDropdown;
+    const fromCopilotSection = s?.copilot.defaultModel?.trim();
+    if (fromCopilotSection) return fromCopilotSection;
   } catch {
     // ignore
   }
+  /** Smaller / “mini” class models are typically the lightest Copilot tier; still subject to your GitHub Copilot subscription. */
   return "gpt-4o-mini";
 }

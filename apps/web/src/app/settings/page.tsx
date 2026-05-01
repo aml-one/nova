@@ -1015,12 +1015,33 @@ export default function SettingsPage() {
               </label>
               <label className="grid gap-1 text-sm">
                 Copilot default model
-                <Select value={settings.models.defaultByProvider.copilot} onChange={(e) => setSettings((p) => ({ ...p, models: { defaultByProvider: { ...p.models.defaultByProvider, copilot: e.target.value } } }))}>
+                <Select
+                  value={settings.models.defaultByProvider.copilot}
+                  onChange={(e) =>
+                    setSettings((p) => {
+                      const id = e.target.value;
+                      return {
+                        ...p,
+                        models: { defaultByProvider: { ...p.models.defaultByProvider, copilot: id } },
+                        copilot: { ...p.copilot, defaultModel: id }
+                      };
+                    })
+                  }
+                >
                   <option value="">Auto / env default</option>
-                  {(modelOptions.copilot ?? []).map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+                  {(modelOptions.copilot ?? []).map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.id}
+                    </option>
+                  ))}
                 </Select>
               </label>
             </div>
+            <p className="text-[11px] text-muted leading-snug">
+              Copilot usage is billed by your GitHub Copilot plan, not Nova—pick a mini/smaller model from the list for lighter chat.{" "}
+              <em>Auto / env default</em> uses <code className="font-mono text-[10px]">COPILOT_MODEL</code> when set, otherwise Nova uses{" "}
+              <code className="font-mono text-[10px]">gpt-4o-mini</code>. For no cloud spend on inference, use Ollama as the primary provider (local).
+            </p>
             <label className="flex items-center gap-2"><Checkbox checked={settings.costGovernor.enabled} onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, enabled: e.target.checked } }))} /> Enable smart cost governor</label>
             <div className="grid gap-2 md:grid-cols-2">
               <Input type="number" value={settings.costGovernor.dailyBudgetUsd} onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, dailyBudgetUsd: Number(e.target.value || 0) } }))} placeholder="Daily budget USD" />
@@ -1045,6 +1066,7 @@ export default function SettingsPage() {
                     onClick={() =>
                       setSettings((p) => ({
                         ...p,
+                        models: { defaultByProvider: { ...p.models.defaultByProvider, copilot: preset.model } },
                         copilot: {
                           ...p.copilot,
                           baseUrl: preset.baseUrl,
@@ -1066,7 +1088,7 @@ export default function SettingsPage() {
                   <strong>Step 2:</strong>{" "}
                   {selectedCopilotPreset?.authMode === "device-login"
                     ? "Run device login in terminal, complete one-time code on GitHub, then use generated auth profile."
-                    : "Paste API key and default model."}
+                    : "Paste API key; pick the Copilot default model from the dropdown above."}
                 </div>
                 <div><strong>Step 3:</strong> Click Validate, then Save Settings.</div>
               </div>
@@ -1144,7 +1166,6 @@ export default function SettingsPage() {
               ) : (
                 <Input value={settings.copilot.apiKey} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, apiKey: e.target.value } }))} placeholder="COPILOT_API_KEY" />
               )}
-              <Input value={settings.copilot.defaultModel} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, defaultModel: e.target.value } }))} placeholder="Default model" />
               <div className="flex flex-wrap gap-2">
                 <Button type="button" tone="purple" onClick={() => void runCopilotSetupValidation()}>Validate Copilot setup</Button>
                 <a className="text-xs underline" href="https://github.com/marketplace/models" target="_blank" rel="noreferrer">GitHub Models</a>
