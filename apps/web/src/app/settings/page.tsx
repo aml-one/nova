@@ -192,6 +192,7 @@ export default function SettingsPage() {
   const [channelsSetupMode, setChannelsSetupMode] = useState<"signal" | "whatsapp" | "both">("both");
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
+  const [chatStyleSaveState, setChatStyleSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   const isLightMode = resolvedTheme === "light";
   const activeAssistantBubbleColor = isLightMode ? settings.web.chatStyle.assistantBubbleColorLight : settings.web.chatStyle.assistantBubbleColor;
@@ -253,20 +254,28 @@ export default function SettingsPage() {
     const serialized = JSON.stringify(settings.web.chatStyle);
     if (!lastSavedChatStyleRef.current) {
       lastSavedChatStyleRef.current = serialized;
+      setChatStyleSaveState("idle");
       return;
     }
     if (serialized === lastSavedChatStyleRef.current) return;
+    setChatStyleSaveState("saving");
     const timer = setTimeout(() => {
       void (async () => {
-        const response = await fetch("/api/settings", {
-          method: "PUT",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ web: { chatStyle: settings.web.chatStyle } })
-        });
-        if (response.ok) {
-          lastSavedChatStyleRef.current = serialized;
-        } else {
-          setError("Could not auto-save chat style");
+        try {
+          const response = await fetch("/api/settings", {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ web: { chatStyle: settings.web.chatStyle } })
+          });
+          if (response.ok) {
+            lastSavedChatStyleRef.current = serialized;
+            setChatStyleSaveState("saved");
+            setTimeout(() => setChatStyleSaveState("idle"), 1200);
+          } else {
+            setChatStyleSaveState("error");
+          }
+        } catch {
+          setChatStyleSaveState("error");
         }
       })();
     }, 350);
@@ -729,8 +738,29 @@ export default function SettingsPage() {
                 <Input type="number" min={0} max={30} value={settings.web.chatStyle.bubbleRadiusPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, bubbleRadiusPx: Number(e.target.value || 0) } } }))} />
               </label>
             </div>
-            <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
-              Editing <strong>{isLightMode ? "Light" : "Dark"}</strong> mode palette. Switch theme to edit the other palette.
+            <div className="flex items-center justify-between rounded-ui border bg-surface p-2 text-xs text-muted">
+              <span>
+                Editing <strong>{isLightMode ? "Light" : "Dark"}</strong> mode palette. Switch theme to edit the other palette.
+              </span>
+              <span
+                className={
+                  chatStyleSaveState === "saving"
+                    ? "text-amber-600"
+                    : chatStyleSaveState === "saved"
+                      ? "text-emerald-600"
+                      : chatStyleSaveState === "error"
+                        ? "text-rose-600"
+                        : "text-muted"
+                }
+              >
+                {chatStyleSaveState === "saving"
+                  ? "Saving style..."
+                  : chatStyleSaveState === "saved"
+                    ? "Style saved"
+                    : chatStyleSaveState === "error"
+                      ? "Save failed"
+                      : " "}
+              </span>
             </div>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.chatStyle.showNames} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, showNames: e.target.checked } } }))} /> Show names in chat bubbles (Nova, You)</label>
             <div className="rounded-ui border bg-surface p-3">
