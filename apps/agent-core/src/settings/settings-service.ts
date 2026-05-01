@@ -24,9 +24,15 @@ const DEFAULT_SETTINGS: AppSettings = {
       assistantBubbleColor: "#e9d5ff",
       userTextColor: "#0f172a",
       assistantTextColor: "#0f172a",
+      userActionIconColor: "#475569",
+      assistantActionIconColor: "#475569",
       bubbleBackgroundEnabled: true,
       borderColor: "#94a3b8",
       borderThicknessPx: 1,
+      userBorderThicknessPx: 1,
+      assistantBorderThicknessPx: 1,
+      userBackgroundOpacityPct: 100,
+      assistantBackgroundOpacityPct: 100,
       bubbleRadiusPx: 16,
       showNames: true
     },
@@ -139,10 +145,21 @@ export class SettingsService {
           assistantBubbleColor: update.web?.chatStyle?.assistantBubbleColor ?? current.web.chatStyle.assistantBubbleColor,
           userTextColor: update.web?.chatStyle?.userTextColor ?? current.web.chatStyle.userTextColor,
           assistantTextColor: update.web?.chatStyle?.assistantTextColor ?? current.web.chatStyle.assistantTextColor,
+          userActionIconColor: update.web?.chatStyle?.userActionIconColor ?? current.web.chatStyle.userActionIconColor,
+          assistantActionIconColor:
+            update.web?.chatStyle?.assistantActionIconColor ?? current.web.chatStyle.assistantActionIconColor,
           bubbleBackgroundEnabled:
             update.web?.chatStyle?.bubbleBackgroundEnabled ?? current.web.chatStyle.bubbleBackgroundEnabled,
           borderColor: update.web?.chatStyle?.borderColor ?? current.web.chatStyle.borderColor,
           borderThicknessPx: update.web?.chatStyle?.borderThicknessPx ?? current.web.chatStyle.borderThicknessPx,
+          userBorderThicknessPx:
+            update.web?.chatStyle?.userBorderThicknessPx ?? current.web.chatStyle.userBorderThicknessPx,
+          assistantBorderThicknessPx:
+            update.web?.chatStyle?.assistantBorderThicknessPx ?? current.web.chatStyle.assistantBorderThicknessPx,
+          userBackgroundOpacityPct:
+            update.web?.chatStyle?.userBackgroundOpacityPct ?? current.web.chatStyle.userBackgroundOpacityPct,
+          assistantBackgroundOpacityPct:
+            update.web?.chatStyle?.assistantBackgroundOpacityPct ?? current.web.chatStyle.assistantBackgroundOpacityPct,
           bubbleRadiusPx: update.web?.chatStyle?.bubbleRadiusPx ?? current.web.chatStyle.bubbleRadiusPx,
           showNames: update.web?.chatStyle?.showNames ?? current.web.chatStyle.showNames
         },
@@ -244,9 +261,43 @@ export class SettingsService {
             settings.web?.chatStyle?.assistantTextColor,
             DEFAULT_SETTINGS.web.chatStyle.assistantTextColor
           ),
+          userActionIconColor: normalizeHexColor(
+            settings.web?.chatStyle?.userActionIconColor,
+            DEFAULT_SETTINGS.web.chatStyle.userActionIconColor
+          ),
+          assistantActionIconColor: normalizeHexColor(
+            settings.web?.chatStyle?.assistantActionIconColor,
+            DEFAULT_SETTINGS.web.chatStyle.assistantActionIconColor
+          ),
           bubbleBackgroundEnabled: settings.web?.chatStyle?.bubbleBackgroundEnabled !== false,
           borderColor: normalizeHexColor(settings.web?.chatStyle?.borderColor, DEFAULT_SETTINGS.web.chatStyle.borderColor),
           borderThicknessPx: clampInt(settings.web?.chatStyle?.borderThicknessPx, 0, 8, DEFAULT_SETTINGS.web.chatStyle.borderThicknessPx),
+          userBorderThicknessPx: clampInt(
+            settings.web?.chatStyle?.userBorderThicknessPx,
+            0,
+            8,
+            settings.web?.chatStyle?.borderThicknessPx ?? DEFAULT_SETTINGS.web.chatStyle.userBorderThicknessPx
+          ),
+          assistantBorderThicknessPx: clampInt(
+            settings.web?.chatStyle?.assistantBorderThicknessPx,
+            0,
+            8,
+            settings.web?.chatStyle?.borderThicknessPx ?? DEFAULT_SETTINGS.web.chatStyle.assistantBorderThicknessPx
+          ),
+          userBackgroundOpacityPct: clampInt(
+            settings.web?.chatStyle?.userBackgroundOpacityPct,
+            0,
+            100,
+            settings.web?.chatStyle?.bubbleBackgroundEnabled === false ? 0 : DEFAULT_SETTINGS.web.chatStyle.userBackgroundOpacityPct
+          ),
+          assistantBackgroundOpacityPct: clampInt(
+            settings.web?.chatStyle?.assistantBackgroundOpacityPct,
+            0,
+            100,
+            settings.web?.chatStyle?.bubbleBackgroundEnabled === false
+              ? 0
+              : DEFAULT_SETTINGS.web.chatStyle.assistantBackgroundOpacityPct
+          ),
           bubbleRadiusPx: clampInt(settings.web?.chatStyle?.bubbleRadiusPx, 0, 30, DEFAULT_SETTINGS.web.chatStyle.bubbleRadiusPx),
           showNames: settings.web?.chatStyle?.showNames !== false
         },

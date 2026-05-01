@@ -24,9 +24,15 @@ export type AppSettings = {
       assistantBubbleColor: string;
       userTextColor: string;
       assistantTextColor: string;
+      userActionIconColor: string;
+      assistantActionIconColor: string;
       bubbleBackgroundEnabled: boolean;
       borderColor: string;
       borderThicknessPx: number;
+      userBorderThicknessPx: number;
+      assistantBorderThicknessPx: number;
+      userBackgroundOpacityPct: number;
+      assistantBackgroundOpacityPct: number;
       bubbleRadiusPx: number;
       showNames: boolean;
     };
@@ -156,10 +162,22 @@ export class SettingsRepository {
               typeof parsed.web?.chatStyle?.assistantTextColor === "string"
                 ? parsed.web.chatStyle.assistantTextColor
                 : "#0f172a",
+            userActionIconColor:
+              typeof parsed.web?.chatStyle?.userActionIconColor === "string"
+                ? parsed.web.chatStyle.userActionIconColor
+                : "#475569",
+            assistantActionIconColor:
+              typeof parsed.web?.chatStyle?.assistantActionIconColor === "string"
+                ? parsed.web.chatStyle.assistantActionIconColor
+                : "#475569",
             bubbleBackgroundEnabled: parsed.web?.chatStyle?.bubbleBackgroundEnabled !== false,
             borderColor:
               typeof parsed.web?.chatStyle?.borderColor === "string" ? parsed.web.chatStyle.borderColor : "#94a3b8",
             borderThicknessPx: Number(parsed.web?.chatStyle?.borderThicknessPx ?? 1),
+            userBorderThicknessPx: Number(parsed.web?.chatStyle?.userBorderThicknessPx ?? parsed.web?.chatStyle?.borderThicknessPx ?? 1),
+            assistantBorderThicknessPx: Number(parsed.web?.chatStyle?.assistantBorderThicknessPx ?? parsed.web?.chatStyle?.borderThicknessPx ?? 1),
+            userBackgroundOpacityPct: Number(parsed.web?.chatStyle?.userBackgroundOpacityPct ?? (parsed.web?.chatStyle?.bubbleBackgroundEnabled !== false ? 100 : 0)),
+            assistantBackgroundOpacityPct: Number(parsed.web?.chatStyle?.assistantBackgroundOpacityPct ?? (parsed.web?.chatStyle?.bubbleBackgroundEnabled !== false ? 100 : 0)),
             bubbleRadiusPx: Number(parsed.web?.chatStyle?.bubbleRadiusPx ?? 16),
             showNames: parsed.web?.chatStyle?.showNames !== false
           },
