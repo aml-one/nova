@@ -1112,7 +1112,7 @@ export default function SettingsPage() {
                     />
                   ) : null}
                   <div className="text-muted">
-                    Manual fallback command: <code>npm run login --provider=github-copilot</code>
+                    If your repo has no <code>login</code> script, set <code>NOVA_COPILOT_DEVICE_LOGIN_COMMAND</code> in env.
                   </div>
                 </div>
               ) : null}

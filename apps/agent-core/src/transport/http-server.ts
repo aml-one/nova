@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { exec as execCallback, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { TaskOrchestrator } from "../orchestrator/task-orchestrator.js";
@@ -544,7 +544,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/copilot/device-login/start") {
-        const command = (process.env.NOVA_COPILOT_DEVICE_LOGIN_COMMAND || "npm run login --provider=github-copilot").trim();
+        const commandResolution = resolveCopilotLoginCommand();
+        if (!commandResolution.command) {
+          return sendJson(response, 400, {
+            error: commandResolution.error ?? "No device login command configured",
+            correlationId
+          });
+        }
+        const command = commandResolution.command;
         const sessionId = randomUUID();
         const session: CopilotDeviceLoginSession = {
           id: sessionId,
@@ -2369,6 +2376,30 @@ function resolveCopilotLoginCommandCwd(): string {
   const candidates = [process.cwd(), resolve(process.cwd(), ".."), resolve(process.cwd(), "../..")];
   const matched = candidates.find((dir) => existsSync(resolve(dir, "package.json")));
   return matched ?? process.cwd();
+}
+
+function resolveCopilotLoginCommand(): { command?: string; error?: string } {
+  const fromEnv = (process.env.NOVA_COPILOT_DEVICE_LOGIN_COMMAND ?? "").trim();
+  if (fromEnv) {
+    return { command: fromEnv };
+  }
+  const candidates = [process.cwd(), resolve(process.cwd(), ".."), resolve(process.cwd(), "../..")];
+  for (const dir of candidates) {
+    const packageJsonPath = resolve(dir, "package.json");
+    if (!existsSync(packageJsonPath)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { scripts?: Record<string, string> };
+      if (parsed.scripts?.login) {
+        return { command: "npm run login -- --provider=github-copilot" };
+      }
+    } catch {
+      // ignore malformed package.json and keep searching
+    }
+  }
+  return {
+    error:
+      "No login script found. Add a package.json login script or set NOVA_COPILOT_DEVICE_LOGIN_COMMAND to your device-login command."
+  };
 }
 
 function sendJson(response: ServerResponse, status: number, data: unknown): void {
