@@ -7,6 +7,7 @@
   "scripts": {
     "build": "corepack pnpm -r build",
     "dev": "corepack pnpm --parallel --filter @nova/agent-core --filter @nova/web dev",
+    "login": "node ./scripts/login.mjs",
     "lint": "corepack pnpm -r lint",
     "typecheck": "corepack pnpm -r typecheck",
     "test": "corepack pnpm -r test"
