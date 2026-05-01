@@ -82,7 +82,19 @@ export async function fetchCopilotTokenFromGithub(githubAccessToken: string): Pr
  * Resolve Copilot HTTP credentials for OpenAI-compatible calls (/models, /chat/completions).
  * Order: env pair → settings api key + base URL → ~/.nova/copilot-auth.json (copilot token or GitHub→Copilot exchange).
  */
+export function isCopilotIntegrationDisabled(): boolean {
+  if (process.env.NOVA_COPILOT_DISABLED === "true") return true;
+  try {
+    return copilotSettingsGetter?.().copilot.disabled === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function resolveCopilotRuntime(): Promise<{ baseUrl: string; apiKey: string }> {
+  if (isCopilotIntegrationDisabled()) {
+    return { baseUrl: "", apiKey: "" };
+  }
   const envBase = process.env.COPILOT_BASE_URL?.trim() ?? "";
   const envKey = process.env.COPILOT_API_KEY?.trim() ?? "";
   if (envBase && envKey) {
@@ -111,6 +123,8 @@ export async function resolveCopilotRuntime(): Promise<{ baseUrl: string; apiKey
 
 /** Sync hints for setup UI (optional GitHub token refresh not attempted). */
 export function copilotLikelyConfigured(getSettings: () => AppSettings): boolean {
+  if (process.env.NOVA_COPILOT_DISABLED === "true") return false;
+  if (getSettings().copilot.disabled === true) return false;
   const envOk = Boolean(process.env.COPILOT_BASE_URL?.trim() && process.env.COPILOT_API_KEY?.trim());
   if (envOk) return true;
   const s = getSettings();
@@ -122,6 +136,7 @@ export function copilotLikelyConfigured(getSettings: () => AppSettings): boolean
 }
 
 export function resolveCopilotDefaultModelId(): string {
+  if (isCopilotIntegrationDisabled()) return "";
   const envModel = process.env.COPILOT_MODEL?.trim();
   if (envModel) return envModel;
   try {

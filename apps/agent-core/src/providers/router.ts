@@ -1,5 +1,6 @@
-import type { ChatMessage, ChatRequest, ModelResponse } from "@nova/sdk/provider";
+import type { ChatMessage, ChatRequest, ModelResponse, ProviderHealth } from "@nova/sdk/provider";
 import { CopilotProvider } from "./copilot.js";
+import { isCopilotIntegrationDisabled } from "./copilot-credentials.js";
 import { LMStudioProvider } from "./lmstudio.js";
 import { OllamaProvider } from "./ollama.js";
 
@@ -54,7 +55,14 @@ export class ModelRouter {
   }
 
   async health(): Promise<Record<string, boolean>> {
-    const checks = await Promise.all(this.providers.map(async (provider) => provider.health()));
+    const checks = await Promise.all(
+      this.providers.map(async (provider): Promise<ProviderHealth> => {
+        if (provider.name === "copilot" && isCopilotIntegrationDisabled()) {
+          return { name: "copilot", ok: false, details: "integration disabled in Settings" };
+        }
+        return provider.health();
+      })
+    );
     for (const check of checks) {
       const state = this.state.get(check.name);
       if (state) {
@@ -72,6 +80,9 @@ export class ModelRouter {
     for (const provider of ordered) {
       const providerState = this.state.get(provider.name);
       if (!providerState) {
+        continue;
+      }
+      if (provider.name === "copilot" && isCopilotIntegrationDisabled()) {
         continue;
       }
       if (providerState.openUntil > Date.now()) {
@@ -100,6 +111,7 @@ export class ModelRouter {
     await this.maybeRefreshHealth();
     const preferredOrder = ["ollama", "lmstudio", "copilot"] as const;
     const ordered = preferredOrder
+      .filter((name) => name !== "copilot" || !isCopilotIntegrationDisabled())
       .map((name) => this.providers.find((provider) => provider.name === name))
       .filter((provider): provider is (typeof this.providers)[number] => Boolean(provider));
     let lastError: Error | undefined;
@@ -136,6 +148,9 @@ export class ModelRouter {
       if (!providerState || providerState.openUntil > Date.now()) {
         continue;
       }
+      if (provider.name === "copilot" && isCopilotIntegrationDisabled()) {
+        continue;
+      }
       try {
         const response = await provider.streamChat({ messages, model }, onToken);
         providerState.failures = 0;
@@ -162,6 +177,7 @@ export class ModelRouter {
     await this.maybeRefreshHealth();
     const preferredOrder = ["ollama", "lmstudio", "copilot"] as const;
     const ordered = preferredOrder
+      .filter((name) => name !== "copilot" || !isCopilotIntegrationDisabled())
       .map((name) => this.providers.find((provider) => provider.name === name))
       .filter((provider): provider is (typeof this.providers)[number] => Boolean(provider));
     let lastError: Error | undefined;
@@ -198,7 +214,10 @@ export class ModelRouter {
   }
 
   private selectProviders(): typeof this.providers {
-    const activeFirst = [...this.providers].sort((a, b) => {
+    const pool = isCopilotIntegrationDisabled()
+      ? this.providers.filter((provider) => provider.name !== "copilot")
+      : [...this.providers];
+    const activeFirst = pool.sort((a, b) => {
       if (a.name === this.activeProvider) {
         return -1;
       }

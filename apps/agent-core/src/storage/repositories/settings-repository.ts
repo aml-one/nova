@@ -98,6 +98,8 @@ export type AppSettings = {
     baseUrl: string;
     apiKey: string;
     defaultModel: string;
+    /** When true, Nova never routes chat to Copilot (router + catalog skip). */
+    disabled: boolean;
   };
   updates: {
     enabled: boolean;
@@ -291,7 +293,8 @@ export class SettingsRepository {
         copilot: {
           baseUrl: typeof parsed.copilot?.baseUrl === "string" ? parsed.copilot.baseUrl : "",
           apiKey: copilotApiKey,
-          defaultModel: typeof parsed.copilot?.defaultModel === "string" ? parsed.copilot.defaultModel : ""
+          defaultModel: typeof parsed.copilot?.defaultModel === "string" ? parsed.copilot.defaultModel : "",
+          disabled: parsed.copilot?.disabled === true
         },
         updates: {
           enabled: parsed.updates?.enabled === true,

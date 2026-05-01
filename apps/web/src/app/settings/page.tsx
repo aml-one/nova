@@ -79,7 +79,7 @@ type SettingsState = {
   shell: { timeoutMs: number; maxOutputBytes: number };
   identityBackup: { enabled: boolean; intervalDays: number; labelPrefix: string };
   models: { defaultByProvider: { ollama: string; lmstudio: string; copilot: string } };
-  copilot: { baseUrl: string; apiKey: string; defaultModel: string };
+  copilot: { baseUrl: string; apiKey: string; defaultModel: string; disabled: boolean };
   updates: { enabled: boolean; checkIntervalMs: number; repoOwner: string; repoName: string; channel: "stable" | "beta"; autoApply: boolean };
   offlineMode: { enabled: boolean };
   skillSettings: Record<string, Record<string, unknown>>;
@@ -148,7 +148,7 @@ const DEFAULT_SETTINGS: SettingsState = {
   shell: { timeoutMs: 30000, maxOutputBytes: 1024 * 1024 },
   identityBackup: { enabled: false, intervalDays: 1, labelPrefix: "nova-core" },
   models: { defaultByProvider: { ollama: "", lmstudio: "", copilot: "" } },
-  copilot: { baseUrl: "", apiKey: "", defaultModel: "gpt-4o-mini" },
+  copilot: { baseUrl: "", apiKey: "", defaultModel: "gpt-4o-mini", disabled: false },
   updates: { enabled: false, checkIntervalMs: 1800000, repoOwner: "", repoName: "", channel: "stable", autoApply: false }
   , offlineMode: { enabled: false },
   skillSettings: {}
@@ -195,6 +195,9 @@ const COPILOT_PRESETS: Array<{
     authMode: "device-login"
   }
 ];
+
+/** Select value when Copilot routing is turned off (persisted as copilot.disabled). */
+const COPILOT_MODEL_DISABLED_VALUE = "__nova_disabled__";
 
 export default function SettingsPage() {
   const { resolvedTheme } = useTheme();
@@ -535,6 +538,13 @@ export default function SettingsPage() {
   async function runCopilotSetupValidation(): Promise<void> {
     setError(null);
     setStatus(null);
+    if (settings.copilot.disabled) {
+      setCopilotSetupOutput(
+        "Copilot is disabled. Pick Auto / env default or a model in Copilot default model (not Disabled), save, then validate."
+      );
+      setStatus(null);
+      return;
+    }
     const preset = COPILOT_PRESETS.find((item) => item.baseUrl === settings.copilot.baseUrl.trim());
     const sendApiKey = preset?.authMode === "device-login" ? "" : settings.copilot.apiKey;
     const response = await fetch("/api/setup/copilot/test", {
@@ -1016,19 +1026,28 @@ export default function SettingsPage() {
               <label className="grid gap-1 text-sm">
                 Copilot default model
                 <Select
-                  value={settings.models.defaultByProvider.copilot}
+                  value={settings.copilot.disabled ? COPILOT_MODEL_DISABLED_VALUE : settings.models.defaultByProvider.copilot}
                   onChange={(e) =>
                     setSettings((p) => {
                       const id = e.target.value;
+                      if (id === COPILOT_MODEL_DISABLED_VALUE) {
+                        return {
+                          ...p,
+                          copilot: { ...p.copilot, disabled: true, defaultModel: "" },
+                          models: { defaultByProvider: { ...p.models.defaultByProvider, copilot: "" } },
+                          activeProvider: p.activeProvider === "copilot" ? "ollama" : p.activeProvider
+                        };
+                      }
                       return {
                         ...p,
-                        models: { defaultByProvider: { ...p.models.defaultByProvider, copilot: id } },
-                        copilot: { ...p.copilot, defaultModel: id }
+                        copilot: { ...p.copilot, disabled: false, defaultModel: id },
+                        models: { defaultByProvider: { ...p.models.defaultByProvider, copilot: id } }
                       };
                     })
                   }
                 >
                   <option value="">Auto / env default</option>
+                  <option value={COPILOT_MODEL_DISABLED_VALUE}>Disabled — never use Copilot</option>
                   {(modelOptions.copilot ?? []).map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.id}
@@ -1038,9 +1057,9 @@ export default function SettingsPage() {
               </label>
             </div>
             <p className="text-[11px] text-muted leading-snug">
-              Copilot usage is billed by your GitHub Copilot plan, not Nova—pick a mini/smaller model from the list for lighter chat.{" "}
+              Copilot usage follows your GitHub Copilot plan. Pick <em>Disabled</em> to remove Copilot from routing entirely (local-first only when using Ollama/LM Studio fallbacks). Otherwise choose a mini/smaller model for lighter chat.{" "}
               <em>Auto / env default</em> uses <code className="font-mono text-[10px]">COPILOT_MODEL</code> when set, otherwise Nova uses{" "}
-              <code className="font-mono text-[10px]">gpt-4o-mini</code>. For no cloud spend on inference, use Ollama as the primary provider (local).
+              <code className="font-mono text-[10px]">gpt-4o-mini</code>. For no cloud inference spend, keep primary provider Ollama (local).
             </p>
             <label className="flex items-center gap-2"><Checkbox checked={settings.costGovernor.enabled} onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, enabled: e.target.checked } }))} /> Enable smart cost governor</label>
             <div className="grid gap-2 md:grid-cols-2">
@@ -1069,6 +1088,7 @@ export default function SettingsPage() {
                         models: { defaultByProvider: { ...p.models.defaultByProvider, copilot: preset.model } },
                         copilot: {
                           ...p.copilot,
+                          disabled: false,
                           baseUrl: preset.baseUrl,
                           defaultModel: preset.model,
                           ...(preset.authMode === "device-login" ? { apiKey: "" } : {})
@@ -1101,7 +1121,11 @@ export default function SettingsPage() {
                       type="button"
                       tone="blue"
                       onClick={() => void startCopilotDeviceLogin()}
-                      disabled={copilotDeviceLoginState === "starting" || copilotDeviceLoginState === "waiting_for_user"}
+                      disabled={
+                        settings.copilot.disabled ||
+                        copilotDeviceLoginState === "starting" ||
+                        copilotDeviceLoginState === "waiting_for_user"
+                      }
                     >
                       {copilotDeviceLoginState === "starting" || copilotDeviceLoginState === "waiting_for_user"
                         ? "Login running..."
@@ -1167,7 +1191,7 @@ export default function SettingsPage() {
                 <Input value={settings.copilot.apiKey} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, apiKey: e.target.value } }))} placeholder="COPILOT_API_KEY" />
               )}
               <div className="flex flex-wrap gap-2">
-                <Button type="button" tone="purple" onClick={() => void runCopilotSetupValidation()}>Validate Copilot setup</Button>
+                <Button type="button" tone="purple" disabled={settings.copilot.disabled} onClick={() => void runCopilotSetupValidation()}>Validate Copilot setup</Button>
                 <a className="text-xs underline" href="https://github.com/marketplace/models" target="_blank" rel="noreferrer">GitHub Models</a>
                 <a className="text-xs underline" href="https://openrouter.ai/models" target="_blank" rel="noreferrer">OpenRouter Models</a>
               </div>
@@ -1875,7 +1899,8 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
     copilot: {
       baseUrl: value?.copilot?.baseUrl ?? DEFAULT_SETTINGS.copilot.baseUrl,
       apiKey: value?.copilot?.apiKey ?? DEFAULT_SETTINGS.copilot.apiKey,
-      defaultModel: value?.copilot?.defaultModel ?? DEFAULT_SETTINGS.copilot.defaultModel
+      defaultModel: value?.copilot?.defaultModel ?? DEFAULT_SETTINGS.copilot.defaultModel,
+      disabled: value?.copilot?.disabled ?? DEFAULT_SETTINGS.copilot.disabled
     },
     updates: {
       enabled: value?.updates?.enabled ?? DEFAULT_SETTINGS.updates.enabled,

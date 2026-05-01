@@ -95,7 +95,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   copilot: {
     baseUrl: process.env.COPILOT_BASE_URL ?? "",
     apiKey: process.env.COPILOT_API_KEY ?? "",
-    defaultModel: process.env.COPILOT_MODEL ?? "gpt-4o-mini"
+    defaultModel: process.env.COPILOT_MODEL ?? "gpt-4o-mini",
+    disabled: process.env.NOVA_COPILOT_DISABLED === "true"
   },
   updates: {
     enabled: process.env.NOVA_UPDATES_ENABLED === "true",
@@ -231,7 +232,8 @@ export class SettingsService {
       copilot: {
         baseUrl: update.copilot?.baseUrl ?? current.copilot.baseUrl,
         apiKey: update.copilot?.apiKey ?? current.copilot.apiKey,
-        defaultModel: update.copilot?.defaultModel ?? current.copilot.defaultModel
+        defaultModel: update.copilot?.defaultModel ?? current.copilot.defaultModel,
+        disabled: update.copilot?.disabled ?? current.copilot.disabled
       },
       updates: {
         enabled: update.updates?.enabled ?? current.updates.enabled,
@@ -257,7 +259,7 @@ export class SettingsService {
     return {
       delegatedFolders: delegatedFolders.length > 0 ? delegatedFolders : [resolvePath(process.cwd())],
       requireApprovals: settings.requireApprovals === true,
-      activeProvider: normalizeActiveProvider(settings.activeProvider),
+      activeProvider: normalizeActiveProvider(settings.activeProvider, settings.copilot?.disabled === true),
       visionProviderPriority: normalizeVisionPriority(settings.visionProviderPriority),
       mediaProviderPriority: normalizeMediaPriority(settings.mediaProviderPriority),
       shell: {
@@ -411,7 +413,8 @@ export class SettingsService {
       copilot: {
         baseUrl: String(settings.copilot?.baseUrl ?? "").trim(),
         apiKey: String(settings.copilot?.apiKey ?? "").trim(),
-        defaultModel: String(settings.copilot?.defaultModel ?? "gpt-4o-mini").trim()
+        defaultModel: String(settings.copilot?.defaultModel ?? "gpt-4o-mini").trim(),
+        disabled: settings.copilot?.disabled === true
       },
       updates: {
         enabled: settings.updates?.enabled === true,
@@ -437,8 +440,14 @@ export class SettingsService {
   }
 }
 
-function normalizeActiveProvider(value: AppSettings["activeProvider"] | undefined): AppSettings["activeProvider"] {
-  return value === "lmstudio" || value === "copilot" ? value : "ollama";
+function normalizeActiveProvider(
+  value: AppSettings["activeProvider"] | undefined,
+  copilotDisabled?: boolean
+): AppSettings["activeProvider"] {
+  const base: AppSettings["activeProvider"] =
+    value === "lmstudio" || value === "copilot" ? value : "ollama";
+  if (copilotDisabled && base === "copilot") return "ollama";
+  return base;
 }
 
 function normalizeVisionPriority(
