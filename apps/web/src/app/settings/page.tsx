@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { FaCopy, FaPenToSquare, FaRotateRight } from "react-icons/fa6";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -694,6 +695,11 @@ export default function SettingsPage() {
                 >
                   {settings.web.chatStyle.showNames ? <div className="mb-1 text-[11px] font-semibold">You</div> : null}
                   <div className="text-xs">Can you summarize what changed?</div>
+                  <div className="mt-1 flex justify-end gap-2">
+                    <FaCopy className="h-3.5 w-3.5" style={{ color: settings.web.chatStyle.userActionIconColor }} />
+                    <FaPenToSquare className="h-3.5 w-3.5" style={{ color: settings.web.chatStyle.userActionIconColor }} />
+                    <FaRotateRight className="h-3.5 w-3.5" style={{ color: settings.web.chatStyle.userActionIconColor }} />
+                  </div>
                 </article>
                 <article
                   className="mr-auto max-w-[85%] border p-2.5"
@@ -709,6 +715,9 @@ export default function SettingsPage() {
                 >
                   {settings.web.chatStyle.showNames ? <div className="mb-1 text-[11px] font-semibold">Nova</div> : null}
                   <div className="text-xs">Updated styling preview is now active.</div>
+                  <div className="mt-1">
+                    <FaCopy className="h-3.5 w-3.5" style={{ color: settings.web.chatStyle.assistantActionIconColor }} />
+                  </div>
                   <div className="mt-1 text-[11px]" style={{ color: settings.web.chatStyle.statsTextColor }}>
                     2.9 t/s · 36 tok · 12.9s · ollama/gemma4:26B
                   </div>

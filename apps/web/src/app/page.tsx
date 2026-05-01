@@ -691,7 +691,7 @@ export default function HomePage() {
                     onClick={() => void copyTurnText(turn.text, turn.id)}
                     title="Copy message"
                   >
-                    <FaCopy className="h-5 w-5" />
+                    <FaCopy className="h-3.5 w-3.5" />
                   </button>
                   <div className="flex items-center gap-1.5">
                     <button
@@ -704,7 +704,7 @@ export default function HomePage() {
                       }}
                       title="Edit"
                     >
-                      <FaPenToSquare className="h-5 w-5" />
+                      <FaPenToSquare className="h-3.5 w-3.5" />
                     </button>
                     <button
                       type="button"
@@ -716,7 +716,7 @@ export default function HomePage() {
                       }}
                       title="Regenerate"
                     >
-                      <FaRotateRight className="h-5 w-5" />
+                      <FaRotateRight className="h-3.5 w-3.5" />
                     </button>
                     {editingTurnId === turn.id ? (
                       <>
@@ -733,7 +733,7 @@ export default function HomePage() {
                           }}
                           title="Save"
                         >
-                          <FaFloppyDisk className="h-5 w-5" />
+                          <FaFloppyDisk className="h-3.5 w-3.5" />
                         </button>
                         <button
                           type="button"
@@ -742,7 +742,7 @@ export default function HomePage() {
                           onClick={() => setEditingTurnId(null)}
                           title="Cancel"
                         >
-                          <FaXmark className="h-5 w-5" />
+                          <FaXmark className="h-3.5 w-3.5" />
                         </button>
                       </>
                     ) : null}
@@ -758,7 +758,7 @@ export default function HomePage() {
                     onClick={() => void copyTurnText(turn.text, turn.id)}
                     title="Copy message"
                   >
-                    <FaCopy className="h-5 w-5" />
+                    <FaCopy className="h-3.5 w-3.5" />
                   </button>
                 </div>
               ) : null}
