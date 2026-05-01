@@ -47,6 +47,10 @@ type SettingsState = {
       bubbleBackgroundEnabled: boolean;
       borderColor: string;
       borderThicknessPx: number;
+      userBorderThicknessPx: number;
+      assistantBorderThicknessPx: number;
+      userBackgroundOpacityPct: number;
+      assistantBackgroundOpacityPct: number;
       bubbleRadiusPx: number;
       showNames: boolean;
     };
@@ -102,6 +106,10 @@ const DEFAULT_SETTINGS: SettingsState = {
       bubbleBackgroundEnabled: true,
       borderColor: "#94a3b8",
       borderThicknessPx: 1,
+      userBorderThicknessPx: 1,
+      assistantBorderThicknessPx: 1,
+      userBackgroundOpacityPct: 100,
+      assistantBackgroundOpacityPct: 100,
       bubbleRadiusPx: 16,
       showNames: true
     }
@@ -548,7 +556,23 @@ export default function SettingsPage() {
                 <Input type="color" value={settings.web.chatStyle.borderColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, borderColor: e.target.value } } }))} />
               </label>
               <label className="grid gap-1 text-xs">
-                Border thickness (px)
+                User border thickness (px)
+                <Input type="number" min={0} max={8} value={settings.web.chatStyle.userBorderThicknessPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBorderThicknessPx: Number(e.target.value || 0) } } }))} />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Nova border thickness (px)
+                <Input type="number" min={0} max={8} value={settings.web.chatStyle.assistantBorderThicknessPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBorderThicknessPx: Number(e.target.value || 0) } } }))} />
+              </label>
+              <label className="grid gap-1 text-xs">
+                User background opacity (%)
+                <Input type="number" min={0} max={100} value={settings.web.chatStyle.userBackgroundOpacityPct} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBackgroundOpacityPct: Number(e.target.value || 0) } } }))} />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Nova background opacity (%)
+                <Input type="number" min={0} max={100} value={settings.web.chatStyle.assistantBackgroundOpacityPct} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBackgroundOpacityPct: Number(e.target.value || 0) } } }))} />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Legacy border thickness (px)
                 <Input type="number" min={0} max={8} value={settings.web.chatStyle.borderThicknessPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, borderThicknessPx: Number(e.target.value || 0) } } }))} />
               </label>
               <label className="grid gap-1 text-xs">
@@ -564,11 +588,11 @@ export default function SettingsPage() {
                   className="ml-auto max-w-[85%] border p-2.5"
                   style={{
                     backgroundColor: settings.web.chatStyle.bubbleBackgroundEnabled
-                      ? settings.web.chatStyle.userBubbleColor
+                      ? withOpacity(settings.web.chatStyle.userBubbleColor, settings.web.chatStyle.userBackgroundOpacityPct)
                       : "transparent",
                     color: settings.web.chatStyle.userTextColor,
                     borderColor: settings.web.chatStyle.borderColor,
-                    borderWidth: `${settings.web.chatStyle.borderThicknessPx}px`,
+                    borderWidth: `${settings.web.chatStyle.userBorderThicknessPx}px`,
                     borderRadius: `${settings.web.chatStyle.bubbleRadiusPx}px`
                   }}
                 >
@@ -579,11 +603,11 @@ export default function SettingsPage() {
                   className="mr-auto max-w-[85%] border p-2.5"
                   style={{
                     backgroundColor: settings.web.chatStyle.bubbleBackgroundEnabled
-                      ? settings.web.chatStyle.assistantBubbleColor
+                      ? withOpacity(settings.web.chatStyle.assistantBubbleColor, settings.web.chatStyle.assistantBackgroundOpacityPct)
                       : "transparent",
                     color: settings.web.chatStyle.assistantTextColor,
                     borderColor: settings.web.chatStyle.borderColor,
-                    borderWidth: `${settings.web.chatStyle.borderThicknessPx}px`,
+                    borderWidth: `${settings.web.chatStyle.assistantBorderThicknessPx}px`,
                     borderRadius: `${settings.web.chatStyle.bubbleRadiusPx}px`
                   }}
                 >
@@ -1293,6 +1317,20 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
           value?.web?.chatStyle?.bubbleBackgroundEnabled ?? DEFAULT_SETTINGS.web.chatStyle.bubbleBackgroundEnabled,
         borderColor: value?.web?.chatStyle?.borderColor ?? DEFAULT_SETTINGS.web.chatStyle.borderColor,
         borderThicknessPx: value?.web?.chatStyle?.borderThicknessPx ?? DEFAULT_SETTINGS.web.chatStyle.borderThicknessPx,
+        userBorderThicknessPx:
+          value?.web?.chatStyle?.userBorderThicknessPx ??
+          value?.web?.chatStyle?.borderThicknessPx ??
+          DEFAULT_SETTINGS.web.chatStyle.userBorderThicknessPx,
+        assistantBorderThicknessPx:
+          value?.web?.chatStyle?.assistantBorderThicknessPx ??
+          value?.web?.chatStyle?.borderThicknessPx ??
+          DEFAULT_SETTINGS.web.chatStyle.assistantBorderThicknessPx,
+        userBackgroundOpacityPct:
+          value?.web?.chatStyle?.userBackgroundOpacityPct ??
+          ((value?.web?.chatStyle?.bubbleBackgroundEnabled ?? DEFAULT_SETTINGS.web.chatStyle.bubbleBackgroundEnabled) ? 100 : 0),
+        assistantBackgroundOpacityPct:
+          value?.web?.chatStyle?.assistantBackgroundOpacityPct ??
+          ((value?.web?.chatStyle?.bubbleBackgroundEnabled ?? DEFAULT_SETTINGS.web.chatStyle.bubbleBackgroundEnabled) ? 100 : 0),
         bubbleRadiusPx: value?.web?.chatStyle?.bubbleRadiusPx ?? DEFAULT_SETTINGS.web.chatStyle.bubbleRadiusPx,
         showNames: value?.web?.chatStyle?.showNames ?? DEFAULT_SETTINGS.web.chatStyle.showNames
       }
@@ -1358,4 +1396,14 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
     },
     skillSettings: value?.skillSettings ?? DEFAULT_SETTINGS.skillSettings
   };
+}
+
+function withOpacity(hex: string, opacityPct: number): string {
+  const normalized = Math.max(0, Math.min(100, Number(opacityPct || 0))) / 100;
+  const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.trim());
+  if (!match) return hex;
+  const r = Number.parseInt(match[1], 16);
+  const g = Number.parseInt(match[2], 16);
+  const b = Number.parseInt(match[3], 16);
+  return `rgba(${r}, ${g}, ${b}, ${normalized})`;
 }

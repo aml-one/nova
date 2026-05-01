@@ -28,6 +28,10 @@ type AppSettingsPayload = {
       bubbleBackgroundEnabled?: boolean;
       borderColor?: string;
       borderThicknessPx?: number;
+      userBorderThicknessPx?: number;
+      assistantBorderThicknessPx?: number;
+      userBackgroundOpacityPct?: number;
+      assistantBackgroundOpacityPct?: number;
     };
   };
   learning?: {

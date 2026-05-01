@@ -75,6 +75,10 @@ export default function HomePage() {
     bubbleBackgroundEnabled: true,
     borderColor: "#94a3b8",
     borderThicknessPx: 1,
+    userBorderThicknessPx: 1,
+    assistantBorderThicknessPx: 1,
+    userBackgroundOpacityPct: 100,
+    assistantBackgroundOpacityPct: 100,
     bubbleRadiusPx: 16,
     showNames: true
   });
@@ -83,6 +87,7 @@ export default function HomePage() {
   const [sendOnEnter, setSendOnEnter] = useState(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
+  const [lastCopiedTurnId, setLastCopiedTurnId] = useState<string | null>(null);
   const hasLoadedSessionsRef = useRef(false);
   const compactActionClass = "inline-flex h-9 min-w-9 items-center justify-center px-2";
   const bubbleIconActionClass =
@@ -156,6 +161,10 @@ export default function HomePage() {
               bubbleBackgroundEnabled?: boolean;
               borderColor?: string;
               borderThicknessPx?: number;
+              userBorderThicknessPx?: number;
+              assistantBorderThicknessPx?: number;
+              userBackgroundOpacityPct?: number;
+              assistantBackgroundOpacityPct?: number;
               bubbleRadiusPx?: number;
               showNames?: boolean;
             };
@@ -173,6 +182,20 @@ export default function HomePage() {
           bubbleBackgroundEnabled: data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled,
           borderColor: data.settings?.web?.chatStyle?.borderColor ?? prev.borderColor,
           borderThicknessPx: data.settings?.web?.chatStyle?.borderThicknessPx ?? prev.borderThicknessPx,
+          userBorderThicknessPx:
+            data.settings?.web?.chatStyle?.userBorderThicknessPx ??
+            data.settings?.web?.chatStyle?.borderThicknessPx ??
+            prev.userBorderThicknessPx,
+          assistantBorderThicknessPx:
+            data.settings?.web?.chatStyle?.assistantBorderThicknessPx ??
+            data.settings?.web?.chatStyle?.borderThicknessPx ??
+            prev.assistantBorderThicknessPx,
+          userBackgroundOpacityPct:
+            data.settings?.web?.chatStyle?.userBackgroundOpacityPct ??
+            ((data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled) ? 100 : 0),
+          assistantBackgroundOpacityPct:
+            data.settings?.web?.chatStyle?.assistantBackgroundOpacityPct ??
+            ((data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled) ? 100 : 0),
           bubbleRadiusPx: data.settings?.web?.chatStyle?.bubbleRadiusPx ?? prev.bubbleRadiusPx,
           showNames: data.settings?.web?.chatStyle?.showNames ?? prev.showNames
         }));
@@ -423,13 +446,35 @@ export default function HomePage() {
     });
   }
 
-  async function copyTurnText(value: string): Promise<void> {
+  async function copyTurnText(value: string, turnId: string): Promise<void> {
     if (!value.trim()) return;
     try {
-      await navigator.clipboard.writeText(value);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
     } catch {
-      // Ignore clipboard failures to keep chat interaction lightweight.
+      // Fallback for environments where navigator.clipboard is blocked/unavailable.
+      try {
+        const textarea = document.createElement("textarea");
+        textarea.value = value;
+        textarea.style.position = "fixed";
+        textarea.style.opacity = "0";
+        textarea.style.pointerEvents = "none";
+        document.body.appendChild(textarea);
+        textarea.focus();
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+      } catch {
+        return;
+      }
     }
+    setLastCopiedTurnId(turnId);
+    setTimeout(() => {
+      setLastCopiedTurnId((prev) => (prev === turnId ? null : prev));
+    }, 1200);
   }
 
   return (
@@ -439,7 +484,7 @@ export default function HomePage() {
           <h1 className="text-2xl font-semibold">Nova Chat</h1>
           <div className="flex items-center gap-1.5">
             <Select
-              className="h-8 min-w-[240px] py-0.5 pl-2 pr-6 text-sm leading-tight"
+              className="h-9 min-w-[260px] py-1 pl-2 pr-6 text-sm leading-normal"
               value={activeSessionId}
               onChange={(event) => {
                 const sessionId = event.target.value;
@@ -561,17 +606,21 @@ export default function HomePage() {
               style={
                 turn.role === "user"
                   ? {
-                      backgroundColor: chatStyle.bubbleBackgroundEnabled ? chatStyle.userBubbleColor : "transparent",
+                      backgroundColor: chatStyle.bubbleBackgroundEnabled
+                        ? withOpacity(chatStyle.userBubbleColor, chatStyle.userBackgroundOpacityPct)
+                        : "transparent",
                       color: chatStyle.userTextColor,
                       borderColor: chatStyle.borderColor,
-                      borderWidth: `${chatStyle.borderThicknessPx}px`,
+                      borderWidth: `${chatStyle.userBorderThicknessPx}px`,
                       borderRadius: `${chatStyle.bubbleRadiusPx}px`
                     }
                   : {
-                      backgroundColor: chatStyle.bubbleBackgroundEnabled ? chatStyle.assistantBubbleColor : "transparent",
+                      backgroundColor: chatStyle.bubbleBackgroundEnabled
+                        ? withOpacity(chatStyle.assistantBubbleColor, chatStyle.assistantBackgroundOpacityPct)
+                        : "transparent",
                       color: chatStyle.assistantTextColor,
                       borderColor: chatStyle.borderColor,
-                      borderWidth: `${chatStyle.borderThicknessPx}px`,
+                      borderWidth: `${chatStyle.assistantBorderThicknessPx}px`,
                       borderRadius: `${chatStyle.bubbleRadiusPx}px`
                     }
               }
@@ -588,7 +637,7 @@ export default function HomePage() {
               )}
               {turn.role === "user" ? (
                 <div className="mt-2 flex items-center justify-between gap-2">
-                  <button type="button" className={bubbleIconActionClass} onClick={() => void copyTurnText(turn.text)} title="Copy message">
+                  <button type="button" className={bubbleIconActionClass} onClick={() => void copyTurnText(turn.text, turn.id)} title="Copy message">
                     <FaCopy className="h-5 w-5" />
                   </button>
                   <div className="flex items-center gap-1.5">
@@ -640,11 +689,12 @@ export default function HomePage() {
               ) : null}
               {turn.role === "assistant" ? (
                 <div className="mt-2">
-                  <button type="button" className={bubbleIconActionClass} onClick={() => void copyTurnText(turn.text)} title="Copy message">
+                  <button type="button" className={bubbleIconActionClass} onClick={() => void copyTurnText(turn.text, turn.id)} title="Copy message">
                     <FaCopy className="h-5 w-5" />
                   </button>
                 </div>
               ) : null}
+              {lastCopiedTurnId === turn.id ? <div className="mt-1 text-[11px] text-emerald-400">Copied</div> : null}
               {turn.role === "assistant" && showThinkingInChat && turn.thinkingText ? (
                 <div className="mt-2 rounded-ui border border-slate-500/60 bg-slate-200/60 p-1.5 text-xs text-slate-700 dark:bg-slate-700/45 dark:text-slate-200">
                   <button
@@ -944,6 +994,16 @@ function randomId(): string {
 
 function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function withOpacity(hex: string, opacityPct: number): string {
+  const normalized = Math.max(0, Math.min(100, Number(opacityPct || 0))) / 100;
+  const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.trim());
+  if (!match) return hex;
+  const r = Number.parseInt(match[1], 16);
+  const g = Number.parseInt(match[2], 16);
+  const b = Number.parseInt(match[3], 16);
+  return `rgba(${r}, ${g}, ${b}, ${normalized})`;
 }
 
 async function readSseStream(
