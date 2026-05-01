@@ -13,6 +13,16 @@ export type ProviderModelInfo = {
   provider: ProviderName;
 };
 
+function dedupeProviderModelsById(models: ProviderModelInfo[]): ProviderModelInfo[] {
+  const seen = new Set<string>();
+  return models.filter((m) => {
+    const id = m.id.trim();
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 export class ProviderCatalogService {
   constructor(private readonly getSettings: () => AppSettings) {}
 
@@ -128,10 +138,11 @@ export class ProviderCatalogService {
       });
       if (!response.ok) return [];
       const data = (await response.json()) as { data?: Array<{ id?: string }> };
-      return (data.data ?? [])
+      const raw = (data.data ?? [])
         .map((item) => item.id?.trim())
         .filter((item): item is string => Boolean(item))
         .map((id) => ({ id, provider: "copilot" as const }));
+      return dedupeProviderModelsById(raw);
     } catch {
       return [];
     }

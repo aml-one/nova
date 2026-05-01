@@ -199,6 +199,16 @@ const COPILOT_PRESETS: Array<{
 /** Select value when Copilot routing is turned off (persisted as copilot.disabled). */
 const COPILOT_MODEL_DISABLED_VALUE = "__nova_disabled__";
 
+function dedupeCatalogModelsById<T extends { id: string }>(models: T[]): T[] {
+  const seen = new Set<string>();
+  return models.filter((m) => {
+    const id = m.id.trim();
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
 export default function SettingsPage() {
   const { resolvedTheme } = useTheme();
   const router = useRouter();
@@ -1013,14 +1023,22 @@ export default function SettingsPage() {
                 Ollama default model
                 <Select value={settings.models.defaultByProvider.ollama} onChange={(e) => setSettings((p) => ({ ...p, models: { defaultByProvider: { ...p.models.defaultByProvider, ollama: e.target.value } } }))}>
                   <option value="">Auto / env default</option>
-                  {(modelOptions.ollama ?? []).map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+                  {dedupeCatalogModelsById(modelOptions.ollama ?? []).map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.id}
+                    </option>
+                  ))}
                 </Select>
               </label>
               <label className="grid gap-1 text-sm">
                 LM Studio default model
                 <Select value={settings.models.defaultByProvider.lmstudio} onChange={(e) => setSettings((p) => ({ ...p, models: { defaultByProvider: { ...p.models.defaultByProvider, lmstudio: e.target.value } } }))}>
                   <option value="">Auto / env default</option>
-                  {(modelOptions.lmstudio ?? []).map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+                  {dedupeCatalogModelsById(modelOptions.lmstudio ?? []).map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.id}
+                    </option>
+                  ))}
                 </Select>
               </label>
               <label className="grid gap-1 text-sm">
@@ -1048,7 +1066,7 @@ export default function SettingsPage() {
                 >
                   <option value="">Auto / env default</option>
                   <option value={COPILOT_MODEL_DISABLED_VALUE}>Disabled — never use Copilot</option>
-                  {(modelOptions.copilot ?? []).map((m) => (
+                  {dedupeCatalogModelsById(modelOptions.copilot ?? []).map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.id}
                     </option>
@@ -1611,8 +1629,10 @@ export default function SettingsPage() {
                   }
                 >
                   <option value="">Auto (use provider default)</option>
-                  {selectedWebsiteBuilderModels.map((m) => (
-                    <option key={m.id} value={m.id}>{m.id}</option>
+                  {dedupeCatalogModelsById(selectedWebsiteBuilderModels).map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.id}
+                    </option>
                   ))}
                 </Select>
               </label>
