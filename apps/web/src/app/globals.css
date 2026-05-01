@@ -37,6 +37,10 @@ body {
   @apply bg-surface text-text;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 * {
   @apply border-border;
 }

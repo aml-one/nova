@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTheme } from "next-themes";
 import { FaCopy, FaPenToSquare, FaRotateRight } from "react-icons/fa6";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
@@ -154,6 +155,7 @@ const DEFAULT_SETTINGS: SettingsState = {
 };
 
 export default function SettingsPage() {
+  const { resolvedTheme } = useTheme();
   const router = useRouter();
   const [tab, setTab] = useState("general");
   const [settings, setSettings] = useState<SettingsState>(DEFAULT_SETTINGS);
@@ -189,6 +191,36 @@ export default function SettingsPage() {
   const [copilotSetupOutput, setCopilotSetupOutput] = useState<string>("");
   const [channelsSetupMode, setChannelsSetupMode] = useState<"signal" | "whatsapp" | "both">("both");
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
+  const lastSavedChatStyleRef = useRef<string>("");
+
+  const isLightMode = resolvedTheme === "light";
+  const activeAssistantBubbleColor = isLightMode ? settings.web.chatStyle.assistantBubbleColorLight : settings.web.chatStyle.assistantBubbleColor;
+  const activeUserBubbleColor = isLightMode ? settings.web.chatStyle.userBubbleColorLight : settings.web.chatStyle.userBubbleColor;
+  const activeAssistantTextColor = isLightMode ? settings.web.chatStyle.assistantTextColorLight : settings.web.chatStyle.assistantTextColor;
+  const activeUserTextColor = isLightMode ? settings.web.chatStyle.userTextColorLight : settings.web.chatStyle.userTextColor;
+  const activeAssistantActionIconColor = isLightMode
+    ? settings.web.chatStyle.assistantActionIconColorLight
+    : settings.web.chatStyle.assistantActionIconColor;
+  const activeUserActionIconColor = isLightMode
+    ? settings.web.chatStyle.userActionIconColorLight
+    : settings.web.chatStyle.userActionIconColor;
+  const activeStatsTextColor = isLightMode ? settings.web.chatStyle.statsTextColorLight : settings.web.chatStyle.statsTextColor;
+
+  function patchThemeChatStyle(input: {
+    dark: Partial<SettingsState["web"]["chatStyle"]>;
+    light: Partial<SettingsState["web"]["chatStyle"]>;
+  }): void {
+    setSettings((p) => ({
+      ...p,
+      web: {
+        ...p.web,
+        chatStyle: {
+          ...p.web.chatStyle,
+          ...(isLightMode ? input.light : input.dark)
+        }
+      }
+    }));
+  }
 
   useEffect(() => {
     void (async () => {
@@ -215,6 +247,31 @@ export default function SettingsPage() {
       setLoading(false);
     })();
   }, [router]);
+
+  useEffect(() => {
+    if (loading) return;
+    const serialized = JSON.stringify(settings.web.chatStyle);
+    if (!lastSavedChatStyleRef.current) {
+      lastSavedChatStyleRef.current = serialized;
+      return;
+    }
+    if (serialized === lastSavedChatStyleRef.current) return;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const response = await fetch("/api/settings", {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ web: { chatStyle: settings.web.chatStyle } })
+        });
+        if (response.ok) {
+          lastSavedChatStyleRef.current = serialized;
+        } else {
+          setError("Could not auto-save chat style");
+        }
+      })();
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [settings.web.chatStyle, loading]);
 
   async function loadSettings(): Promise<void> {
     const response = await fetch("/api/settings");
@@ -560,8 +617,13 @@ export default function SettingsPage() {
                 <div className="text-xs font-semibold text-muted">Nova (left)</div>
                 <ColorPickerRow
                   label="Background color"
-                  value={settings.web.chatStyle.assistantBubbleColor}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBubbleColor: value } } }))}
+                  value={activeAssistantBubbleColor}
+                  onChange={(value) =>
+                    patchThemeChatStyle({
+                      dark: { assistantBubbleColor: value },
+                      light: { assistantBubbleColorLight: value }
+                    })
+                  }
                 />
                 <label className="grid gap-1 text-xs">
                   Background opacity ({settings.web.chatStyle.assistantBackgroundOpacityPct}%)
@@ -575,13 +637,23 @@ export default function SettingsPage() {
                 </label>
                 <ColorPickerRow
                   label="Text color"
-                  value={settings.web.chatStyle.assistantTextColor}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantTextColor: value } } }))}
+                  value={activeAssistantTextColor}
+                  onChange={(value) =>
+                    patchThemeChatStyle({
+                      dark: { assistantTextColor: value },
+                      light: { assistantTextColorLight: value }
+                    })
+                  }
                 />
                 <ColorPickerRow
                   label="Action icon color"
-                  value={settings.web.chatStyle.assistantActionIconColor}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantActionIconColor: value } } }))}
+                  value={activeAssistantActionIconColor}
+                  onChange={(value) =>
+                    patchThemeChatStyle({
+                      dark: { assistantActionIconColor: value },
+                      light: { assistantActionIconColorLight: value }
+                    })
+                  }
                 />
                 <label className="grid gap-1 text-xs">
                   Border thickness (px)
@@ -592,8 +664,13 @@ export default function SettingsPage() {
                 <div className="text-xs font-semibold text-muted">User (right)</div>
                 <ColorPickerRow
                   label="Background color"
-                  value={settings.web.chatStyle.userBubbleColor}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBubbleColor: value } } }))}
+                  value={activeUserBubbleColor}
+                  onChange={(value) =>
+                    patchThemeChatStyle({
+                      dark: { userBubbleColor: value },
+                      light: { userBubbleColorLight: value }
+                    })
+                  }
                 />
                 <label className="grid gap-1 text-xs">
                   Background opacity ({settings.web.chatStyle.userBackgroundOpacityPct}%)
@@ -607,13 +684,23 @@ export default function SettingsPage() {
                 </label>
                 <ColorPickerRow
                   label="Text color"
-                  value={settings.web.chatStyle.userTextColor}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userTextColor: value } } }))}
+                  value={activeUserTextColor}
+                  onChange={(value) =>
+                    patchThemeChatStyle({
+                      dark: { userTextColor: value },
+                      light: { userTextColorLight: value }
+                    })
+                  }
                 />
                 <ColorPickerRow
                   label="Action icon color"
-                  value={settings.web.chatStyle.userActionIconColor}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userActionIconColor: value } } }))}
+                  value={activeUserActionIconColor}
+                  onChange={(value) =>
+                    patchThemeChatStyle({
+                      dark: { userActionIconColor: value },
+                      light: { userActionIconColorLight: value }
+                    })
+                  }
                 />
                 <label className="grid gap-1 text-xs">
                   Border thickness (px)
@@ -629,53 +716,21 @@ export default function SettingsPage() {
               />
               <ColorPickerRow
                 label="Stats line color"
-                value={settings.web.chatStyle.statsTextColor}
-                onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, statsTextColor: value } } }))}
+                value={activeStatsTextColor}
+                onChange={(value) =>
+                  patchThemeChatStyle({
+                    dark: { statsTextColor: value },
+                    light: { statsTextColorLight: value }
+                  })
+                }
               />
               <label className="grid gap-1 text-xs">
                 Bubble corner radius (0-30px)
                 <Input type="number" min={0} max={30} value={settings.web.chatStyle.bubbleRadiusPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, bubbleRadiusPx: Number(e.target.value || 0) } } }))} />
               </label>
             </div>
-            <div className="space-y-2 rounded-ui border bg-surface p-3">
-              <div className="text-xs font-semibold text-muted">Light mode palette overrides</div>
-              <div className="grid gap-2 md:grid-cols-2">
-                <ColorPickerRow
-                  label="User bubble color (light)"
-                  value={settings.web.chatStyle.userBubbleColorLight}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBubbleColorLight: value } } }))}
-                />
-                <ColorPickerRow
-                  label="Nova bubble color (light)"
-                  value={settings.web.chatStyle.assistantBubbleColorLight}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBubbleColorLight: value } } }))}
-                />
-                <ColorPickerRow
-                  label="User text color (light)"
-                  value={settings.web.chatStyle.userTextColorLight}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userTextColorLight: value } } }))}
-                />
-                <ColorPickerRow
-                  label="Nova text color (light)"
-                  value={settings.web.chatStyle.assistantTextColorLight}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantTextColorLight: value } } }))}
-                />
-                <ColorPickerRow
-                  label="User action icon (light)"
-                  value={settings.web.chatStyle.userActionIconColorLight}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userActionIconColorLight: value } } }))}
-                />
-                <ColorPickerRow
-                  label="Nova action icon (light)"
-                  value={settings.web.chatStyle.assistantActionIconColorLight}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantActionIconColorLight: value } } }))}
-                />
-                <ColorPickerRow
-                  label="Stats line color (light)"
-                  value={settings.web.chatStyle.statsTextColorLight}
-                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, statsTextColorLight: value } } }))}
-                />
-              </div>
+            <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
+              Editing <strong>{isLightMode ? "Light" : "Dark"}</strong> mode palette. Switch theme to edit the other palette.
             </div>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.chatStyle.showNames} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, showNames: e.target.checked } } }))} /> Show names in chat bubbles (Nova, You)</label>
             <div className="rounded-ui border bg-surface p-3">
@@ -685,9 +740,9 @@ export default function SettingsPage() {
                   className="ml-auto max-w-[85%] border p-2.5"
                   style={{
                     backgroundColor: settings.web.chatStyle.bubbleBackgroundEnabled
-                      ? withOpacity(settings.web.chatStyle.userBubbleColor, settings.web.chatStyle.userBackgroundOpacityPct)
+                      ? withOpacity(activeUserBubbleColor, settings.web.chatStyle.userBackgroundOpacityPct)
                       : "transparent",
-                    color: settings.web.chatStyle.userTextColor,
+                    color: activeUserTextColor,
                     borderColor: settings.web.chatStyle.borderColor,
                     borderWidth: `${settings.web.chatStyle.userBorderThicknessPx}px`,
                     borderRadius: `${settings.web.chatStyle.bubbleRadiusPx}px`
@@ -696,18 +751,18 @@ export default function SettingsPage() {
                   {settings.web.chatStyle.showNames ? <div className="mb-1 text-[11px] font-semibold">You</div> : null}
                   <div className="text-xs">Can you summarize what changed?</div>
                   <div className="mt-1 flex justify-end gap-2">
-                    <FaCopy className="h-3.5 w-3.5" style={{ color: settings.web.chatStyle.userActionIconColor }} />
-                    <FaPenToSquare className="h-3.5 w-3.5" style={{ color: settings.web.chatStyle.userActionIconColor }} />
-                    <FaRotateRight className="h-3.5 w-3.5" style={{ color: settings.web.chatStyle.userActionIconColor }} />
+                    <FaCopy className="h-3.5 w-3.5" style={{ color: activeUserActionIconColor }} />
+                    <FaPenToSquare className="h-3.5 w-3.5" style={{ color: activeUserActionIconColor }} />
+                    <FaRotateRight className="h-3.5 w-3.5" style={{ color: activeUserActionIconColor }} />
                   </div>
                 </article>
                 <article
                   className="mr-auto max-w-[85%] border p-2.5"
                   style={{
                     backgroundColor: settings.web.chatStyle.bubbleBackgroundEnabled
-                      ? withOpacity(settings.web.chatStyle.assistantBubbleColor, settings.web.chatStyle.assistantBackgroundOpacityPct)
+                      ? withOpacity(activeAssistantBubbleColor, settings.web.chatStyle.assistantBackgroundOpacityPct)
                       : "transparent",
-                    color: settings.web.chatStyle.assistantTextColor,
+                    color: activeAssistantTextColor,
                     borderColor: settings.web.chatStyle.borderColor,
                     borderWidth: `${settings.web.chatStyle.assistantBorderThicknessPx}px`,
                     borderRadius: `${settings.web.chatStyle.bubbleRadiusPx}px`
@@ -716,9 +771,9 @@ export default function SettingsPage() {
                   {settings.web.chatStyle.showNames ? <div className="mb-1 text-[11px] font-semibold">Nova</div> : null}
                   <div className="text-xs">Updated styling preview is now active.</div>
                   <div className="mt-1">
-                    <FaCopy className="h-3.5 w-3.5" style={{ color: settings.web.chatStyle.assistantActionIconColor }} />
+                    <FaCopy className="h-3.5 w-3.5" style={{ color: activeAssistantActionIconColor }} />
                   </div>
-                  <div className="mt-1 text-[11px]" style={{ color: settings.web.chatStyle.statsTextColor }}>
+                  <div className="mt-1 text-[11px]" style={{ color: activeStatsTextColor }}>
                     2.9 t/s · 36 tok · 12.9s · ollama/gemma4:26B
                   </div>
                 </article>
