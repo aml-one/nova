@@ -541,6 +541,16 @@ export default function SettingsPage() {
     setCopilotDeviceLoginMessage("Device login cancelled.");
   }
 
+  async function copyCopilotDeviceCode(): Promise<void> {
+    if (!copilotDeviceLoginCode) return;
+    try {
+      await navigator.clipboard.writeText(copilotDeviceLoginCode);
+      setStatus("Copied one-time code to clipboard.");
+    } catch {
+      setError("Could not copy one-time code. Please copy manually.");
+    }
+  }
+
   async function testWebsiteBuilderSshConnection(): Promise<void> {
     setSshTestResult(null);
     const response = await fetch("/api/websites/test-ssh", {
@@ -1078,8 +1088,13 @@ export default function SettingsPage() {
                     </div>
                   ) : null}
                   {copilotDeviceLoginCode ? (
-                    <div className="rounded-ui border bg-surface px-2 py-1 font-mono text-[12px]">
-                      One-time code: <strong>{copilotDeviceLoginCode}</strong>
+                    <div className="flex items-center justify-between gap-2 rounded-ui border bg-surface px-2 py-1 font-mono text-[12px]">
+                      <span>
+                        One-time code: <strong>{copilotDeviceLoginCode}</strong>
+                      </span>
+                      <Button type="button" tone="neutral" onClick={() => void copyCopilotDeviceCode()}>
+                        Copy code
+                      </Button>
                     </div>
                   ) : null}
                   {copilotDeviceLoginMessage ? (
