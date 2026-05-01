@@ -44,6 +44,8 @@ type SettingsState = {
       assistantBubbleColor: string;
       userTextColor: string;
       assistantTextColor: string;
+      userActionIconColor: string;
+      assistantActionIconColor: string;
       bubbleBackgroundEnabled: boolean;
       borderColor: string;
       borderThicknessPx: number;
@@ -103,6 +105,8 @@ const DEFAULT_SETTINGS: SettingsState = {
       assistantBubbleColor: "#e9d5ff",
       userTextColor: "#0f172a",
       assistantTextColor: "#0f172a",
+      userActionIconColor: "#475569",
+      assistantActionIconColor: "#475569",
       bubbleBackgroundEnabled: true,
       borderColor: "#94a3b8",
       borderThicknessPx: 1,
@@ -534,47 +538,78 @@ export default function SettingsPage() {
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.hideProviderModelInStats} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, hideProviderModelInStats: e.target.checked } }))} /> Hide provider/model in chat statistics</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.sendOnEnter} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, sendOnEnter: e.target.checked } }))} /> Send message on Enter (Shift+Enter for newline)</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.chatStyle.bubbleBackgroundEnabled} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, bubbleBackgroundEnabled: e.target.checked } } }))} /> Enable bubble backgrounds in chat</label>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2 rounded-ui border bg-surface p-3">
+                <div className="text-xs font-semibold text-muted">Nova (left)</div>
+                <ColorPickerRow
+                  label="Background color"
+                  value={settings.web.chatStyle.assistantBubbleColor}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBubbleColor: value } } }))}
+                />
+                <label className="grid gap-1 text-xs">
+                  Background opacity ({settings.web.chatStyle.assistantBackgroundOpacityPct}%)
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={settings.web.chatStyle.assistantBackgroundOpacityPct}
+                    onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBackgroundOpacityPct: Number(e.target.value || 0) } } }))}
+                  />
+                </label>
+                <ColorPickerRow
+                  label="Text color"
+                  value={settings.web.chatStyle.assistantTextColor}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantTextColor: value } } }))}
+                />
+                <ColorPickerRow
+                  label="Action icon color"
+                  value={settings.web.chatStyle.assistantActionIconColor}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantActionIconColor: value } } }))}
+                />
+                <label className="grid gap-1 text-xs">
+                  Border thickness (px)
+                  <Input type="number" min={0} max={8} value={settings.web.chatStyle.assistantBorderThicknessPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBorderThicknessPx: Number(e.target.value || 0) } } }))} />
+                </label>
+              </div>
+              <div className="space-y-2 rounded-ui border bg-surface p-3">
+                <div className="text-xs font-semibold text-muted">User (right)</div>
+                <ColorPickerRow
+                  label="Background color"
+                  value={settings.web.chatStyle.userBubbleColor}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBubbleColor: value } } }))}
+                />
+                <label className="grid gap-1 text-xs">
+                  Background opacity ({settings.web.chatStyle.userBackgroundOpacityPct}%)
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    value={settings.web.chatStyle.userBackgroundOpacityPct}
+                    onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBackgroundOpacityPct: Number(e.target.value || 0) } } }))}
+                  />
+                </label>
+                <ColorPickerRow
+                  label="Text color"
+                  value={settings.web.chatStyle.userTextColor}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userTextColor: value } } }))}
+                />
+                <ColorPickerRow
+                  label="Action icon color"
+                  value={settings.web.chatStyle.userActionIconColor}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userActionIconColor: value } } }))}
+                />
+                <label className="grid gap-1 text-xs">
+                  Border thickness (px)
+                  <Input type="number" min={0} max={8} value={settings.web.chatStyle.userBorderThicknessPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBorderThicknessPx: Number(e.target.value || 0) } } }))} />
+                </label>
+              </div>
+            </div>
             <div className="grid gap-2 md:grid-cols-2">
-              <label className="grid gap-1 text-xs">
-                Nova bubble color (left)
-                <Input type="color" value={settings.web.chatStyle.assistantBubbleColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBubbleColor: e.target.value } } }))} />
-              </label>
-              <label className="grid gap-1 text-xs">
-                User bubble color (right)
-                <Input type="color" value={settings.web.chatStyle.userBubbleColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBubbleColor: e.target.value } } }))} />
-              </label>
-              <label className="grid gap-1 text-xs">
-                Nova text color (left)
-                <Input type="color" value={settings.web.chatStyle.assistantTextColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantTextColor: e.target.value } } }))} />
-              </label>
-              <label className="grid gap-1 text-xs">
-                User text color (right)
-                <Input type="color" value={settings.web.chatStyle.userTextColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userTextColor: e.target.value } } }))} />
-              </label>
-              <label className="grid gap-1 text-xs">
-                Bubble border color
-                <Input type="color" value={settings.web.chatStyle.borderColor} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, borderColor: e.target.value } } }))} />
-              </label>
-              <label className="grid gap-1 text-xs">
-                User border thickness (px)
-                <Input type="number" min={0} max={8} value={settings.web.chatStyle.userBorderThicknessPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBorderThicknessPx: Number(e.target.value || 0) } } }))} />
-              </label>
-              <label className="grid gap-1 text-xs">
-                Nova border thickness (px)
-                <Input type="number" min={0} max={8} value={settings.web.chatStyle.assistantBorderThicknessPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBorderThicknessPx: Number(e.target.value || 0) } } }))} />
-              </label>
-              <label className="grid gap-1 text-xs">
-                User background opacity (%)
-                <Input type="number" min={0} max={100} value={settings.web.chatStyle.userBackgroundOpacityPct} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBackgroundOpacityPct: Number(e.target.value || 0) } } }))} />
-              </label>
-              <label className="grid gap-1 text-xs">
-                Nova background opacity (%)
-                <Input type="number" min={0} max={100} value={settings.web.chatStyle.assistantBackgroundOpacityPct} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBackgroundOpacityPct: Number(e.target.value || 0) } } }))} />
-              </label>
-              <label className="grid gap-1 text-xs">
-                Legacy border thickness (px)
-                <Input type="number" min={0} max={8} value={settings.web.chatStyle.borderThicknessPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, borderThicknessPx: Number(e.target.value || 0) } } }))} />
-              </label>
+              <ColorPickerRow
+                label="Bubble border color"
+                value={settings.web.chatStyle.borderColor}
+                onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, borderColor: value } } }))}
+              />
               <label className="grid gap-1 text-xs">
                 Bubble corner radius (0-30px)
                 <Input type="number" min={0} max={30} value={settings.web.chatStyle.bubbleRadiusPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, bubbleRadiusPx: Number(e.target.value || 0) } } }))} />
@@ -1299,6 +1334,29 @@ function normalizeUpdateError(value?: string): string | undefined {
   return cleaned.join(" ");
 }
 
+function ColorPickerRow(input: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="grid gap-1 text-xs">
+      {input.label}
+      <div className="flex items-center gap-2">
+        <span className="inline-block h-8 w-8 rounded-ui border" style={{ backgroundColor: input.value }} />
+        <Input
+          value={input.value}
+          onChange={(e) => input.onChange(e.target.value)}
+          placeholder="#000000"
+          className="h-8"
+        />
+        <input
+          type="color"
+          value={input.value}
+          onChange={(e) => input.onChange(e.target.value)}
+          className="h-8 w-10 cursor-pointer rounded-ui border bg-surface p-0.5"
+        />
+      </div>
+    </label>
+  );
+}
+
 function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsState {
   return {
     delegatedFolders: value?.delegatedFolders ?? DEFAULT_SETTINGS.delegatedFolders,
@@ -1313,6 +1371,9 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
         assistantBubbleColor: value?.web?.chatStyle?.assistantBubbleColor ?? DEFAULT_SETTINGS.web.chatStyle.assistantBubbleColor,
         userTextColor: value?.web?.chatStyle?.userTextColor ?? DEFAULT_SETTINGS.web.chatStyle.userTextColor,
         assistantTextColor: value?.web?.chatStyle?.assistantTextColor ?? DEFAULT_SETTINGS.web.chatStyle.assistantTextColor,
+        userActionIconColor: value?.web?.chatStyle?.userActionIconColor ?? DEFAULT_SETTINGS.web.chatStyle.userActionIconColor,
+        assistantActionIconColor:
+          value?.web?.chatStyle?.assistantActionIconColor ?? DEFAULT_SETTINGS.web.chatStyle.assistantActionIconColor,
         bubbleBackgroundEnabled:
           value?.web?.chatStyle?.bubbleBackgroundEnabled ?? DEFAULT_SETTINGS.web.chatStyle.bubbleBackgroundEnabled,
         borderColor: value?.web?.chatStyle?.borderColor ?? DEFAULT_SETTINGS.web.chatStyle.borderColor,

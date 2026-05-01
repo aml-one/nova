@@ -72,6 +72,8 @@ export default function HomePage() {
     assistantBubbleColor: "#e9d5ff",
     userTextColor: "#0f172a",
     assistantTextColor: "#0f172a",
+    userActionIconColor: "#475569",
+    assistantActionIconColor: "#475569",
     bubbleBackgroundEnabled: true,
     borderColor: "#94a3b8",
     borderThicknessPx: 1,
@@ -91,7 +93,7 @@ export default function HomePage() {
   const hasLoadedSessionsRef = useRef(false);
   const compactActionClass = "inline-flex h-9 min-w-9 items-center justify-center px-2";
   const bubbleIconActionClass =
-    "inline-flex h-7 w-7 items-center justify-center text-slate-500 transition hover:text-slate-200";
+    "inline-flex h-7 w-7 items-center justify-center transition-[filter] hover:brightness-110";
 
   const uploadedMedia = useMemo(
     () =>
@@ -158,6 +160,8 @@ export default function HomePage() {
               assistantBubbleColor?: string;
               userTextColor?: string;
               assistantTextColor?: string;
+              userActionIconColor?: string;
+              assistantActionIconColor?: string;
               bubbleBackgroundEnabled?: boolean;
               borderColor?: string;
               borderThicknessPx?: number;
@@ -179,6 +183,9 @@ export default function HomePage() {
           assistantBubbleColor: data.settings?.web?.chatStyle?.assistantBubbleColor ?? prev.assistantBubbleColor,
           userTextColor: data.settings?.web?.chatStyle?.userTextColor ?? prev.userTextColor,
           assistantTextColor: data.settings?.web?.chatStyle?.assistantTextColor ?? prev.assistantTextColor,
+          userActionIconColor: data.settings?.web?.chatStyle?.userActionIconColor ?? prev.userActionIconColor,
+          assistantActionIconColor:
+            data.settings?.web?.chatStyle?.assistantActionIconColor ?? prev.assistantActionIconColor,
           bubbleBackgroundEnabled: data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled,
           borderColor: data.settings?.web?.chatStyle?.borderColor ?? prev.borderColor,
           borderThicknessPx: data.settings?.web?.chatStyle?.borderThicknessPx ?? prev.borderThicknessPx,
@@ -637,13 +644,20 @@ export default function HomePage() {
               )}
               {turn.role === "user" ? (
                 <div className="mt-2 flex items-center justify-between gap-2">
-                  <button type="button" className={bubbleIconActionClass} onClick={() => void copyTurnText(turn.text, turn.id)} title="Copy message">
+                  <button
+                    type="button"
+                    className={bubbleIconActionClass}
+                    style={{ color: chatStyle.userActionIconColor }}
+                    onClick={() => void copyTurnText(turn.text, turn.id)}
+                    title="Copy message"
+                  >
                     <FaCopy className="h-5 w-5" />
                   </button>
                   <div className="flex items-center gap-1.5">
                     <button
                       type="button"
                       className={bubbleIconActionClass}
+                      style={{ color: chatStyle.userActionIconColor }}
                       onClick={() => {
                         setEditingTurnId(turn.id);
                         setEditingText(turn.text);
@@ -655,6 +669,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       className={bubbleIconActionClass}
+                      style={{ color: chatStyle.userActionIconColor }}
                       onClick={() => {
                         setMessage(turn.text);
                         window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
@@ -668,6 +683,7 @@ export default function HomePage() {
                         <button
                           type="button"
                           className={bubbleIconActionClass}
+                          style={{ color: chatStyle.userActionIconColor }}
                           onClick={() => {
                             const next = editingText.trim();
                             if (!next) return;
@@ -679,7 +695,13 @@ export default function HomePage() {
                         >
                           <FaFloppyDisk className="h-5 w-5" />
                         </button>
-                        <button type="button" className={bubbleIconActionClass} onClick={() => setEditingTurnId(null)} title="Cancel">
+                        <button
+                          type="button"
+                          className={bubbleIconActionClass}
+                          style={{ color: chatStyle.userActionIconColor }}
+                          onClick={() => setEditingTurnId(null)}
+                          title="Cancel"
+                        >
                           <FaXmark className="h-5 w-5" />
                         </button>
                       </>
@@ -689,7 +711,13 @@ export default function HomePage() {
               ) : null}
               {turn.role === "assistant" ? (
                 <div className="mt-2">
-                  <button type="button" className={bubbleIconActionClass} onClick={() => void copyTurnText(turn.text, turn.id)} title="Copy message">
+                  <button
+                    type="button"
+                    className={bubbleIconActionClass}
+                    style={{ color: chatStyle.assistantActionIconColor }}
+                    onClick={() => void copyTurnText(turn.text, turn.id)}
+                    title="Copy message"
+                  >
                     <FaCopy className="h-5 w-5" />
                   </button>
                 </div>
