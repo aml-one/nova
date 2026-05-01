@@ -1786,10 +1786,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           })) as Record<string, unknown>;
           return sendJson(response, 200, { ok: true, cameraName: target.name, result, correlationId });
         } catch (error) {
-          return sendJson(response, 422, {
+          return sendJson(response, 200, {
             ok: false,
             cameraName: target.name,
             error: error instanceof Error ? error.message : "camera test failed",
+            hint: "Camera runtime skill returned an error. Check camera URL reachability/credentials and runtime dependencies.",
             correlationId
           });
         }

@@ -167,12 +167,16 @@ export default function CameraMonitorPage() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ cameraName })
     });
-    const data = (await response.json()) as { result?: { detections?: unknown[] }; error?: string };
+    const data = (await response.json()) as { ok?: boolean; result?: { detections?: unknown[] }; error?: string; hint?: string };
     if (!response.ok) {
       setStatus(data.error ?? `Camera test failed for ${cameraName}`);
     } else {
-      const count = Array.isArray(data.result?.detections) ? data.result!.detections!.length : 0;
-      setStatus(`Camera test complete for ${cameraName}. Detections: ${count}.`);
+      if (data.ok === false) {
+        setStatus(`Camera test for ${cameraName} returned runtime error: ${data.error ?? "unknown error"}${data.hint ? ` (${data.hint})` : ""}`);
+      } else {
+        const count = Array.isArray(data.result?.detections) ? data.result!.detections!.length : 0;
+        setStatus(`Camera test complete for ${cameraName}. Detections: ${count}.`);
+      }
       await refresh();
     }
     setTestingName(null);

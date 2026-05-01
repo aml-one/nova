@@ -12,5 +12,6 @@ export async function POST(request: Request) {
   if (!response.ok) {
     return NextResponse.json({ error: data.error ?? "camera test failed" }, { status: response.status });
   }
+  // camera test can return ok:false with diagnostics while still being a successful API call
   return NextResponse.json(data);
 }
