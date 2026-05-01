@@ -32,6 +32,7 @@ import { SelfImprovementLoop } from "../improvement/self-improvement-loop.js";
 import { InMemorySkillRegistry } from "../skills/skill-registry.js";
 import { resolveChannelAccess } from "../security/phone-access.js";
 import { ApprovalService } from "../execution/approval-service.js";
+import { registerCopilotSettingsSource, resolveCopilotRuntime } from "../providers/copilot-credentials.js";
 import { ProviderCatalogService } from "../providers/provider-catalog.js";
 import { UpdateManager } from "../update/update-manager.js";
 import { ThoughtRepository } from "../storage/repositories/thought-repository.js";
@@ -68,6 +69,7 @@ type CopilotDeviceLoginSession = {
 };
 
 export async function startHttpServer(options: HttpServerOptions): Promise<void> {
+  registerCopilotSettingsSource(() => options.settings.get());
   const port = options.port ?? Number(process.env.NOVA_AGENT_PORT ?? "8787");
   const wa = new WhatsAppChannelAdapter();
   const signal = new SignalChannelAdapter();
@@ -82,7 +84,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   const personas = new PersonaVersionService();
   const personaLoader = new PersonaLoader();
   const approvals = new ApprovalService();
-  const providerCatalog = new ProviderCatalogService();
+  const providerCatalog = new ProviderCatalogService(() => options.settings.get());
   const thoughtLog = new ThoughtRepository();
   const mobilePush = new MobilePushService();
   let lastThoughtBroadcastAt = "";
@@ -523,22 +525,34 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/copilot/test") {
         const payload = (await readJson(request)) as { baseUrl?: string; apiKey?: string };
-        const baseUrl = payload.baseUrl?.trim() || "";
-        const apiKey = payload.apiKey?.trim() || "";
+        const resolved = await resolveCopilotRuntime();
+        const baseUrl = payload.baseUrl?.trim() || resolved.baseUrl || "";
+        const apiKey = payload.apiKey?.trim() || resolved.apiKey || "";
         if (!baseUrl || !apiKey) {
-          return sendJson(response, 400, { error: "baseUrl and apiKey are required", correlationId });
+          return sendJson(response, 400, {
+            error:
+              "Could not validate Copilot: need base URL + credentials. Paste API key for external endpoints, save Settings, or complete GitHub device login.",
+            correlationId
+          });
         }
         const check = await pingUrl(`${baseUrl.replace(/\/$/, "")}/models`, {
           authorization: `Bearer ${apiKey}`
         });
-        const suggestedEnv = [`COPILOT_BASE_URL=${baseUrl}`, `COPILOT_API_KEY=${apiKey}`].join("\n");
+        const omitApiKeyFromSuggestedEnv = !payload.apiKey?.trim();
+        const suggestedEnv = omitApiKeyFromSuggestedEnv
+          ? [`COPILOT_BASE_URL=${baseUrl}`, "# COPILOT_API_KEY: resolved at runtime (env, Settings, or ~/.nova/copilot-auth.json)"].join(
+              "\n"
+            )
+          : [`COPILOT_BASE_URL=${baseUrl}`, `COPILOT_API_KEY=${apiKey}`].join("\n");
         return sendJson(response, 200, {
           check,
           suggestedEnv,
           quickGuide: [
             "Use a Copilot/OpenAI-compatible endpoint URL (must expose /models).",
-            "Create a token/key in that provider dashboard.",
-            "Paste URL + key, then click Validate."
+            omitApiKeyFromSuggestedEnv
+              ? "No API key was sent in this request; Nova used saved env, Settings, or device-login profile."
+              : "Create a token/key in that provider dashboard.",
+            "Click Validate, then Save Settings."
           ],
           correlationId
         });

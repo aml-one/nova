@@ -154,6 +154,48 @@ const DEFAULT_SETTINGS: SettingsState = {
   skillSettings: {}
 };
 
+const COPILOT_PRESETS: Array<{
+  id: string;
+  label: string;
+  baseUrl: string;
+  model: string;
+  note: string;
+  authMode: "api-key" | "device-login";
+}> = [
+  {
+    id: "github-models",
+    label: "GitHub Models",
+    baseUrl: "https://models.inference.ai.azure.com",
+    model: "gpt-4o-mini",
+    note: "Use a GitHub personal access token with Models access.",
+    authMode: "api-key"
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "openai/gpt-4o-mini",
+    note: "Use your OpenRouter API key and pick any listed model id.",
+    authMode: "api-key"
+  },
+  {
+    id: "custom",
+    label: "Custom OpenAI-compatible",
+    baseUrl: "http://127.0.0.1:1234/v1",
+    model: "gpt-4o-mini",
+    note: "Works with local gateways (LM Studio, vLLM, LiteLLM, etc.) exposing /models.",
+    authMode: "api-key"
+  },
+  {
+    id: "github-device-login",
+    label: "GitHub Device Login (OpenClaw-style)",
+    baseUrl: "https://api.githubcopilot.com",
+    model: "gpt-4o-mini",
+    note: "Use one-time code login in terminal, then runtime token exchange for Copilot.",
+    authMode: "device-login"
+  }
+];
+
 export default function SettingsPage() {
   const { resolvedTheme } = useTheme();
   const router = useRouter();
@@ -316,6 +358,11 @@ export default function SettingsPage() {
       cancelled = true;
     };
   }, [copilotDeviceLoginSessionId]);
+
+  useEffect(() => {
+    if (copilotDeviceLoginState !== "authorized") return;
+    void loadCatalog();
+  }, [copilotDeviceLoginState]);
 
   async function loadSettings(): Promise<void> {
     const response = await fetch("/api/settings");
@@ -488,12 +535,14 @@ export default function SettingsPage() {
   async function runCopilotSetupValidation(): Promise<void> {
     setError(null);
     setStatus(null);
+    const preset = COPILOT_PRESETS.find((item) => item.baseUrl === settings.copilot.baseUrl.trim());
+    const sendApiKey = preset?.authMode === "device-login" ? "" : settings.copilot.apiKey;
     const response = await fetch("/api/setup/copilot/test", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         baseUrl: settings.copilot.baseUrl,
-        apiKey: settings.copilot.apiKey
+        apiKey: sendApiKey
       })
     });
     const data = (await response.json()) as { check?: SetupCheckResult; suggestedEnv?: string; error?: string };
@@ -620,50 +669,9 @@ export default function SettingsPage() {
         : modelOptions.copilot ?? [];
   const websiteBuilderModel = String(websiteBuilderSettings.model ?? "");
   const updateErrorMessage = normalizeUpdateError(updateStatus?.lastError);
-  const copilotPresets: Array<{
-    id: string;
-    label: string;
-    baseUrl: string;
-    model: string;
-    note: string;
-    authMode: "api-key" | "device-login";
-  }> = [
-    {
-      id: "github-models",
-      label: "GitHub Models",
-      baseUrl: "https://models.inference.ai.azure.com",
-      model: "gpt-4o-mini",
-      note: "Use a GitHub personal access token with Models access.",
-      authMode: "api-key"
-    },
-    {
-      id: "openrouter",
-      label: "OpenRouter",
-      baseUrl: "https://openrouter.ai/api/v1",
-      model: "openai/gpt-4o-mini",
-      note: "Use your OpenRouter API key and pick any listed model id.",
-      authMode: "api-key"
-    },
-    {
-      id: "custom",
-      label: "Custom OpenAI-compatible",
-      baseUrl: "http://127.0.0.1:1234/v1",
-      model: "gpt-4o-mini",
-      note: "Works with local gateways (LM Studio, vLLM, LiteLLM, etc.) exposing /models.",
-      authMode: "api-key"
-    },
-    {
-      id: "github-device-login",
-      label: "GitHub Device Login (OpenClaw-style)",
-      baseUrl: "https://api.githubcopilot.com",
-      model: "gpt-4o-mini",
-      note: "Use one-time code login in terminal, then runtime token exchange for Copilot.",
-      authMode: "device-login"
-    }
-  ];
   const selectedCopilotPreset =
-    copilotPresets.find((item) => item.baseUrl === settings.copilot.baseUrl) ??
-    copilotPresets.find((item) => item.id === "custom");
+    COPILOT_PRESETS.find((item) => item.baseUrl === settings.copilot.baseUrl) ??
+    COPILOT_PRESETS.find((item) => item.id === "custom");
   const tabs = [
     { id: "general", label: "General", tone: "blue" as const },
     { id: "models", label: "Models", tone: "purple" as const },
@@ -1024,9 +1032,12 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-2 rounded-ui border bg-surface p-3">
               <h3 className="font-semibold">Copilot quick setup</h3>
-              <p className="text-xs text-muted">OpenClaw-style setup: pick a preset, paste key, validate, then save.</p>
+              <p className="text-xs text-muted">
+                Pick a preset: API-key backends need a pasted key; GitHub device login stores tokens in{" "}
+                <code className="font-mono">~/.nova/copilot-auth.json</code>.
+              </p>
               <div className="grid gap-2 md:grid-cols-3">
-                {copilotPresets.map((preset) => (
+                {COPILOT_PRESETS.map((preset) => (
                   <button
                     key={preset.id}
                     type="button"
@@ -1034,7 +1045,12 @@ export default function SettingsPage() {
                     onClick={() =>
                       setSettings((p) => ({
                         ...p,
-                        copilot: { ...p.copilot, baseUrl: preset.baseUrl, defaultModel: preset.model }
+                        copilot: {
+                          ...p.copilot,
+                          baseUrl: preset.baseUrl,
+                          defaultModel: preset.model,
+                          ...(preset.authMode === "device-login" ? { apiKey: "" } : {})
+                        }
                       }))
                     }
                   >
@@ -1120,7 +1136,14 @@ export default function SettingsPage() {
                 Optional exchange endpoint for advanced setups: <code>https://api.github.com/copilot_internal/v2/token</code>
               </div>
               <Input value={settings.copilot.baseUrl} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, baseUrl: e.target.value } }))} placeholder="COPILOT_BASE_URL" />
-              <Input value={settings.copilot.apiKey} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, apiKey: e.target.value } }))} placeholder="COPILOT_API_KEY" />
+              {selectedCopilotPreset?.authMode === "device-login" ? (
+                <div className="rounded-ui border bg-surface2 p-2 text-xs text-muted">
+                  API key field is hidden for GitHub device login. Credentials load from{" "}
+                  <code className="font-mono">~/.nova/copilot-auth.json</code> after you authorize. Switch preset if you need to paste an API key instead.
+                </div>
+              ) : (
+                <Input value={settings.copilot.apiKey} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, apiKey: e.target.value } }))} placeholder="COPILOT_API_KEY" />
+              )}
               <Input value={settings.copilot.defaultModel} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, defaultModel: e.target.value } }))} placeholder="Default model" />
               <div className="flex flex-wrap gap-2">
                 <Button type="button" tone="purple" onClick={() => void runCopilotSetupValidation()}>Validate Copilot setup</Button>

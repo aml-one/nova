@@ -1,24 +1,24 @@
 import type { ChatRequest, ModelProvider, ModelResponse, ProviderHealth } from "@nova/sdk/provider";
+import { resolveCopilotDefaultModelId, resolveCopilotRuntime } from "./copilot-credentials.js";
 import { chatViaOpenAICompatible, streamViaOpenAICompatible } from "./openai-compatible.js";
 
 export class CopilotProvider implements ModelProvider {
   readonly name = "copilot";
-  private readonly baseUrl = process.env.COPILOT_BASE_URL ?? "";
-  private readonly model = process.env.COPILOT_MODEL ?? "gpt-4o-mini";
-  private readonly apiKey = process.env.COPILOT_API_KEY;
 
   async health(): Promise<ProviderHealth> {
-    if (!this.baseUrl || !this.apiKey) {
+    const { baseUrl, apiKey } = await resolveCopilotRuntime();
+    if (!baseUrl || !apiKey) {
       return {
         name: this.name,
         ok: false,
-        details: "set COPILOT_BASE_URL and COPILOT_API_KEY for provider access"
+        details:
+          "Configure COPILOT_BASE_URL + COPILOT_API_KEY, save Copilot URL/key in Settings, or complete GitHub device login (~/.nova/copilot-auth.json)."
       };
     }
     try {
-      const response = await fetch(`${this.baseUrl}/models`, {
+      const response = await fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
         headers: {
-          authorization: `Bearer ${this.apiKey}`
+          authorization: `Bearer ${apiKey}`
         }
       });
       return {
@@ -36,14 +36,16 @@ export class CopilotProvider implements ModelProvider {
   }
 
   async chat(request: ChatRequest): Promise<ModelResponse> {
-    if (!this.baseUrl || !this.apiKey) {
+    const { baseUrl, apiKey } = await resolveCopilotRuntime();
+    if (!baseUrl || !apiKey) {
       throw new Error("copilot provider is not configured");
     }
+    const model = request.model ?? resolveCopilotDefaultModelId();
     return chatViaOpenAICompatible({
       provider: this.name,
-      endpoint: `${this.baseUrl}/chat/completions`,
-      model: request.model ?? this.model,
-      apiKey: this.apiKey,
+      endpoint: `${baseUrl.replace(/\/$/, "")}/chat/completions`,
+      model,
+      apiKey,
       messages: request.messages,
       temperature: request.temperature,
       maxTokens: request.maxTokens
@@ -51,15 +53,17 @@ export class CopilotProvider implements ModelProvider {
   }
 
   async streamChat(request: ChatRequest, onToken: (token: string) => void): Promise<ModelResponse> {
-    if (!this.baseUrl || !this.apiKey) {
+    const { baseUrl, apiKey } = await resolveCopilotRuntime();
+    if (!baseUrl || !apiKey) {
       throw new Error("copilot provider is not configured");
     }
+    const model = request.model ?? resolveCopilotDefaultModelId();
     return streamViaOpenAICompatible(
       {
         provider: this.name,
-        endpoint: `${this.baseUrl}/chat/completions`,
-        model: request.model ?? this.model,
-        apiKey: this.apiKey,
+        endpoint: `${baseUrl.replace(/\/$/, "")}/chat/completions`,
+        model,
+        apiKey,
         messages: request.messages,
         temperature: request.temperature,
         maxTokens: request.maxTokens

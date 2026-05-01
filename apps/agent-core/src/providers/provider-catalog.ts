@@ -1,3 +1,6 @@
+import type { AppSettings } from "../storage/repositories/settings-repository.js";
+import { copilotLikelyConfigured, resolveCopilotRuntime } from "./copilot-credentials.js";
+
 type ProviderName = "ollama" | "lmstudio" | "copilot";
 
 export type ProviderModelInfo = {
@@ -6,6 +9,8 @@ export type ProviderModelInfo = {
 };
 
 export class ProviderCatalogService {
+  constructor(private readonly getSettings: () => AppSettings) {}
+
   async listModels(): Promise<Record<ProviderName, ProviderModelInfo[]>> {
     const [ollama, lmstudio, copilot] = await Promise.all([
       this.listOllamaModels(),
@@ -19,7 +24,7 @@ export class ProviderCatalogService {
     ProviderName | "signalBridge" | "whatsAppBridge",
     { configured: boolean; steps: string[]; details: string }
   > {
-    const copilotConfigured = Boolean(process.env.COPILOT_BASE_URL && process.env.COPILOT_API_KEY);
+    const copilotConfigured = copilotLikelyConfigured(this.getSettings);
     const waConfigured = Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TOKEN);
     const signalConfigured = Boolean(process.env.SIGNAL_API_URL && process.env.SIGNAL_ACCOUNT_NUMBER);
     return {
@@ -43,11 +48,13 @@ export class ProviderCatalogService {
       },
       copilot: {
         configured: copilotConfigured,
-        details: copilotConfigured ? "Endpoint and API key configured" : "Set COPILOT_BASE_URL and COPILOT_API_KEY",
+        details: copilotConfigured
+          ? "Copilot credentials available (env, Settings, or device-login profile)"
+          : "Set Copilot URL + API key in Settings, env vars, or complete GitHub device login.",
         steps: [
-          "Get an OpenAI-compatible endpoint URL that exposes /models.",
-          "Create an API key in that provider dashboard.",
-          "Set COPILOT_BASE_URL, COPILOT_API_KEY, and choose default model in Settings."
+          "Pick a preset (GitHub Models, OpenRouter, GitHub device login, or custom URL).",
+          "Use API key paste or device login so Nova can call /models.",
+          "Choose default Copilot model in Settings > Models."
         ]
       },
       signalBridge: {
@@ -102,11 +109,10 @@ export class ProviderCatalogService {
   }
 
   private async listCopilotModels(): Promise<ProviderModelInfo[]> {
-    const baseUrl = process.env.COPILOT_BASE_URL;
-    const apiKey = process.env.COPILOT_API_KEY;
+    const { baseUrl, apiKey } = await resolveCopilotRuntime();
     if (!baseUrl || !apiKey) return [];
     try {
-      const response = await fetch(`${baseUrl}/models`, {
+      const response = await fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
         headers: { authorization: `Bearer ${apiKey}` }
       });
       if (!response.ok) return [];

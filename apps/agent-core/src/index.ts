@@ -17,6 +17,7 @@ import { startHttpServer } from "./transport/http-server.js";
 import { UserProfileStore } from "./identity/user-profile-store.js";
 import { VisionRouter } from "./providers/vision-router.js";
 import { MediaGenerationRouter } from "./media/media-generation-router.js";
+import { registerCopilotSettingsSource } from "./providers/copilot-credentials.js";
 import { SettingsService } from "./settings/settings-service.js";
 import { AuthService } from "./auth/auth-service.js";
 import { LearningDaemon } from "./improvement/learning-daemon.js";
@@ -29,6 +30,7 @@ import { InstallStateService } from "./update/install-state.js";
 async function bootstrap(): Promise<void> {
   runMobileSetupDiagnostics();
   const settings = new SettingsService();
+  registerCopilotSettingsSource(() => settings.get());
   const skillRegistry = new InMemorySkillRegistry(() => settings.get().skills);
   const router = new ModelRouter();
   const memory = new MemoryService();
