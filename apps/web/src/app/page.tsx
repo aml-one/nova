@@ -69,6 +69,7 @@ export default function HomePage() {
   const [liveThinkingCollapsed, setLiveThinkingCollapsed] = useState(false);
   const [liveThinking, setLiveThinking] = useState("Analyzing your request...");
   const [hideProviderModelInStats, setHideProviderModelInStats] = useState(false);
+  const [chatStyleReady, setChatStyleReady] = useState(false);
   const [chatStyle, setChatStyle] = useState({
     userBubbleColor: "#dbeafe",
     assistantBubbleColor: "#e9d5ff",
@@ -169,83 +170,87 @@ export default function HomePage() {
 
   useEffect(() => {
     void (async () => {
-      const response = await fetch("/api/settings");
-      const data = (await response.json()) as {
-        settings?: {
-          web?: {
-            hideProviderModelInStats?: boolean;
-            sendOnEnter?: boolean;
-            chatStyle?: {
-              userBubbleColor?: string;
-              assistantBubbleColor?: string;
-              userTextColor?: string;
-              assistantTextColor?: string;
-              userActionIconColor?: string;
-              assistantActionIconColor?: string;
-              statsTextColor?: string;
-              userBubbleColorLight?: string;
-              assistantBubbleColorLight?: string;
-              userTextColorLight?: string;
-              assistantTextColorLight?: string;
-              userActionIconColorLight?: string;
-              assistantActionIconColorLight?: string;
-              statsTextColorLight?: string;
-              bubbleBackgroundEnabled?: boolean;
-              borderColor?: string;
-              borderThicknessPx?: number;
-              userBorderThicknessPx?: number;
-              assistantBorderThicknessPx?: number;
-              userBackgroundOpacityPct?: number;
-              assistantBackgroundOpacityPct?: number;
-              bubbleRadiusPx?: number;
-              showNames?: boolean;
+      try {
+        const response = await fetch("/api/settings");
+        const data = (await response.json()) as {
+          settings?: {
+            web?: {
+              hideProviderModelInStats?: boolean;
+              sendOnEnter?: boolean;
+              chatStyle?: {
+                userBubbleColor?: string;
+                assistantBubbleColor?: string;
+                userTextColor?: string;
+                assistantTextColor?: string;
+                userActionIconColor?: string;
+                assistantActionIconColor?: string;
+                statsTextColor?: string;
+                userBubbleColorLight?: string;
+                assistantBubbleColorLight?: string;
+                userTextColorLight?: string;
+                assistantTextColorLight?: string;
+                userActionIconColorLight?: string;
+                assistantActionIconColorLight?: string;
+                statsTextColorLight?: string;
+                bubbleBackgroundEnabled?: boolean;
+                borderColor?: string;
+                borderThicknessPx?: number;
+                userBorderThicknessPx?: number;
+                assistantBorderThicknessPx?: number;
+                userBackgroundOpacityPct?: number;
+                assistantBackgroundOpacityPct?: number;
+                bubbleRadiusPx?: number;
+                showNames?: boolean;
+              };
             };
           };
         };
-      };
-      if (response.ok) {
-        setHideProviderModelInStats(data.settings?.web?.hideProviderModelInStats === true);
-        setSendOnEnter(data.settings?.web?.sendOnEnter === true);
-        setChatStyle((prev) => ({
-          userBubbleColor: data.settings?.web?.chatStyle?.userBubbleColor ?? prev.userBubbleColor,
-          assistantBubbleColor: data.settings?.web?.chatStyle?.assistantBubbleColor ?? prev.assistantBubbleColor,
-          userTextColor: data.settings?.web?.chatStyle?.userTextColor ?? prev.userTextColor,
-          assistantTextColor: data.settings?.web?.chatStyle?.assistantTextColor ?? prev.assistantTextColor,
-          userActionIconColor: data.settings?.web?.chatStyle?.userActionIconColor ?? prev.userActionIconColor,
-          assistantActionIconColor:
-            data.settings?.web?.chatStyle?.assistantActionIconColor ?? prev.assistantActionIconColor,
-          statsTextColor: data.settings?.web?.chatStyle?.statsTextColor ?? prev.statsTextColor,
-          userBubbleColorLight: data.settings?.web?.chatStyle?.userBubbleColorLight ?? prev.userBubbleColorLight,
-          assistantBubbleColorLight:
-            data.settings?.web?.chatStyle?.assistantBubbleColorLight ?? prev.assistantBubbleColorLight,
-          userTextColorLight: data.settings?.web?.chatStyle?.userTextColorLight ?? prev.userTextColorLight,
-          assistantTextColorLight:
-            data.settings?.web?.chatStyle?.assistantTextColorLight ?? prev.assistantTextColorLight,
-          userActionIconColorLight:
-            data.settings?.web?.chatStyle?.userActionIconColorLight ?? prev.userActionIconColorLight,
-          assistantActionIconColorLight:
-            data.settings?.web?.chatStyle?.assistantActionIconColorLight ?? prev.assistantActionIconColorLight,
-          statsTextColorLight: data.settings?.web?.chatStyle?.statsTextColorLight ?? prev.statsTextColorLight,
-          bubbleBackgroundEnabled: data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled,
-          borderColor: data.settings?.web?.chatStyle?.borderColor ?? prev.borderColor,
-          borderThicknessPx: data.settings?.web?.chatStyle?.borderThicknessPx ?? prev.borderThicknessPx,
-          userBorderThicknessPx:
-            data.settings?.web?.chatStyle?.userBorderThicknessPx ??
-            data.settings?.web?.chatStyle?.borderThicknessPx ??
-            prev.userBorderThicknessPx,
-          assistantBorderThicknessPx:
-            data.settings?.web?.chatStyle?.assistantBorderThicknessPx ??
-            data.settings?.web?.chatStyle?.borderThicknessPx ??
-            prev.assistantBorderThicknessPx,
-          userBackgroundOpacityPct:
-            data.settings?.web?.chatStyle?.userBackgroundOpacityPct ??
-            ((data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled) ? 100 : 0),
-          assistantBackgroundOpacityPct:
-            data.settings?.web?.chatStyle?.assistantBackgroundOpacityPct ??
-            ((data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled) ? 100 : 0),
-          bubbleRadiusPx: data.settings?.web?.chatStyle?.bubbleRadiusPx ?? prev.bubbleRadiusPx,
-          showNames: data.settings?.web?.chatStyle?.showNames ?? prev.showNames
-        }));
+        if (response.ok) {
+          setHideProviderModelInStats(data.settings?.web?.hideProviderModelInStats === true);
+          setSendOnEnter(data.settings?.web?.sendOnEnter === true);
+          setChatStyle((prev) => ({
+            userBubbleColor: data.settings?.web?.chatStyle?.userBubbleColor ?? prev.userBubbleColor,
+            assistantBubbleColor: data.settings?.web?.chatStyle?.assistantBubbleColor ?? prev.assistantBubbleColor,
+            userTextColor: data.settings?.web?.chatStyle?.userTextColor ?? prev.userTextColor,
+            assistantTextColor: data.settings?.web?.chatStyle?.assistantTextColor ?? prev.assistantTextColor,
+            userActionIconColor: data.settings?.web?.chatStyle?.userActionIconColor ?? prev.userActionIconColor,
+            assistantActionIconColor:
+              data.settings?.web?.chatStyle?.assistantActionIconColor ?? prev.assistantActionIconColor,
+            statsTextColor: data.settings?.web?.chatStyle?.statsTextColor ?? prev.statsTextColor,
+            userBubbleColorLight: data.settings?.web?.chatStyle?.userBubbleColorLight ?? prev.userBubbleColorLight,
+            assistantBubbleColorLight:
+              data.settings?.web?.chatStyle?.assistantBubbleColorLight ?? prev.assistantBubbleColorLight,
+            userTextColorLight: data.settings?.web?.chatStyle?.userTextColorLight ?? prev.userTextColorLight,
+            assistantTextColorLight:
+              data.settings?.web?.chatStyle?.assistantTextColorLight ?? prev.assistantTextColorLight,
+            userActionIconColorLight:
+              data.settings?.web?.chatStyle?.userActionIconColorLight ?? prev.userActionIconColorLight,
+            assistantActionIconColorLight:
+              data.settings?.web?.chatStyle?.assistantActionIconColorLight ?? prev.assistantActionIconColorLight,
+            statsTextColorLight: data.settings?.web?.chatStyle?.statsTextColorLight ?? prev.statsTextColorLight,
+            bubbleBackgroundEnabled: data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled,
+            borderColor: data.settings?.web?.chatStyle?.borderColor ?? prev.borderColor,
+            borderThicknessPx: data.settings?.web?.chatStyle?.borderThicknessPx ?? prev.borderThicknessPx,
+            userBorderThicknessPx:
+              data.settings?.web?.chatStyle?.userBorderThicknessPx ??
+              data.settings?.web?.chatStyle?.borderThicknessPx ??
+              prev.userBorderThicknessPx,
+            assistantBorderThicknessPx:
+              data.settings?.web?.chatStyle?.assistantBorderThicknessPx ??
+              data.settings?.web?.chatStyle?.borderThicknessPx ??
+              prev.assistantBorderThicknessPx,
+            userBackgroundOpacityPct:
+              data.settings?.web?.chatStyle?.userBackgroundOpacityPct ??
+              ((data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled) ? 100 : 0),
+            assistantBackgroundOpacityPct:
+              data.settings?.web?.chatStyle?.assistantBackgroundOpacityPct ??
+              ((data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled) ? 100 : 0),
+            bubbleRadiusPx: data.settings?.web?.chatStyle?.bubbleRadiusPx ?? prev.bubbleRadiusPx,
+            showNames: data.settings?.web?.chatStyle?.showNames ?? prev.showNames
+          }));
+        }
+      } finally {
+        setChatStyleReady(true);
       }
     })();
   }, []);
@@ -628,7 +633,8 @@ export default function HomePage() {
             setAutoScrollEnabled(nearBottom);
           }}
         >
-          {turns.length === 0 ? <div className="text-sm text-muted">Start chatting with Nova.</div> : null}
+          {!chatStyleReady ? <div className="text-sm text-muted">Loading chat style…</div> : null}
+          {chatStyleReady && turns.length === 0 ? <div className="text-sm text-muted">Start chatting with Nova.</div> : null}
           {loading && showThinkingInChat ? (
             <article className="mr-auto max-w-[85%] rounded-ui border border-slate-500/60 bg-slate-200/60 p-2.5 text-slate-700 dark:bg-slate-700/45 dark:text-slate-200">
               <div className="mb-1 text-xs font-semibold">Thinking</div>
@@ -642,7 +648,7 @@ export default function HomePage() {
               {!liveThinkingCollapsed ? <div className="whitespace-pre-wrap text-xs">{liveThinking}</div> : null}
             </article>
           ) : null}
-          {turns.map((turn, index) => (
+          {chatStyleReady && turns.map((turn, index) => (
             <article
               key={turn.id}
               className={
