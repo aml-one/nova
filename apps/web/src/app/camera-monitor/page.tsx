@@ -1,0 +1,257 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { Button } from "../../components/ui/button";
+import { Card } from "../../components/ui/card";
+
+type CameraTimelineItem = {
+  camera_id?: string;
+  label?: string;
+  color?: string;
+  plate?: string;
+  capture_path?: string;
+  created_at?: string;
+};
+
+type SkillManifest = { id: string; name: string };
+type HealthCheck = { id: string; name: string; level: "green" | "orange" | "red"; detail: string };
+type FullHealth = { checks: HealthCheck[] };
+
+type AppSettings = {
+  skillSettings?: Record<string, Record<string, unknown>>;
+};
+
+type CameraEntry = {
+  name: string;
+  rtspUrl: string;
+  enabled: boolean;
+};
+
+export default function CameraMonitorPage() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [testingName, setTestingName] = useState<string | null>(null);
+  const [status, setStatus] = useState<string>("");
+  const [settings, setSettings] = useState<AppSettings>({});
+  const [timeline, setTimeline] = useState<CameraTimelineItem[]>([]);
+  const [skillLoaded, setSkillLoaded] = useState(false);
+  const [skillStatus, setSkillStatus] = useState<"active" | "degraded" | "inactive">("inactive");
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function refresh(): Promise<void> {
+    setLoading(true);
+    setStatus("");
+    const [settingsRes, timelineRes, skillsRes, healthRes] = await Promise.all([
+      fetch("/api/settings"),
+      fetch("/api/camera/timeline"),
+      fetch("/api/skills/manifests"),
+      fetch("/api/system/health")
+    ]);
+    const settingsData = (await settingsRes.json()) as { settings?: AppSettings };
+    const timelineData = (await timelineRes.json()) as { items?: CameraTimelineItem[] };
+    const skillsData = (await skillsRes.json()) as { items?: SkillManifest[] };
+    const healthData = (await healthRes.json()) as { health?: FullHealth };
+    setSettings(settingsData.settings ?? {});
+    setTimeline(Array.isArray(timelineData.items) ? timelineData.items : []);
+
+    const manifests = skillsData.items ?? [];
+    const cameraManifest = manifests.find((item) => item.id === "camera-vision" || item.id === "cameraVision");
+    setSkillLoaded(Boolean(cameraManifest));
+    const matched = (healthData.health?.checks ?? []).find((check) => {
+      const raw = `${check.id} ${check.name} ${check.detail}`.toLowerCase();
+      return raw.includes("camera-vision") || raw.includes("camera vision");
+    });
+    setSkillStatus(!matched ? "inactive" : matched.level === "green" ? "active" : matched.level === "orange" ? "degraded" : "inactive");
+    setLoading(false);
+  }
+
+  const cameraEntries = useMemo(() => {
+    const cameraConfig = (settings.skillSettings?.["camera-vision"] ?? settings.skillSettings?.["cameraVision"] ?? {}) as Record<string, unknown>;
+    const rtspRaw = String(cameraConfig.rtspUrls ?? cameraConfig.rtsp_urls ?? "");
+    const disabled = new Set(
+      Array.isArray(cameraConfig.disabledCameraNames)
+        ? (cameraConfig.disabledCameraNames as unknown[]).map((item) => String(item))
+        : []
+    );
+    return rtspRaw
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line, index) => {
+        const pipeIndex = line.indexOf("|");
+        const named = pipeIndex > 0;
+        const name = named ? line.slice(0, pipeIndex).trim() : `camera-${index + 1}`;
+        const rtspUrl = named ? line.slice(pipeIndex + 1).trim() : line;
+        return {
+          name,
+          rtspUrl,
+          enabled: !disabled.has(name)
+        } satisfies CameraEntry;
+      });
+  }, [settings]);
+
+  const latestByCamera = useMemo(() => {
+    const map = new Map<string, CameraTimelineItem>();
+    for (const item of timeline) {
+      const key = String(item.camera_id ?? item.label ?? "");
+      if (!key || map.has(key)) continue;
+      map.set(key, item);
+    }
+    return map;
+  }, [timeline]);
+
+  async function saveCameraToggle(cameraName: string, enabled: boolean): Promise<void> {
+    setSaving(true);
+    setStatus("");
+    const cameraConfig = (settings.skillSettings?.["camera-vision"] ?? settings.skillSettings?.["cameraVision"] ?? {}) as Record<string, unknown>;
+    const disabled = new Set(
+      Array.isArray(cameraConfig.disabledCameraNames)
+        ? (cameraConfig.disabledCameraNames as unknown[]).map((item) => String(item))
+        : []
+    );
+    if (enabled) disabled.delete(cameraName);
+    else disabled.add(cameraName);
+    const nextSkillSettings = {
+      ...(settings.skillSettings ?? {}),
+      ["camera-vision"]: {
+        ...cameraConfig,
+        disabledCameraNames: Array.from(disabled)
+      },
+      ["cameraVision"]: {
+        ...((settings.skillSettings?.["cameraVision"] ?? {}) as Record<string, unknown>),
+        disabledCameraNames: Array.from(disabled)
+      }
+    };
+    const response = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ skillSettings: nextSkillSettings })
+    });
+    const data = (await response.json()) as { settings?: AppSettings; error?: string };
+    if (!response.ok) {
+      setStatus(data.error ?? "Failed to save camera toggle");
+    } else {
+      setSettings(data.settings ?? settings);
+      setStatus(`Saved ${cameraName} as ${enabled ? "enabled" : "disabled"}.`);
+    }
+    setSaving(false);
+  }
+
+  async function testCamera(cameraName: string): Promise<void> {
+    setTestingName(cameraName);
+    setStatus("");
+    const response = await fetch("/api/camera/test", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ cameraName })
+    });
+    const data = (await response.json()) as { result?: { detections?: unknown[] }; error?: string };
+    if (!response.ok) {
+      setStatus(data.error ?? `Camera test failed for ${cameraName}`);
+    } else {
+      const count = Array.isArray(data.result?.detections) ? data.result!.detections!.length : 0;
+      setStatus(`Camera test complete for ${cameraName}. Detections: ${count}.`);
+      await refresh();
+    }
+    setTestingName(null);
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h1 className="text-2xl font-semibold">Camera Monitor</h1>
+            <p className="text-sm text-muted">Connection checks, test snapshots, detections, and per-camera controls.</p>
+          </div>
+          <Button type="button" tone="blue" onClick={() => void refresh()} disabled={loading}>
+            {loading ? "Refreshing..." : "Refresh"}
+          </Button>
+        </div>
+        <div className="text-xs text-muted">
+          Skill runtime: {skillLoaded ? "loaded" : "not loaded"} · health: {skillStatus}
+        </div>
+        {!skillLoaded ? (
+          <div className="rounded-ui border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">
+            Camera skill is not loaded, so tests/snapshots may not work until the runtime module is available.
+          </div>
+        ) : null}
+      </Card>
+
+      <Card className="space-y-3">
+        <h2 className="text-lg font-semibold">Per-Camera Controls</h2>
+        {cameraEntries.length === 0 ? <p className="text-sm text-muted">No camera entries found. Add RTSP URLs in Settings → Camera Vision.</p> : null}
+        <div className="space-y-2">
+          {cameraEntries.map((camera) => {
+            const latest = latestByCamera.get(camera.name);
+            const isValidRtsp = /^rtsp:\/\//i.test(camera.rtspUrl);
+            const preview = String(latest?.capture_path ?? "");
+            const showImage = /^https?:\/\//i.test(preview) || preview.startsWith("/v1/media/files/") || preview.startsWith("/api/");
+            return (
+              <article key={camera.name} className="rounded-ui border bg-surface p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-sm font-semibold">{camera.name}</div>
+                    <div className="text-xs text-muted">{camera.rtspUrl}</div>
+                    <div className="mt-1 text-[11px] text-muted">Connection check: {isValidRtsp ? "RTSP format looks valid" : "Invalid RTSP format"}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={camera.enabled}
+                        onChange={(e) => void saveCameraToggle(camera.name, e.target.checked)}
+                        disabled={saving}
+                      />
+                      Enabled
+                    </label>
+                    <Button type="button" tone="purple" onClick={() => void testCamera(camera.name)} disabled={testingName === camera.name || !camera.enabled}>
+                      {testingName === camera.name ? "Testing..." : "Test"}
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-2 grid gap-2 md:grid-cols-[180px_1fr]">
+                  <div className="h-28 overflow-hidden rounded-ui border bg-surface2">
+                    {showImage ? (
+                      <img src={preview} alt={`${camera.name} snapshot`} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full items-center justify-center px-2 text-center text-[11px] text-muted">
+                        {preview ? "No web preview for this capture path." : "No snapshot yet."}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted">
+                    <div>Last event: {latest?.created_at ? new Date(latest.created_at).toLocaleString() : "-"}</div>
+                    <div>Label: {latest?.label ?? "-"}</div>
+                    <div>Color: {latest?.color ?? "-"}</div>
+                    <div>Plate: {latest?.plate ?? "-"}</div>
+                    <div className="truncate">Capture: {preview || "-"}</div>
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </Card>
+
+      <Card className="space-y-2">
+        <h2 className="text-lg font-semibold">Detection Timeline</h2>
+        <div className="max-h-[52vh] space-y-2 overflow-auto pr-1">
+          {timeline.length === 0 ? <p className="text-sm text-muted">No camera detections yet.</p> : null}
+          {timeline.map((item, index) => (
+            <article key={`${item.camera_id ?? "camera"}-${item.created_at ?? index}`} className="rounded-ui border bg-surface p-2 text-xs">
+              <div className="font-semibold">{item.camera_id ?? "unknown camera"} · {item.label ?? "unknown"}</div>
+              <div className="text-muted">{item.created_at ? new Date(item.created_at).toLocaleString() : "-"}</div>
+              <div className="text-muted">color={item.color ?? "-"} · plate={item.plate ?? "-"}</div>
+            </article>
+          ))}
+        </div>
+      </Card>
+
+      {status ? <Card className="text-sm">{status}</Card> : null}
+    </div>
+  );
+}

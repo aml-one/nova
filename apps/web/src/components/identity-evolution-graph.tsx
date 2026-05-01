@@ -89,7 +89,7 @@ export function buildIdentityTimeline(input: {
       id: `learning-${dateKey}`,
       at: `${dateKey}T12:00:00.000Z`,
       title: "Knowledge Growth",
-      detail: `Research notes: ${researched}, improvements: ${improvements}, cumulative growth score: ${cumulativeKnowledge}`,
+      detail: `Research notes: ${researched}, improvements: ${improvements}, cumulative growth score: ${cumulativeKnowledge} (activity score = research + improvements; not an intelligence/quality score).`,
       side: index % 2 === 0 ? "right" : "left",
       accentClass: "bg-sky-500",
       kind: "knowledge",

@@ -568,6 +568,43 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       if (request.method === "GET" && parsedUrl.pathname === "/v1/improvement/status") {
         return sendJson(response, 200, { status: options.learningDaemon?.getStatus() ?? null, correlationId });
       }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/improvement/inspect") {
+        const limit = Math.max(20, Math.min(1000, Number(parsedUrl.searchParams.get("limit") ?? "300")));
+        const thoughts = thoughtLog.list(limit);
+        const emotions = options.orchestrator.getEmotionHistory("nova-system").slice(0, limit);
+        const diagnostics = options.improvement.getDiagnostics();
+        const loopSignals = detectAutonomyLoopSignals({
+          thoughts,
+          emotions,
+          learningRecent: diagnostics.learning.recent
+        });
+        return sendJson(response, 200, {
+          generatedAt: new Date().toISOString(),
+          correlationId,
+          status: {
+            learningDaemon: options.learningDaemon?.getStatus() ?? null
+          },
+          summaries: {
+            thoughts: summarizeThoughts(thoughts),
+            emotions: summarizeEmotions(emotions),
+            learning: {
+              totalRecords: diagnostics.learning.totalRecords,
+              categoryCounts: diagnostics.learning.categoryCounts
+            },
+            outcomes: diagnostics.outcomes
+          },
+          diagnostics: {
+            policy: diagnostics.policy,
+            curiosity: diagnostics.curiosity,
+            loopSignals
+          },
+          recent: {
+            thoughts: thoughts.slice(0, 120),
+            emotions: emotions.slice(0, 120),
+            learning: diagnostics.learning.recent
+          }
+        });
+      }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/improvement/cycle") {
         const result = await options.improvement.runIdleLearningCycle();
         return sendJson(response, 200, { ok: true, result, correlationId });
@@ -1709,6 +1746,31 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           .all(color, color, label, label);
         return sendJson(response, 200, { items: rows, correlationId });
       }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/camera/test") {
+        const payload = (await readJson(request)) as { cameraName?: string };
+        const cameraName = payload.cameraName?.trim();
+        if (!cameraName) {
+          return sendJson(response, 400, { error: "cameraName is required", correlationId });
+        }
+        const skill = options.skillRegistry.get("camera-vision");
+        if (!skill) {
+          return sendJson(response, 404, { error: "camera-vision skill is not loaded", correlationId });
+        }
+        try {
+          const result = (await options.skillRegistry.run("camera-vision", {
+            cameraName,
+            mode: "snapshot"
+          })) as Record<string, unknown>;
+          return sendJson(response, 200, { ok: true, cameraName, result, correlationId });
+        } catch (error) {
+          return sendJson(response, 500, {
+            ok: false,
+            cameraName,
+            error: error instanceof Error ? error.message : "camera test failed",
+            correlationId
+          });
+        }
+      }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/personas/versions") {
         const personaId = parsedUrl.searchParams.get("personaId") ?? "default";
         const items = personas.list(personaId);
@@ -1773,6 +1835,82 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
 async function readJson(request: IncomingMessage): Promise<unknown> {
   const raw = await readRawBody(request);
   return raw ? JSON.parse(raw) : {};
+}
+
+function summarizeThoughts(items: Array<{ category: string; title: string }>): Record<string, number> {
+  return items.reduce<Record<string, number>>((acc, item) => {
+    const key = item.category || "unknown";
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+}
+
+function summarizeEmotions(items: Array<{ label: string; trigger: string }>): {
+  byLabel: Record<string, number>;
+  byTrigger: Record<string, number>;
+} {
+  const byLabel: Record<string, number> = {};
+  const byTrigger: Record<string, number> = {};
+  for (const item of items) {
+    byLabel[item.label || "unknown"] = (byLabel[item.label || "unknown"] ?? 0) + 1;
+    byTrigger[item.trigger || "unknown"] = (byTrigger[item.trigger || "unknown"] ?? 0) + 1;
+  }
+  return { byLabel, byTrigger };
+}
+
+function detectAutonomyLoopSignals(input: {
+  thoughts: Array<{ title: string; content: string }>;
+  emotions: Array<{ trigger: string; label: string }>;
+  learningRecent: Array<Record<string, unknown>>;
+}): Array<{ id: string; severity: "info" | "warn"; detail: string }> {
+  const findings: Array<{ id: string; severity: "info" | "warn"; detail: string }> = [];
+  const repeatedThoughtTitles = countMostRepeated(input.thoughts.map((item) => item.title));
+  if (repeatedThoughtTitles.count >= 8) {
+    findings.push({
+      id: "repeated-thought-title",
+      severity: "warn",
+      detail: `Frequent repetition detected: "${repeatedThoughtTitles.value}" appears ${repeatedThoughtTitles.count} times in the recent thought window.`
+    });
+  }
+  const repeatedEmotionTrigger = countMostRepeated(input.emotions.map((item) => `${item.trigger}:${item.label}`));
+  if (repeatedEmotionTrigger.count >= 6) {
+    findings.push({
+      id: "repeated-emotion-trigger",
+      severity: "warn",
+      detail: `Emotion loop candidate: "${repeatedEmotionTrigger.value}" appears ${repeatedEmotionTrigger.count} times recently.`
+    });
+  }
+  const recentResearchOnly = input.learningRecent
+    .slice(-30)
+    .filter((item) => String(item.category ?? "") === "research").length;
+  const recentImprovements = input.learningRecent
+    .slice(-30)
+    .filter((item) => String(item.category ?? "") === "improvement").length;
+  if (recentResearchOnly >= 10 && recentImprovements === 0) {
+    findings.push({
+      id: "research-heavy-without-improvement",
+      severity: "info",
+      detail: "Learning is currently research-heavy with no recent improvement actions."
+    });
+  }
+  return findings;
+}
+
+function countMostRepeated(values: string[]): { value: string; count: number } {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    const key = value || "unknown";
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  let best = "";
+  let count = 0;
+  for (const [key, value] of counts.entries()) {
+    if (value > count) {
+      best = key;
+      count = value;
+    }
+  }
+  return { value: best, count };
 }
 
 async function readRawBody(request: IncomingMessage): Promise<string> {

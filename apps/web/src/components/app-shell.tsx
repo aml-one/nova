@@ -48,9 +48,11 @@ const links: NavLink[] = [
   },
   { href: "/reports", label: "Reports", icon: FaBookOpen, subtitle: "Weekly learning summaries and overnight digests." },
   { href: "/learning", label: "Learning", icon: FaRobot, subtitle: "Self-improvement events and autonomous learning runs." },
+  { href: "/autonomy", label: "Autonomy", icon: FaRobot, subtitle: "Deep diagnostics for learning loops and independence health." },
   { href: "/workflows", label: "Workflows", icon: FaListCheck, subtitle: "Build if-this-then-that automations for Nova tasks." },
   { href: "/replay", label: "Replay", icon: FaRepeat, subtitle: "Fork prior runs and continue alternate chat branches." },
   { href: "/cameras", label: "Cameras", icon: FaCamera, subtitle: "Camera timeline events and live semantic alerts." },
+  { href: "/camera-monitor", label: "Camera Monitor", icon: FaCamera, subtitle: "Per-camera controls, tests, snapshots, and detection timeline." },
   { href: "/sandbox", label: "Sandbox", icon: FaShieldHalved, subtitle: "Simulate risky commands before execution." },
   { href: "/rollout", label: "Rollout", icon: FaTimeline, subtitle: "Stage, checkpoint, and rollback settings changes." },
   { href: "/security", label: "Security", icon: FaLock, subtitle: "Security center actions, anomalies, and audit history." },
@@ -113,7 +115,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
               {!navCollapsed ? <span>{link.label}</span> : null}
             </Link>
-            {index === 1 || index === 6 || index === 9 || index === 12 ? <div className="my-2 h-px w-full bg-slate-300/40" /> : null}
+            {index === 1 || index === 7 || index === 11 || index === 14 ? <div className="my-2 h-px w-full bg-slate-300/40" /> : null}
             </div>
           ))}
           <div className="mt-2 h-px w-full bg-slate-300/40" />

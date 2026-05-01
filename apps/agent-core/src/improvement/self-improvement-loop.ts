@@ -18,6 +18,14 @@ type Outcome = {
   success: boolean;
 };
 
+type LearningRecordLike = {
+  at?: string;
+  category?: string;
+  accepted?: boolean;
+  result?: string;
+  details?: Record<string, unknown>;
+};
+
 type ImprovementPolicy = {
   mode: "suggest-only" | "auto-apply-skills" | "auto-apply-code-sandbox";
   autoApplySkills: boolean;
@@ -144,10 +152,31 @@ export class SelfImprovementLoop {
     if ((options?.enabled ?? policy.backgroundLearningEnabled) !== true) {
       return "background learning is disabled by policy";
     }
+    if (this.outcomes.length === 0) {
+      this.learningLog.append(
+        "Skipped idle learning: waiting for real interaction",
+        true,
+        "No task outcomes yet. Nova will start autonomous research after real user/task activity.",
+        "proposal"
+      );
+      return "idle cycle skipped: no outcomes yet";
+    }
     const summary = summarizeOutcomes(
       this.outcomes.map((item) => item.task),
       this.outcomes.map((item) => item.success)
     );
+    if (summary.failures === 0) {
+      const hoursSinceResearch = this.hoursSinceLastAcceptedResearch();
+      if (hoursSinceResearch !== null && hoursSinceResearch < 6) {
+        this.learningLog.append(
+          "Skipped idle research to avoid repetitive loop",
+          true,
+          `No failures detected and last accepted research was ${hoursSinceResearch.toFixed(1)}h ago.`,
+          "proposal"
+        );
+        return "idle cycle skipped: no failures and research still fresh";
+      }
+    }
     const researchTopics = summary.topFailingTasks.length > 0 ? summary.topFailingTasks : ["Intelligent agent", "TypeScript"];
     const researchNotes = await collectResearchNotes(researchTopics.slice(0, 2));
     const cognition = await this.runAutonomousCognition(researchTopics.slice(0, 2), researchNotes);
@@ -242,6 +271,49 @@ export class SelfImprovementLoop {
 
   getLearningHistory(): Array<Record<string, unknown>> {
     return this.learningLog.getAll();
+  }
+
+  getDiagnostics(): {
+    policy: ImprovementPolicy;
+    outcomes: { total: number; failures: number; recent: Outcome[] };
+    learning: { totalRecords: number; categoryCounts: Record<string, number>; recent: LearningRecordLike[] };
+    curiosity: { pendingQuestions: number; skillGenerationByDate: Record<string, number> };
+  } {
+    const summary = summarizeOutcomes(
+      this.outcomes.map((item) => item.task),
+      this.outcomes.map((item) => item.success)
+    );
+    const learning = this.learningLog.getAll() as LearningRecordLike[];
+    const categoryCounts = learning.reduce<Record<string, number>>((acc, item) => {
+      const key = item.category || "unknown";
+      acc[key] = (acc[key] ?? 0) + 1;
+      return acc;
+    }, {});
+    return {
+      policy: this.policy,
+      outcomes: {
+        total: this.outcomes.length,
+        failures: summary.failures,
+        recent: this.outcomes.slice(-50)
+      },
+      learning: {
+        totalRecords: learning.length,
+        categoryCounts,
+        recent: learning.slice(-120)
+      },
+      curiosity: this.curiosity.getStats()
+    };
+  }
+
+  private hoursSinceLastAcceptedResearch(): number | null {
+    const recent = this.learningLog.getAll() as LearningRecordLike[];
+    const last = [...recent]
+      .reverse()
+      .find((item) => item.category === "research" && item.accepted === true && typeof item.at === "string");
+    if (!last?.at) return null;
+    const at = Date.parse(last.at);
+    if (!Number.isFinite(at)) return null;
+    return Math.max(0, (Date.now() - at) / 3_600_000);
   }
 }
 

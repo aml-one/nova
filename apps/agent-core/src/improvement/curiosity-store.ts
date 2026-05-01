@@ -80,6 +80,13 @@ export class CuriosityStore {
     return next;
   }
 
+  getStats(): { pendingQuestions: number; skillGenerationByDate: Record<string, number> } {
+    return {
+      pendingQuestions: this.state.pendingQuestions.length,
+      skillGenerationByDate: { ...this.state.skillGenerationByDate }
+    };
+  }
+
   private load(): void {
     if (!existsSync(this.storePath)) {
       return;

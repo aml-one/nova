@@ -84,7 +84,9 @@ export default function HomePage() {
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const hasLoadedSessionsRef = useRef(false);
-  const compactActionClass = "inline-flex h-7 w-7 items-center justify-center p-0";
+  const compactActionClass = "inline-flex h-9 min-w-9 items-center justify-center px-2";
+  const bubbleIconActionClass =
+    "inline-flex h-7 w-7 items-center justify-center text-slate-500 transition hover:text-slate-200";
 
   const uploadedMedia = useMemo(
     () =>
@@ -437,7 +439,7 @@ export default function HomePage() {
           <h1 className="text-2xl font-semibold">Nova Chat</h1>
           <div className="flex items-center gap-1.5">
             <Select
-              className="h-8 min-w-[240px] py-0 text-sm leading-none"
+              className="h-8 min-w-[240px] py-0.5 pl-2 pr-6 text-sm leading-tight"
               value={activeSessionId}
               onChange={(event) => {
                 const sessionId = event.target.value;
@@ -467,7 +469,7 @@ export default function HomePage() {
               }}
               title="Start new session"
             >
-              <FaPlus className="h-3.5 w-3.5" />
+              <FaPlus className="h-5 w-5" />
             </Button>
             <Button
               type="button"
@@ -482,7 +484,7 @@ export default function HomePage() {
               }}
               title="Rename active session"
             >
-              <FaPenToSquare className="h-3.5 w-3.5" />
+              <FaPenToSquare className="h-5 w-5" />
             </Button>
             <Button
               type="button"
@@ -511,7 +513,7 @@ export default function HomePage() {
               }}
               title="Delete active session"
             >
-              <FaTrash className="h-3.5 w-3.5" />
+              <FaTrash className="h-5 w-5" />
             </Button>
             {loading ? (
               <button
@@ -578,24 +580,6 @@ export default function HomePage() {
               {editingTurnId === turn.id ? (
                 <div className="space-y-2">
                   <Textarea value={editingText} onChange={(event) => setEditingText(event.target.value)} rows={3} />
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      tone="green"
-                      className={compactActionClass}
-                      onClick={() => {
-                        const next = editingText.trim();
-                        if (!next) return;
-                        setTurns((prev) => prev.map((item) => (item.id === turn.id ? { ...item, text: next } : item)));
-                        setMessage(next);
-                        setEditingTurnId(null);
-                      }}
-                      title="Save"
-                    >
-                      <FaFloppyDisk className="h-3.5 w-3.5" />
-                    </Button>
-                    <button type="button" className="text-xs text-rose-400 hover:text-rose-300" onClick={() => setEditingTurnId(null)}>Cancel</button>
-                  </div>
                 </div>
               ) : (
                 <div className="text-sm">
@@ -604,41 +588,60 @@ export default function HomePage() {
               )}
               {turn.role === "user" ? (
                 <div className="mt-2 flex items-center justify-between gap-2">
-                  <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-ui border bg-surface2" onClick={() => void copyTurnText(turn.text)} title="Copy message">
-                    <FaCopy className="h-3.5 w-3.5" />
+                  <button type="button" className={bubbleIconActionClass} onClick={() => void copyTurnText(turn.text)} title="Copy message">
+                    <FaCopy className="h-5 w-5" />
                   </button>
                   <div className="flex items-center gap-1.5">
-                  <Button
-                    type="button"
-                    tone="yellow"
-                    className={compactActionClass}
-                    onClick={() => {
-                      setEditingTurnId(turn.id);
-                      setEditingText(turn.text);
-                    }}
-                    title="Edit"
-                  >
-                    <FaPenToSquare className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    type="button"
-                    tone="orange"
-                    className={compactActionClass}
-                    onClick={() => {
-                      setMessage(turn.text);
-                      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
-                    }}
-                    title="Regenerate"
-                  >
-                    <FaRotateRight className="h-3.5 w-3.5" />
-                  </Button>
+                    <button
+                      type="button"
+                      className={bubbleIconActionClass}
+                      onClick={() => {
+                        setEditingTurnId(turn.id);
+                        setEditingText(turn.text);
+                      }}
+                      title="Edit"
+                    >
+                      <FaPenToSquare className="h-5 w-5" />
+                    </button>
+                    <button
+                      type="button"
+                      className={bubbleIconActionClass}
+                      onClick={() => {
+                        setMessage(turn.text);
+                        window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+                      }}
+                      title="Regenerate"
+                    >
+                      <FaRotateRight className="h-5 w-5" />
+                    </button>
+                    {editingTurnId === turn.id ? (
+                      <>
+                        <button
+                          type="button"
+                          className={bubbleIconActionClass}
+                          onClick={() => {
+                            const next = editingText.trim();
+                            if (!next) return;
+                            setTurns((prev) => prev.map((item) => (item.id === turn.id ? { ...item, text: next } : item)));
+                            setMessage(next);
+                            setEditingTurnId(null);
+                          }}
+                          title="Save"
+                        >
+                          <FaFloppyDisk className="h-5 w-5" />
+                        </button>
+                        <button type="button" className={bubbleIconActionClass} onClick={() => setEditingTurnId(null)} title="Cancel">
+                          <FaXmark className="h-5 w-5" />
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
               {turn.role === "assistant" ? (
                 <div className="mt-2">
-                  <button type="button" className="inline-flex h-7 w-7 items-center justify-center rounded-ui border bg-surface2" onClick={() => void copyTurnText(turn.text)} title="Copy message">
-                    <FaCopy className="h-3.5 w-3.5" />
+                  <button type="button" className={bubbleIconActionClass} onClick={() => void copyTurnText(turn.text)} title="Copy message">
+                    <FaCopy className="h-5 w-5" />
                   </button>
                 </div>
               ) : null}

@@ -463,6 +463,8 @@ export default function SettingsPage() {
       }))
   );
   const skillStatusById = buildSkillStatusMap(skillManifests, health?.checks ?? []);
+  const cameraSkillManifest = skillManifests.find((item) => item.id === "camera-vision" || item.id === "cameraVision");
+  const cameraSkillStatus = skillStatusById["camera-vision"] ?? skillStatusById["cameraVision"] ?? "inactive";
   const identityTimeline = buildIdentityTimeline({
     defaultPersona,
     versions: personaVersions,
@@ -973,10 +975,29 @@ export default function SettingsPage() {
 
         {tab === "skill:camera-vision" || tab === "skill:cameraVision" ? (
           <Card className="space-y-3">
-            <h2 className="text-lg font-semibold">Camera Vision Skill</h2>
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="text-lg font-semibold">Camera Vision Skill</h2>
+              <span className={badgeClassForSkillStatus(cameraSkillStatus)}>{labelForSkillStatus(cameraSkillStatus)}</span>
+            </div>
             <p className="text-xs text-muted">
               Add RTSP camera URLs (one per line). Example: <code>rtsp://user:password@192.168.31.10:554/h.264</code>
             </p>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={Boolean(cameraVisionSettings.enabled ?? false)}
+                onChange={(e) =>
+                  setSettings((p) => ({
+                    ...p,
+                    skillSettings: {
+                      ...p.skillSettings,
+                      ["camera-vision"]: { ...p.skillSettings["camera-vision"], enabled: e.target.checked },
+                      ["cameraVision"]: { ...(p.skillSettings["cameraVision"] ?? {}), enabled: e.target.checked }
+                    }
+                  }))
+                }
+              />
+              Enable camera vision automation
+            </label>
             <textarea
               className="min-h-[120px] w-full rounded-ui border bg-surface px-2 py-1 text-sm"
                 value={String(cameraVisionSettings.rtspUrls ?? cameraVisionSettings.rtsp_urls ?? "")}
@@ -1002,6 +1023,15 @@ export default function SettingsPage() {
                   <div key={`${line}-${idx}`}>{line}</div>
                 ))}
               {!String(cameraVisionSettings.rtspUrls ?? "").trim() ? <div>No cameras configured yet.</div> : null}
+            </div>
+            <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
+              <div className="font-semibold">How this works right now</div>
+              <div>- The UI stores camera URLs in settings; save settings to persist.</div>
+              <div>- The runtime skill must be present in the loaded skill manifests to become truly active.</div>
+              <div>- The current web UI does not provide a live video viewer here; snapshots/detections are triggered by skill usage and camera/lab routes.</div>
+              {!cameraSkillManifest ? (
+                <div className="mt-1 text-rose-300">Runtime camera skill module is not loaded. It will remain inactive until installed/loaded.</div>
+              ) : null}
             </div>
           </Card>
         ) : null}
