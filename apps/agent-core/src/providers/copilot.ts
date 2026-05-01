@@ -1,5 +1,10 @@
 import type { ChatRequest, ModelProvider, ModelResponse, ProviderHealth } from "@nova/sdk/provider";
-import { resolveCopilotDefaultModelId, resolveCopilotRuntime } from "./copilot-credentials.js";
+import {
+  githubCopilotApiExtraHeaders,
+  headersForCopilotModelsGet,
+  resolveCopilotDefaultModelId,
+  resolveCopilotRuntime
+} from "./copilot-credentials.js";
 import { chatViaOpenAICompatible, streamViaOpenAICompatible } from "./openai-compatible.js";
 
 export class CopilotProvider implements ModelProvider {
@@ -17,9 +22,7 @@ export class CopilotProvider implements ModelProvider {
     }
     try {
       const response = await fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
-        headers: {
-          authorization: `Bearer ${apiKey}`
-        }
+        headers: headersForCopilotModelsGet(baseUrl, apiKey)
       });
       return {
         name: this.name,
@@ -66,7 +69,8 @@ export class CopilotProvider implements ModelProvider {
         apiKey,
         messages: request.messages,
         temperature: request.temperature,
-        maxTokens: request.maxTokens
+        maxTokens: request.maxTokens,
+        extraHeaders: githubCopilotApiExtraHeaders(baseUrl)
       },
       onToken
     );

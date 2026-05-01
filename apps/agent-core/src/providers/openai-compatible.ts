@@ -8,6 +8,8 @@ type OpenAICompatibleOptions = {
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
+  /** e.g. GitHub Copilot requires Copilot-Integration-Id on api.githubcopilot.com */
+  extraHeaders?: Record<string, string>;
 };
 
 type OpenAIResponse = {
@@ -25,7 +27,8 @@ export async function chatViaOpenAICompatible(
     method: "POST",
     headers: {
       "content-type": "application/json",
-      ...(options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : {})
+      ...(options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : {}),
+      ...(options.extraHeaders ?? {})
     },
     body: JSON.stringify({
       model: options.model,
@@ -60,7 +63,8 @@ export async function streamViaOpenAICompatible(
     method: "POST",
     headers: {
       "content-type": "application/json",
-      ...(options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : {})
+      ...(options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : {}),
+      ...(options.extraHeaders ?? {})
     },
     body: JSON.stringify({
       model: options.model,

@@ -5,6 +5,35 @@ import type { AppSettings } from "../storage/repositories/settings-repository.js
 
 export const DEFAULT_GITHUB_COPILOT_BASE_URL = "https://api.githubcopilot.com";
 
+/** Required on api.githubcopilot.com requests or GitHub returns 4xx (documented in Copilot reverse‑engineering guides). */
+export const GITHUB_COPILOT_VSCODE_CHAT_INTEGRATION_ID = "vscode-chat";
+
+export function isGithubCopilotApiBase(baseUrl: string): boolean {
+  const trimmed = baseUrl.trim().replace(/\/$/, "");
+  try {
+    const withProto = trimmed.includes("://") ? trimmed : `https://${trimmed}`;
+    return new URL(withProto).hostname.toLowerCase() === "api.githubcopilot.com";
+  } catch {
+    return trimmed.toLowerCase().includes("api.githubcopilot.com");
+  }
+}
+
+/** GET /models + chat/completions against GitHub Copilot need this integration header. */
+export function githubCopilotApiExtraHeaders(baseUrl: string): Record<string, string> | undefined {
+  if (!isGithubCopilotApiBase(baseUrl)) return undefined;
+  return { "Copilot-Integration-Id": GITHUB_COPILOT_VSCODE_CHAT_INTEGRATION_ID };
+}
+
+export function headersForCopilotModelsGet(baseUrl: string, apiKey: string): HeadersInit {
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${apiKey}`,
+    accept: "application/json"
+  };
+  const extra = githubCopilotApiExtraHeaders(baseUrl);
+  if (extra) Object.assign(headers, extra);
+  return headers;
+}
+
 type CopilotAuthFile = {
   copilotToken?: string;
   githubAccessToken?: string;

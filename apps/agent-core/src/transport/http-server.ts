@@ -32,7 +32,11 @@ import { SelfImprovementLoop } from "../improvement/self-improvement-loop.js";
 import { InMemorySkillRegistry } from "../skills/skill-registry.js";
 import { resolveChannelAccess } from "../security/phone-access.js";
 import { ApprovalService } from "../execution/approval-service.js";
-import { registerCopilotSettingsSource, resolveCopilotRuntime } from "../providers/copilot-credentials.js";
+import {
+  headersForCopilotModelsGet,
+  registerCopilotSettingsSource,
+  resolveCopilotRuntime
+} from "../providers/copilot-credentials.js";
 import { ProviderCatalogService } from "../providers/provider-catalog.js";
 import { UpdateManager } from "../update/update-manager.js";
 import { ThoughtRepository } from "../storage/repositories/thought-repository.js";
@@ -535,9 +539,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
             correlationId
           });
         }
-        const check = await pingUrl(`${baseUrl.replace(/\/$/, "")}/models`, {
-          authorization: `Bearer ${apiKey}`
-        });
+        const check = await pingUrl(`${baseUrl.replace(/\/$/, "")}/models`, headersForCopilotModelsGet(baseUrl, apiKey));
         const omitApiKeyFromSuggestedEnv = !payload.apiKey?.trim();
         const suggestedEnv = omitApiKeyFromSuggestedEnv
           ? [`COPILOT_BASE_URL=${baseUrl}`, "# COPILOT_API_KEY: resolved at runtime (env, Settings, or ~/.nova/copilot-auth.json)"].join(

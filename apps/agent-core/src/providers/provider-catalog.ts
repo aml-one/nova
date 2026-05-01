@@ -1,5 +1,5 @@
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
-import { copilotLikelyConfigured, resolveCopilotRuntime } from "./copilot-credentials.js";
+import { copilotLikelyConfigured, headersForCopilotModelsGet, resolveCopilotRuntime } from "./copilot-credentials.js";
 
 type ProviderName = "ollama" | "lmstudio" | "copilot";
 
@@ -113,7 +113,7 @@ export class ProviderCatalogService {
     if (!baseUrl || !apiKey) return [];
     try {
       const response = await fetch(`${baseUrl.replace(/\/$/, "")}/models`, {
-        headers: { authorization: `Bearer ${apiKey}` }
+        headers: headersForCopilotModelsGet(baseUrl, apiKey)
       });
       if (!response.ok) return [];
       const data = (await response.json()) as { data?: Array<{ id?: string }> };
