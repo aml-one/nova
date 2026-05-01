@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createHash, randomUUID } from "node:crypto";
 import { exec as execCallback, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import { TaskOrchestrator } from "../orchestrator/task-orchestrator.js";
 import { WhatsAppChannelAdapter } from "../channels/whatsapp.js";
@@ -545,13 +545,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/copilot/device-login/start") {
         const commandResolution = resolveCopilotLoginCommand();
-        if (!commandResolution.command) {
+        if (!commandResolution.command || !commandResolution.cwd) {
           return sendJson(response, 400, {
             error: commandResolution.error ?? "No device login command configured",
             correlationId
           });
         }
         const command = commandResolution.command;
+        const loginCwd = commandResolution.cwd;
         const sessionId = randomUUID();
         const session: CopilotDeviceLoginSession = {
           id: sessionId,
@@ -563,12 +564,12 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         copilotDeviceLoginSessions.set(sessionId, session);
         try {
           const child = spawn(command, {
-            cwd: resolveCopilotLoginCommandCwd(),
+            cwd: loginCwd,
             shell: true,
             env: process.env
           });
           session.process = child;
-          appendCopilotLoginLog(session, `Started command: ${command}`);
+          appendCopilotLoginLog(session, `Started command (cwd=${loginCwd}): ${command}`);
           const handleOutput = (chunk: Buffer): void => {
             const text = chunk.toString("utf8");
             for (const line of text.split(/\r?\n/)) {
@@ -2372,30 +2373,48 @@ function appendCopilotLoginLog(session: CopilotDeviceLoginSession, line: string)
   }
 }
 
-function resolveCopilotLoginCommandCwd(): string {
-  const candidates = [process.cwd(), resolve(process.cwd(), ".."), resolve(process.cwd(), "../..")];
-  const matched = candidates.find((dir) => existsSync(resolve(dir, "package.json")));
-  return matched ?? process.cwd();
+/** Directory containing package.json with a `login` script (monorepo root), walking up from startDir. */
+function findPackageRootWithLoginScript(startDir: string): string | undefined {
+  let dir = resolve(startDir);
+  const seen = new Set<string>();
+  for (let depth = 0; depth < 16 && !seen.has(dir); depth++) {
+    seen.add(dir);
+    const packageJsonPath = resolve(dir, "package.json");
+    if (existsSync(packageJsonPath)) {
+      try {
+        const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { scripts?: Record<string, string> };
+        if (parsed.scripts?.login) {
+          return dir;
+        }
+      } catch {
+        // ignore malformed package.json and keep walking up
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
 }
 
-function resolveCopilotLoginCommand(): { command?: string; error?: string } {
+function resolveCopilotLoginCommand(): { command?: string; cwd?: string; error?: string } {
   const fromEnv = (process.env.NOVA_COPILOT_DEVICE_LOGIN_COMMAND ?? "").trim();
+  const repoRoot = findPackageRootWithLoginScript(process.cwd());
+
   if (fromEnv) {
-    return { command: fromEnv };
+    return {
+      command: fromEnv,
+      cwd: repoRoot ?? process.cwd()
+    };
   }
-  const candidates = [process.cwd(), resolve(process.cwd(), ".."), resolve(process.cwd(), "../..")];
-  for (const dir of candidates) {
-    const packageJsonPath = resolve(dir, "package.json");
-    if (!existsSync(packageJsonPath)) continue;
-    try {
-      const parsed = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { scripts?: Record<string, string> };
-      if (parsed.scripts?.login) {
-        return { command: "npm run login -- --provider=github-copilot" };
-      }
-    } catch {
-      // ignore malformed package.json and keep searching
-    }
+
+  if (repoRoot) {
+    return {
+      command: "npm run login -- --provider=github-copilot",
+      cwd: repoRoot
+    };
   }
+
   return {
     error:
       "No login script found. Add a package.json login script or set NOVA_COPILOT_DEVICE_LOGIN_COMMAND to your device-login command."
