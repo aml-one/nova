@@ -78,10 +78,6 @@ export async function fetchCopilotTokenFromGithub(githubAccessToken: string): Pr
   }
 }
 
-/**
- * Resolve Copilot HTTP credentials for OpenAI-compatible calls (/models, /chat/completions).
- * Order: env pair → settings api key + base URL → ~/.nova/copilot-auth.json (copilot token or GitHub→Copilot exchange).
- */
 export function isCopilotIntegrationDisabled(): boolean {
   if (process.env.NOVA_COPILOT_DISABLED === "true") return true;
   try {
@@ -91,6 +87,14 @@ export function isCopilotIntegrationDisabled(): boolean {
   }
 }
 
+/**
+ * Resolve Copilot HTTP credentials for OpenAI-compatible calls (/models, /chat/completions).
+ *
+ * - Full `COPILOT_BASE_URL` + `COPILOT_API_KEY` in env wins.
+ * - For **api.githubcopilot.com**, prefer refreshing a short-lived Copilot token from the device-login
+ *   GitHub OAuth token, then the file `copilotToken`, then Settings API key (stale keys caused 401s).
+ * - For other bases (OpenRouter, Azure GitHub Models, local), prefer Settings / env API key, then auth file.
+ */
 export async function resolveCopilotRuntime(): Promise<{ baseUrl: string; apiKey: string }> {
   if (isCopilotIntegrationDisabled()) {
     return { baseUrl: "", apiKey: "" };
@@ -103,9 +107,29 @@ export async function resolveCopilotRuntime(): Promise<{ baseUrl: string; apiKey
 
   const settings = copilotSettingsGetter?.();
   let baseUrl = settings?.copilot.baseUrl?.trim() || envBase || "";
-  let apiKey = settings?.copilot.apiKey?.trim() || envKey || "";
-
   const auth = readCopilotAuthProfile();
+  const deviceAuthAvailable = Boolean(auth?.githubAccessToken?.trim() || auth?.copilotToken?.trim());
+
+  if (!baseUrl && deviceAuthAvailable) {
+    baseUrl = DEFAULT_GITHUB_COPILOT_BASE_URL;
+  }
+
+  if (isGithubCopilotApiBase(baseUrl)) {
+    let apiKey = "";
+    if (auth?.githubAccessToken?.trim()) {
+      const fresh = await fetchCopilotTokenFromGithub(auth.githubAccessToken.trim());
+      if (fresh) apiKey = fresh;
+    }
+    if (!apiKey && auth?.copilotToken?.trim()) {
+      apiKey = auth.copilotToken.trim();
+    }
+    if (!apiKey) {
+      apiKey = settings?.copilot.apiKey?.trim() || envKey || "";
+    }
+    return { baseUrl: DEFAULT_GITHUB_COPILOT_BASE_URL, apiKey };
+  }
+
+  let apiKey = settings?.copilot.apiKey?.trim() || envKey || "";
   if (!apiKey && auth?.copilotToken?.trim()) {
     apiKey = auth.copilotToken.trim();
   }
