@@ -46,6 +46,7 @@ type SettingsState = {
       assistantTextColor: string;
       userActionIconColor: string;
       assistantActionIconColor: string;
+      statsTextColor: string;
       bubbleBackgroundEnabled: boolean;
       borderColor: string;
       borderThicknessPx: number;
@@ -107,6 +108,7 @@ const DEFAULT_SETTINGS: SettingsState = {
       assistantTextColor: "#0f172a",
       userActionIconColor: "#475569",
       assistantActionIconColor: "#475569",
+      statsTextColor: "#64748b",
       bubbleBackgroundEnabled: true,
       borderColor: "#94a3b8",
       borderThicknessPx: 1,
@@ -610,6 +612,11 @@ export default function SettingsPage() {
                 value={settings.web.chatStyle.borderColor}
                 onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, borderColor: value } } }))}
               />
+              <ColorPickerRow
+                label="Stats line color"
+                value={settings.web.chatStyle.statsTextColor}
+                onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, statsTextColor: value } } }))}
+              />
               <label className="grid gap-1 text-xs">
                 Bubble corner radius (0-30px)
                 <Input type="number" min={0} max={30} value={settings.web.chatStyle.bubbleRadiusPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, bubbleRadiusPx: Number(e.target.value || 0) } } }))} />
@@ -648,6 +655,9 @@ export default function SettingsPage() {
                 >
                   {settings.web.chatStyle.showNames ? <div className="mb-1 text-[11px] font-semibold">Nova</div> : null}
                   <div className="text-xs">Updated styling preview is now active.</div>
+                  <div className="mt-1 text-[11px]" style={{ color: settings.web.chatStyle.statsTextColor }}>
+                    2.9 t/s · 36 tok · 12.9s · ollama/gemma4:26B
+                  </div>
                 </article>
               </div>
             </div>
@@ -1010,10 +1020,10 @@ export default function SettingsPage() {
               <Input value={settings.updates.repoName} onChange={(e) => setSettings((p) => ({ ...p, updates: { ...p.updates, repoName: e.target.value } }))} placeholder="Repo name" />
               <Input type="number" value={settings.updates.checkIntervalMs} onChange={(e) => setSettings((p) => ({ ...p, updates: { ...p.updates, checkIntervalMs: Number(e.target.value || 0) } }))} placeholder="Check interval ms" />
             </div>
-            <Select value={settings.updates.channel} onChange={(e) => setSettings((p) => ({ ...p, updates: { ...p.updates, channel: e.target.value as "stable" | "beta" } }))}>
-              <option value="stable">Stable</option>
-              <option value="beta">Beta</option>
-            </Select>
+            <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
+              Update channel is currently a single stream from your configured repository.
+              <div className="mt-1">Current mode: <strong>Repository HEAD</strong> (channel selector reserved for future multi-track releases).</div>
+            </div>
             <div className="flex gap-2">
               <Button type="button" tone="yellow" onClick={() => void checkUpdates()}>Check now</Button>
               <Button type="button" tone="orange" onClick={() => void applyUpdates()}>Apply latest</Button>
@@ -1374,6 +1384,7 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
         userActionIconColor: value?.web?.chatStyle?.userActionIconColor ?? DEFAULT_SETTINGS.web.chatStyle.userActionIconColor,
         assistantActionIconColor:
           value?.web?.chatStyle?.assistantActionIconColor ?? DEFAULT_SETTINGS.web.chatStyle.assistantActionIconColor,
+        statsTextColor: value?.web?.chatStyle?.statsTextColor ?? DEFAULT_SETTINGS.web.chatStyle.statsTextColor,
         bubbleBackgroundEnabled:
           value?.web?.chatStyle?.bubbleBackgroundEnabled ?? DEFAULT_SETTINGS.web.chatStyle.bubbleBackgroundEnabled,
         borderColor: value?.web?.chatStyle?.borderColor ?? DEFAULT_SETTINGS.web.chatStyle.borderColor,

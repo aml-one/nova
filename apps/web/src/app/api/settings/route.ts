@@ -27,6 +27,7 @@ type AppSettingsPayload = {
       assistantTextColor?: string;
       userActionIconColor?: string;
       assistantActionIconColor?: string;
+      statsTextColor?: string;
       bubbleBackgroundEnabled?: boolean;
       borderColor?: string;
       borderThicknessPx?: number;

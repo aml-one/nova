@@ -26,6 +26,7 @@ const DEFAULT_SETTINGS: AppSettings = {
       assistantTextColor: "#0f172a",
       userActionIconColor: "#475569",
       assistantActionIconColor: "#475569",
+      statsTextColor: "#64748b",
       bubbleBackgroundEnabled: true,
       borderColor: "#94a3b8",
       borderThicknessPx: 1,
@@ -148,6 +149,7 @@ export class SettingsService {
           userActionIconColor: update.web?.chatStyle?.userActionIconColor ?? current.web.chatStyle.userActionIconColor,
           assistantActionIconColor:
             update.web?.chatStyle?.assistantActionIconColor ?? current.web.chatStyle.assistantActionIconColor,
+          statsTextColor: update.web?.chatStyle?.statsTextColor ?? current.web.chatStyle.statsTextColor,
           bubbleBackgroundEnabled:
             update.web?.chatStyle?.bubbleBackgroundEnabled ?? current.web.chatStyle.bubbleBackgroundEnabled,
           borderColor: update.web?.chatStyle?.borderColor ?? current.web.chatStyle.borderColor,
@@ -268,6 +270,10 @@ export class SettingsService {
           assistantActionIconColor: normalizeHexColor(
             settings.web?.chatStyle?.assistantActionIconColor,
             DEFAULT_SETTINGS.web.chatStyle.assistantActionIconColor
+          ),
+          statsTextColor: normalizeHexColor(
+            settings.web?.chatStyle?.statsTextColor,
+            DEFAULT_SETTINGS.web.chatStyle.statsTextColor
           ),
           bubbleBackgroundEnabled: settings.web?.chatStyle?.bubbleBackgroundEnabled !== false,
           borderColor: normalizeHexColor(settings.web?.chatStyle?.borderColor, DEFAULT_SETTINGS.web.chatStyle.borderColor),

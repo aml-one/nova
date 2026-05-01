@@ -3,6 +3,7 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useTheme } from "next-themes";
 import { FaBrain, FaCopy, FaFloppyDisk, FaPenToSquare, FaPlus, FaRotateRight, FaSpinner, FaTrash, FaXmark } from "react-icons/fa6";
 import { Card } from "../components/ui/card";
 import { Textarea } from "../components/ui/textarea";
@@ -55,6 +56,7 @@ type PendingUpload = {
 };
 
 export default function HomePage() {
+  const { resolvedTheme } = useTheme();
   const [message, setMessage] = useState("");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -74,6 +76,7 @@ export default function HomePage() {
     assistantTextColor: "#0f172a",
     userActionIconColor: "#475569",
     assistantActionIconColor: "#475569",
+    statsTextColor: "#64748b",
     bubbleBackgroundEnabled: true,
     borderColor: "#94a3b8",
     borderThicknessPx: 1,
@@ -94,6 +97,7 @@ export default function HomePage() {
   const compactActionClass = "inline-flex h-9 min-w-9 items-center justify-center px-2";
   const bubbleIconActionClass =
     "inline-flex h-7 w-7 items-center justify-center transition-[filter] hover:brightness-110";
+  const isDarkTheme = resolvedTheme !== "light";
 
   const uploadedMedia = useMemo(
     () =>
@@ -162,6 +166,7 @@ export default function HomePage() {
               assistantTextColor?: string;
               userActionIconColor?: string;
               assistantActionIconColor?: string;
+              statsTextColor?: string;
               bubbleBackgroundEnabled?: boolean;
               borderColor?: string;
               borderThicknessPx?: number;
@@ -186,6 +191,7 @@ export default function HomePage() {
           userActionIconColor: data.settings?.web?.chatStyle?.userActionIconColor ?? prev.userActionIconColor,
           assistantActionIconColor:
             data.settings?.web?.chatStyle?.assistantActionIconColor ?? prev.assistantActionIconColor,
+          statsTextColor: data.settings?.web?.chatStyle?.statsTextColor ?? prev.statsTextColor,
           bubbleBackgroundEnabled: data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled,
           borderColor: data.settings?.web?.chatStyle?.borderColor ?? prev.borderColor,
           borderThicknessPx: data.settings?.web?.chatStyle?.borderThicknessPx ?? prev.borderThicknessPx,
@@ -616,7 +622,7 @@ export default function HomePage() {
                       backgroundColor: chatStyle.bubbleBackgroundEnabled
                         ? withOpacity(chatStyle.userBubbleColor, chatStyle.userBackgroundOpacityPct)
                         : "transparent",
-                      color: chatStyle.userTextColor,
+                      color: ensureReadableTextColor(chatStyle.userTextColor, isDarkTheme),
                       borderColor: chatStyle.borderColor,
                       borderWidth: `${chatStyle.userBorderThicknessPx}px`,
                       borderRadius: `${chatStyle.bubbleRadiusPx}px`
@@ -625,7 +631,7 @@ export default function HomePage() {
                       backgroundColor: chatStyle.bubbleBackgroundEnabled
                         ? withOpacity(chatStyle.assistantBubbleColor, chatStyle.assistantBackgroundOpacityPct)
                         : "transparent",
-                      color: chatStyle.assistantTextColor,
+                      color: ensureReadableTextColor(chatStyle.assistantTextColor, isDarkTheme),
                       borderColor: chatStyle.borderColor,
                       borderWidth: `${chatStyle.assistantBorderThicknessPx}px`,
                       borderRadius: `${chatStyle.bubbleRadiusPx}px`
@@ -647,7 +653,7 @@ export default function HomePage() {
                   <button
                     type="button"
                     className={bubbleIconActionClass}
-                    style={{ color: chatStyle.userActionIconColor }}
+                    style={{ color: ensureReadableTextColor(chatStyle.userActionIconColor, isDarkTheme) }}
                     onClick={() => void copyTurnText(turn.text, turn.id)}
                     title="Copy message"
                   >
@@ -657,7 +663,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       className={bubbleIconActionClass}
-                      style={{ color: chatStyle.userActionIconColor }}
+                      style={{ color: ensureReadableTextColor(chatStyle.userActionIconColor, isDarkTheme) }}
                       onClick={() => {
                         setEditingTurnId(turn.id);
                         setEditingText(turn.text);
@@ -669,7 +675,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       className={bubbleIconActionClass}
-                      style={{ color: chatStyle.userActionIconColor }}
+                      style={{ color: ensureReadableTextColor(chatStyle.userActionIconColor, isDarkTheme) }}
                       onClick={() => {
                         setMessage(turn.text);
                         window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
@@ -683,7 +689,7 @@ export default function HomePage() {
                         <button
                           type="button"
                           className={bubbleIconActionClass}
-                          style={{ color: chatStyle.userActionIconColor }}
+                          style={{ color: ensureReadableTextColor(chatStyle.userActionIconColor, isDarkTheme) }}
                           onClick={() => {
                             const next = editingText.trim();
                             if (!next) return;
@@ -698,7 +704,7 @@ export default function HomePage() {
                         <button
                           type="button"
                           className={bubbleIconActionClass}
-                          style={{ color: chatStyle.userActionIconColor }}
+                          style={{ color: ensureReadableTextColor(chatStyle.userActionIconColor, isDarkTheme) }}
                           onClick={() => setEditingTurnId(null)}
                           title="Cancel"
                         >
@@ -714,7 +720,7 @@ export default function HomePage() {
                   <button
                     type="button"
                     className={bubbleIconActionClass}
-                    style={{ color: chatStyle.assistantActionIconColor }}
+                    style={{ color: ensureReadableTextColor(chatStyle.assistantActionIconColor, isDarkTheme) }}
                     onClick={() => void copyTurnText(turn.text, turn.id)}
                     title="Copy message"
                   >
@@ -744,7 +750,7 @@ export default function HomePage() {
                 </div>
               ) : null}
               {turn.role === "assistant" && turn.stats ? (
-                <div className="mt-2 text-[11px] text-slate-700/80 dark:text-slate-200/80">
+                <div className="mt-2 text-[11px]" style={{ color: ensureReadableTextColor(chatStyle.statsTextColor, isDarkTheme) }}>
                   {turn.stats.tokensPerSecond} t/s · {turn.stats.tokenCount} tok · {(turn.stats.elapsedMs / 1000).toFixed(2)}s
                   {typeof turn.stats.firstTokenMs === "number" ? ` · first ${(turn.stats.firstTokenMs / 1000).toFixed(2)}s` : ""}
                   {typeof turn.stats.providerTps === "number" ? ` · provider ${turn.stats.providerTps} t/s` : ""}
@@ -1032,6 +1038,25 @@ function withOpacity(hex: string, opacityPct: number): string {
   const g = Number.parseInt(match[2], 16);
   const b = Number.parseInt(match[3], 16);
   return `rgba(${r}, ${g}, ${b}, ${normalized})`;
+}
+
+function ensureReadableTextColor(hex: string, isDarkTheme: boolean): string {
+  const rgb = parseHexColor(hex);
+  if (!rgb) return hex;
+  const luminance = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255;
+  if (!isDarkTheme && luminance > 0.78) return "#334155";
+  if (isDarkTheme && luminance < 0.22) return "#e2e8f0";
+  return hex;
+}
+
+function parseHexColor(hex: string): { r: number; g: number; b: number } | null {
+  const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex.trim());
+  if (!match) return null;
+  return {
+    r: Number.parseInt(match[1], 16),
+    g: Number.parseInt(match[2], 16),
+    b: Number.parseInt(match[3], 16)
+  };
 }
 
 async function readSseStream(

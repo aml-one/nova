@@ -26,6 +26,7 @@ export type AppSettings = {
       assistantTextColor: string;
       userActionIconColor: string;
       assistantActionIconColor: string;
+      statsTextColor: string;
       bubbleBackgroundEnabled: boolean;
       borderColor: string;
       borderThicknessPx: number;
@@ -170,6 +171,10 @@ export class SettingsRepository {
               typeof parsed.web?.chatStyle?.assistantActionIconColor === "string"
                 ? parsed.web.chatStyle.assistantActionIconColor
                 : "#475569",
+            statsTextColor:
+              typeof parsed.web?.chatStyle?.statsTextColor === "string"
+                ? parsed.web.chatStyle.statsTextColor
+                : "#64748b",
             bubbleBackgroundEnabled: parsed.web?.chatStyle?.bubbleBackgroundEnabled !== false,
             borderColor:
               typeof parsed.web?.chatStyle?.borderColor === "string" ? parsed.web.chatStyle.borderColor : "#94a3b8",
