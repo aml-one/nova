@@ -540,6 +540,29 @@ export default function SettingsPage() {
         : modelOptions.copilot ?? [];
   const websiteBuilderModel = String(websiteBuilderSettings.model ?? "");
   const updateErrorMessage = normalizeUpdateError(updateStatus?.lastError);
+  const copilotPresets: Array<{ id: string; label: string; baseUrl: string; model: string; note: string }> = [
+    {
+      id: "github-models",
+      label: "GitHub Models",
+      baseUrl: "https://models.inference.ai.azure.com",
+      model: "gpt-4o-mini",
+      note: "Use a GitHub personal access token with Models access."
+    },
+    {
+      id: "openrouter",
+      label: "OpenRouter",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "openai/gpt-4o-mini",
+      note: "Use your OpenRouter API key and pick any listed model id."
+    },
+    {
+      id: "custom",
+      label: "Custom OpenAI-compatible",
+      baseUrl: "http://127.0.0.1:1234/v1",
+      model: "gpt-4o-mini",
+      note: "Works with local gateways (LM Studio, vLLM, LiteLLM, etc.) exposing /models."
+    }
+  ];
   const tabs = [
     { id: "general", label: "General", tone: "blue" as const },
     { id: "models", label: "Models", tone: "purple" as const },
@@ -900,20 +923,41 @@ export default function SettingsPage() {
             </div>
             <div className="space-y-2 rounded-ui border bg-surface p-3">
               <h3 className="font-semibold">Copilot quick setup</h3>
-              <p className="text-xs text-muted">
-                Use any OpenAI-compatible provider endpoint. The base URL should expose a <code>/models</code> route, and API key is created in that provider dashboard.
-              </p>
-              <p className="text-xs text-muted">
-                If you use GitHub Models, check <a className="underline" href="https://github.com/marketplace/models" target="_blank" rel="noreferrer">GitHub Models</a> and create a token in your account settings.
-              </p>
+              <p className="text-xs text-muted">OpenClaw-style setup: pick a preset, paste key, validate, then save.</p>
+              <div className="grid gap-2 md:grid-cols-3">
+                {copilotPresets.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className="rounded-ui border bg-surface2 p-2 text-left text-xs transition hover:border-blue-500/60"
+                    onClick={() =>
+                      setSettings((p) => ({
+                        ...p,
+                        copilot: { ...p.copilot, baseUrl: preset.baseUrl, defaultModel: preset.model }
+                      }))
+                    }
+                  >
+                    <div className="font-semibold">{preset.label}</div>
+                    <div className="mt-1 text-muted">{preset.note}</div>
+                    <div className="mt-1 font-mono text-[10px] text-muted">{preset.baseUrl}</div>
+                  </button>
+                ))}
+              </div>
+              <div className="rounded-ui border bg-surface2 p-2 text-xs text-muted">
+                <div><strong>Step 1:</strong> Choose preset (or enter your own base URL).</div>
+                <div><strong>Step 2:</strong> Paste API key and default model.</div>
+                <div><strong>Step 3:</strong> Click Validate, then Save Settings.</div>
+              </div>
               <Input value={settings.copilot.baseUrl} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, baseUrl: e.target.value } }))} placeholder="COPILOT_BASE_URL" />
               <Input value={settings.copilot.apiKey} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, apiKey: e.target.value } }))} placeholder="COPILOT_API_KEY" />
               <Input value={settings.copilot.defaultModel} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, defaultModel: e.target.value } }))} placeholder="Default model" />
               <div className="flex flex-wrap gap-2">
                 <Button type="button" tone="purple" onClick={() => void runCopilotSetupValidation()}>Validate Copilot setup</Button>
+                <a className="text-xs underline" href="https://github.com/marketplace/models" target="_blank" rel="noreferrer">GitHub Models</a>
+                <a className="text-xs underline" href="https://openrouter.ai/models" target="_blank" rel="noreferrer">OpenRouter Models</a>
               </div>
               {copilotSetupOutput ? (
-                <textarea className="h-24 w-full rounded-ui border bg-white p-2 font-mono text-xs" value={copilotSetupOutput} readOnly />
+                <textarea className="h-24 w-full rounded-ui border bg-surface p-2 font-mono text-xs" value={copilotSetupOutput} readOnly />
               ) : null}
             </div>
           </Card>
