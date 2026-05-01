@@ -51,7 +51,7 @@ const links: NavLink[] = [
   { href: "/autonomy", label: "Autonomy", icon: FaRobot, subtitle: "Deep diagnostics for learning loops and independence health." },
   { href: "/workflows", label: "Workflows", icon: FaListCheck, subtitle: "Build if-this-then-that automations for Nova tasks." },
   { href: "/replay", label: "Replay", icon: FaRepeat, subtitle: "Fork prior runs and continue alternate chat branches." },
-  { href: "/cameras", label: "Cameras", icon: FaCamera, subtitle: "Camera timeline events and live semantic alerts." },
+  { href: "/cameras", label: "Camera Timeline", icon: FaCamera, subtitle: "Detection feed and recent camera events." },
   { href: "/camera-monitor", label: "Camera Monitor", icon: FaCamera, subtitle: "Per-camera controls, tests, snapshots, and detection timeline." },
   { href: "/sandbox", label: "Sandbox", icon: FaShieldHalved, subtitle: "Simulate risky commands before execution." },
   { href: "/rollout", label: "Rollout", icon: FaTimeline, subtitle: "Stage, checkpoint, and rollback settings changes." },

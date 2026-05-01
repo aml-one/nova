@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
+import Link from "next/link";
+import { parseCameraConfig, type ParsedCameraConfig } from "../../lib/camera-config";
 
 type CameraItem = {
   camera_id: string;
@@ -15,11 +17,18 @@ type CameraItem = {
 
 export default function CamerasPage() {
   const [items, setItems] = useState<CameraItem[]>([]);
+  const [configured, setConfigured] = useState<ParsedCameraConfig[]>([]);
 
   async function load(): Promise<void> {
-    const response = await fetch("/api/camera/timeline");
-    const data = (await response.json()) as { items?: CameraItem[] };
-    if (response.ok) setItems(data.items ?? []);
+    const [timelineRes, settingsRes] = await Promise.all([fetch("/api/camera/timeline"), fetch("/api/settings")]);
+    const timelineData = (await timelineRes.json()) as { items?: CameraItem[] };
+    const settingsData = (await settingsRes.json()) as { settings?: { skillSettings?: Record<string, Record<string, unknown>> } };
+    if (timelineRes.ok) setItems(timelineData.items ?? []);
+    const cfg =
+      (settingsData.settings?.skillSettings?.["camera-vision"] ??
+        settingsData.settings?.skillSettings?.["cameraVision"] ??
+        {}) as Record<string, unknown>;
+    setConfigured(parseCameraConfig(cfg));
   }
 
   useEffect(() => {
@@ -38,8 +47,25 @@ export default function CamerasPage() {
             This page shows recent detections across connected camera feeds, including guessed label, color, and license plate if available.
           </p>
         </div>
-        <Button type="button" tone="blue" onClick={() => void load()}>Refresh</Button>
+        <div className="flex items-center gap-2">
+          <Button type="button" tone="blue" onClick={() => void load()}>Refresh</Button>
+          <Link href="/camera-monitor" className="text-sm text-sky-400 hover:text-sky-300">Open Camera Monitor</Link>
+        </div>
       </Card>
+      {configured.length > 0 ? (
+        <Card className="space-y-2">
+          <h2 className="text-lg font-semibold">Configured Cameras</h2>
+          <div className="grid gap-2 md:grid-cols-3">
+            {configured.map((camera) => (
+              <article key={camera.name} className="rounded-ui border bg-surface p-2 text-xs">
+                <div className="font-semibold">{camera.name}</div>
+                <div className="truncate text-muted">{camera.rtspUrl}</div>
+                <div className="text-muted">status: {camera.enabled ? "enabled" : "disabled"}</div>
+              </article>
+            ))}
+          </div>
+        </Card>
+      ) : null}
       <div className="grid gap-3 md:grid-cols-3">
         {items.slice(0, 30).map((item, index) => (
           <Card key={`${item.camera_id}-${item.created_at}-${index}`} className="space-y-2">
@@ -51,6 +77,13 @@ export default function CamerasPage() {
           </Card>
         ))}
       </div>
+      {items.length === 0 ? (
+        <Card>
+          <p className="text-sm text-muted">
+            No detection events yet. Use <Link href="/camera-monitor" className="text-sky-400 hover:text-sky-300">Camera Monitor</Link> to run per-camera tests and trigger snapshots.
+          </p>
+        </Card>
+      ) : null}
     </div>
   );
 }

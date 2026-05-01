@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
+import { parseCameraConfig } from "../../lib/camera-config";
 
 type CameraTimelineItem = {
   camera_id?: string;
@@ -34,6 +35,7 @@ export default function CameraMonitorPage() {
   const [status, setStatus] = useState<string>("");
   const [settings, setSettings] = useState<AppSettings>({});
   const [timeline, setTimeline] = useState<CameraTimelineItem[]>([]);
+  const [draftNames, setDraftNames] = useState<Record<string, string>>({});
   const [skillLoaded, setSkillLoaded] = useState(false);
   const [skillStatus, setSkillStatus] = useState<"active" | "degraded" | "inactive">("inactive");
 
@@ -70,27 +72,7 @@ export default function CameraMonitorPage() {
 
   const cameraEntries = useMemo(() => {
     const cameraConfig = (settings.skillSettings?.["camera-vision"] ?? settings.skillSettings?.["cameraVision"] ?? {}) as Record<string, unknown>;
-    const rtspRaw = String(cameraConfig.rtspUrls ?? cameraConfig.rtsp_urls ?? "");
-    const disabled = new Set(
-      Array.isArray(cameraConfig.disabledCameraNames)
-        ? (cameraConfig.disabledCameraNames as unknown[]).map((item) => String(item))
-        : []
-    );
-    return rtspRaw
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line, index) => {
-        const pipeIndex = line.indexOf("|");
-        const named = pipeIndex > 0;
-        const name = named ? line.slice(0, pipeIndex).trim() : `camera-${index + 1}`;
-        const rtspUrl = named ? line.slice(pipeIndex + 1).trim() : line;
-        return {
-          name,
-          rtspUrl,
-          enabled: !disabled.has(name)
-        } satisfies CameraEntry;
-      });
+    return parseCameraConfig(cameraConfig);
   }, [settings]);
 
   const latestByCamera = useMemo(() => {
@@ -140,6 +122,43 @@ export default function CameraMonitorPage() {
     setSaving(false);
   }
 
+  async function saveCameraNames(): Promise<void> {
+    const cameraConfig = (settings.skillSettings?.["camera-vision"] ?? settings.skillSettings?.["cameraVision"] ?? {}) as Record<string, unknown>;
+    const parsed = parseCameraConfig(cameraConfig);
+    const rewritten = parsed
+      .map((cam) => {
+        const nextName = (draftNames[cam.name] ?? cam.name).trim() || cam.name;
+        return `${nextName}|${cam.rtspUrl}`;
+      })
+      .join("\n");
+    setSaving(true);
+    const nextSkillSettings = {
+      ...(settings.skillSettings ?? {}),
+      ["camera-vision"]: {
+        ...cameraConfig,
+        rtspUrls: rewritten
+      },
+      ["cameraVision"]: {
+        ...((settings.skillSettings?.["cameraVision"] ?? {}) as Record<string, unknown>),
+        rtspUrls: rewritten
+      }
+    };
+    const response = await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ skillSettings: nextSkillSettings })
+    });
+    const data = (await response.json()) as { settings?: AppSettings; error?: string };
+    if (!response.ok) {
+      setStatus(data.error ?? "Failed to save camera names");
+    } else {
+      setSettings(data.settings ?? settings);
+      setStatus("Camera names saved.");
+      setDraftNames({});
+    }
+    setSaving(false);
+  }
+
   async function testCamera(cameraName: string): Promise<void> {
     setTestingName(cameraName);
     setStatus("");
@@ -183,6 +202,12 @@ export default function CameraMonitorPage() {
 
       <Card className="space-y-3">
         <h2 className="text-lg font-semibold">Per-Camera Controls</h2>
+        <div className="flex items-center gap-2">
+          <Button type="button" tone="green" onClick={() => void saveCameraNames()} disabled={saving || cameraEntries.length === 0}>
+            Save camera names
+          </Button>
+          <span className="text-xs text-muted">Use custom names to map camera tests and timeline entries.</span>
+        </div>
         {cameraEntries.length === 0 ? <p className="text-sm text-muted">No camera entries found. Add RTSP URLs in Settings → Camera Vision.</p> : null}
         <div className="space-y-2">
           {cameraEntries.map((camera) => {
@@ -194,7 +219,12 @@ export default function CameraMonitorPage() {
               <article key={camera.name} className="rounded-ui border bg-surface p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <div className="text-sm font-semibold">{camera.name}</div>
+                    <input
+                      value={draftNames[camera.name] ?? camera.name}
+                      onChange={(e) => setDraftNames((prev) => ({ ...prev, [camera.name]: e.target.value }))}
+                      className="h-8 rounded-ui border bg-surface px-2 text-sm font-semibold"
+                      placeholder="Camera name"
+                    />
                     <div className="text-xs text-muted">{camera.rtspUrl}</div>
                     <div className="mt-1 text-[11px] text-muted">Connection check: {isValidRtsp ? "RTSP format looks valid" : "Invalid RTSP format"}</div>
                   </div>

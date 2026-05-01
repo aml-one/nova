@@ -1748,9 +1748,32 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/camera/test") {
         const payload = (await readJson(request)) as { cameraName?: string };
-        const cameraName = payload.cameraName?.trim();
-        if (!cameraName) {
+        const requestedCameraName = payload.cameraName?.trim();
+        if (!requestedCameraName) {
           return sendJson(response, 400, { error: "cameraName is required", correlationId });
+        }
+        const configured = parseConfiguredCameras(options.settings.get().skillSettings ?? {});
+        if (configured.length === 0) {
+          return sendJson(response, 400, {
+            error: "No configured cameras. Add RTSP entries in Settings -> Camera Vision.",
+            correlationId
+          });
+        }
+        const target =
+          configured.find((item) => item.name === requestedCameraName) ??
+          configured.find((item) => requestedCameraName === `camera-${item.index + 1}`);
+        if (!target) {
+          return sendJson(response, 404, {
+            error: `Camera '${requestedCameraName}' not found in configured list.`,
+            configuredCameras: configured.map((item) => item.name),
+            correlationId
+          });
+        }
+        if (!target.enabled) {
+          return sendJson(response, 409, {
+            error: `Camera '${target.name}' is disabled in settings.`,
+            correlationId
+          });
         }
         const skill = options.skillRegistry.get("camera-vision");
         if (!skill) {
@@ -1758,14 +1781,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         }
         try {
           const result = (await options.skillRegistry.run("camera-vision", {
-            cameraName,
+            cameraName: target.name,
             mode: "snapshot"
           })) as Record<string, unknown>;
-          return sendJson(response, 200, { ok: true, cameraName, result, correlationId });
+          return sendJson(response, 200, { ok: true, cameraName: target.name, result, correlationId });
         } catch (error) {
-          return sendJson(response, 500, {
+          return sendJson(response, 422, {
             ok: false,
-            cameraName,
+            cameraName: target.name,
             error: error instanceof Error ? error.message : "camera test failed",
             correlationId
           });
@@ -1911,6 +1934,32 @@ function countMostRepeated(values: string[]): { value: string; count: number } {
     }
   }
   return { value: best, count };
+}
+
+function parseConfiguredCameras(
+  skillSettings: Record<string, Record<string, unknown>>
+): Array<{ name: string; rtspUrl: string; enabled: boolean; index: number }> {
+  const config = (skillSettings["camera-vision"] ?? skillSettings["cameraVision"] ?? {}) as Record<string, unknown>;
+  const rtspRaw = String(config.rtspUrls ?? config.rtsp_urls ?? "");
+  const disabled = new Set(
+    Array.isArray(config.disabledCameraNames) ? (config.disabledCameraNames as unknown[]).map((item) => String(item)) : []
+  );
+  return rtspRaw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line, index) => {
+      const pipeIndex = line.indexOf("|");
+      const named = pipeIndex > 0;
+      const name = named ? line.slice(0, pipeIndex).trim() : `camera-${index + 1}`;
+      const rtspUrl = named ? line.slice(pipeIndex + 1).trim() : line;
+      return {
+        name,
+        rtspUrl,
+        enabled: !disabled.has(name),
+        index
+      };
+    });
 }
 
 async function readRawBody(request: IncomingMessage): Promise<string> {

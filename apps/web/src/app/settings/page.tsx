@@ -980,7 +980,7 @@ export default function SettingsPage() {
               <span className={badgeClassForSkillStatus(cameraSkillStatus)}>{labelForSkillStatus(cameraSkillStatus)}</span>
             </div>
             <p className="text-xs text-muted">
-              Add RTSP camera URLs (one per line). Example: <code>rtsp://user:password@192.168.31.10:554/h.264</code>
+              Add RTSP camera URLs (one per line). You can name a camera using <code>name|rtsp://...</code>. Example: <code>front-door|rtsp://user:password@192.168.31.10:554/h.264</code>
             </p>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
