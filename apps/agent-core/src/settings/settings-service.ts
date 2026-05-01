@@ -27,6 +27,13 @@ const DEFAULT_SETTINGS: AppSettings = {
       userActionIconColor: "#475569",
       assistantActionIconColor: "#475569",
       statsTextColor: "#64748b",
+      userBubbleColorLight: "#dbeafe",
+      assistantBubbleColorLight: "#f5f3ff",
+      userTextColorLight: "#0f172a",
+      assistantTextColorLight: "#0f172a",
+      userActionIconColorLight: "#475569",
+      assistantActionIconColorLight: "#475569",
+      statsTextColorLight: "#475569",
       bubbleBackgroundEnabled: true,
       borderColor: "#94a3b8",
       borderThicknessPx: 1,
@@ -150,6 +157,19 @@ export class SettingsService {
           assistantActionIconColor:
             update.web?.chatStyle?.assistantActionIconColor ?? current.web.chatStyle.assistantActionIconColor,
           statsTextColor: update.web?.chatStyle?.statsTextColor ?? current.web.chatStyle.statsTextColor,
+          userBubbleColorLight:
+            update.web?.chatStyle?.userBubbleColorLight ?? current.web.chatStyle.userBubbleColorLight,
+          assistantBubbleColorLight:
+            update.web?.chatStyle?.assistantBubbleColorLight ?? current.web.chatStyle.assistantBubbleColorLight,
+          userTextColorLight: update.web?.chatStyle?.userTextColorLight ?? current.web.chatStyle.userTextColorLight,
+          assistantTextColorLight:
+            update.web?.chatStyle?.assistantTextColorLight ?? current.web.chatStyle.assistantTextColorLight,
+          userActionIconColorLight:
+            update.web?.chatStyle?.userActionIconColorLight ?? current.web.chatStyle.userActionIconColorLight,
+          assistantActionIconColorLight:
+            update.web?.chatStyle?.assistantActionIconColorLight ?? current.web.chatStyle.assistantActionIconColorLight,
+          statsTextColorLight:
+            update.web?.chatStyle?.statsTextColorLight ?? current.web.chatStyle.statsTextColorLight,
           bubbleBackgroundEnabled:
             update.web?.chatStyle?.bubbleBackgroundEnabled ?? current.web.chatStyle.bubbleBackgroundEnabled,
           borderColor: update.web?.chatStyle?.borderColor ?? current.web.chatStyle.borderColor,
@@ -274,6 +294,34 @@ export class SettingsService {
           statsTextColor: normalizeHexColor(
             settings.web?.chatStyle?.statsTextColor,
             DEFAULT_SETTINGS.web.chatStyle.statsTextColor
+          ),
+          userBubbleColorLight: normalizeHexColor(
+            settings.web?.chatStyle?.userBubbleColorLight,
+            DEFAULT_SETTINGS.web.chatStyle.userBubbleColorLight
+          ),
+          assistantBubbleColorLight: normalizeHexColor(
+            settings.web?.chatStyle?.assistantBubbleColorLight,
+            DEFAULT_SETTINGS.web.chatStyle.assistantBubbleColorLight
+          ),
+          userTextColorLight: normalizeHexColor(
+            settings.web?.chatStyle?.userTextColorLight,
+            DEFAULT_SETTINGS.web.chatStyle.userTextColorLight
+          ),
+          assistantTextColorLight: normalizeHexColor(
+            settings.web?.chatStyle?.assistantTextColorLight,
+            DEFAULT_SETTINGS.web.chatStyle.assistantTextColorLight
+          ),
+          userActionIconColorLight: normalizeHexColor(
+            settings.web?.chatStyle?.userActionIconColorLight,
+            DEFAULT_SETTINGS.web.chatStyle.userActionIconColorLight
+          ),
+          assistantActionIconColorLight: normalizeHexColor(
+            settings.web?.chatStyle?.assistantActionIconColorLight,
+            DEFAULT_SETTINGS.web.chatStyle.assistantActionIconColorLight
+          ),
+          statsTextColorLight: normalizeHexColor(
+            settings.web?.chatStyle?.statsTextColorLight,
+            DEFAULT_SETTINGS.web.chatStyle.statsTextColorLight
           ),
           bubbleBackgroundEnabled: settings.web?.chatStyle?.bubbleBackgroundEnabled !== false,
           borderColor: normalizeHexColor(settings.web?.chatStyle?.borderColor, DEFAULT_SETTINGS.web.chatStyle.borderColor),

@@ -47,6 +47,13 @@ type SettingsState = {
       userActionIconColor: string;
       assistantActionIconColor: string;
       statsTextColor: string;
+      userBubbleColorLight: string;
+      assistantBubbleColorLight: string;
+      userTextColorLight: string;
+      assistantTextColorLight: string;
+      userActionIconColorLight: string;
+      assistantActionIconColorLight: string;
+      statsTextColorLight: string;
       bubbleBackgroundEnabled: boolean;
       borderColor: string;
       borderThicknessPx: number;
@@ -109,6 +116,13 @@ const DEFAULT_SETTINGS: SettingsState = {
       userActionIconColor: "#475569",
       assistantActionIconColor: "#475569",
       statsTextColor: "#64748b",
+      userBubbleColorLight: "#dbeafe",
+      assistantBubbleColorLight: "#f5f3ff",
+      userTextColorLight: "#0f172a",
+      assistantTextColorLight: "#0f172a",
+      userActionIconColorLight: "#475569",
+      assistantActionIconColorLight: "#475569",
+      statsTextColorLight: "#475569",
       bubbleBackgroundEnabled: true,
       borderColor: "#94a3b8",
       borderThicknessPx: 1,
@@ -621,6 +635,46 @@ export default function SettingsPage() {
                 Bubble corner radius (0-30px)
                 <Input type="number" min={0} max={30} value={settings.web.chatStyle.bubbleRadiusPx} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, bubbleRadiusPx: Number(e.target.value || 0) } } }))} />
               </label>
+            </div>
+            <div className="space-y-2 rounded-ui border bg-surface p-3">
+              <div className="text-xs font-semibold text-muted">Light mode palette overrides</div>
+              <div className="grid gap-2 md:grid-cols-2">
+                <ColorPickerRow
+                  label="User bubble color (light)"
+                  value={settings.web.chatStyle.userBubbleColorLight}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userBubbleColorLight: value } } }))}
+                />
+                <ColorPickerRow
+                  label="Nova bubble color (light)"
+                  value={settings.web.chatStyle.assistantBubbleColorLight}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantBubbleColorLight: value } } }))}
+                />
+                <ColorPickerRow
+                  label="User text color (light)"
+                  value={settings.web.chatStyle.userTextColorLight}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userTextColorLight: value } } }))}
+                />
+                <ColorPickerRow
+                  label="Nova text color (light)"
+                  value={settings.web.chatStyle.assistantTextColorLight}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantTextColorLight: value } } }))}
+                />
+                <ColorPickerRow
+                  label="User action icon (light)"
+                  value={settings.web.chatStyle.userActionIconColorLight}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, userActionIconColorLight: value } } }))}
+                />
+                <ColorPickerRow
+                  label="Nova action icon (light)"
+                  value={settings.web.chatStyle.assistantActionIconColorLight}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, assistantActionIconColorLight: value } } }))}
+                />
+                <ColorPickerRow
+                  label="Stats line color (light)"
+                  value={settings.web.chatStyle.statsTextColorLight}
+                  onChange={(value) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, statsTextColorLight: value } } }))}
+                />
+              </div>
             </div>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.chatStyle.showNames} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, showNames: e.target.checked } } }))} /> Show names in chat bubbles (Nova, You)</label>
             <div className="rounded-ui border bg-surface p-3">
@@ -1385,6 +1439,21 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
         assistantActionIconColor:
           value?.web?.chatStyle?.assistantActionIconColor ?? DEFAULT_SETTINGS.web.chatStyle.assistantActionIconColor,
         statsTextColor: value?.web?.chatStyle?.statsTextColor ?? DEFAULT_SETTINGS.web.chatStyle.statsTextColor,
+        userBubbleColorLight:
+          value?.web?.chatStyle?.userBubbleColorLight ?? DEFAULT_SETTINGS.web.chatStyle.userBubbleColorLight,
+        assistantBubbleColorLight:
+          value?.web?.chatStyle?.assistantBubbleColorLight ?? DEFAULT_SETTINGS.web.chatStyle.assistantBubbleColorLight,
+        userTextColorLight:
+          value?.web?.chatStyle?.userTextColorLight ?? DEFAULT_SETTINGS.web.chatStyle.userTextColorLight,
+        assistantTextColorLight:
+          value?.web?.chatStyle?.assistantTextColorLight ?? DEFAULT_SETTINGS.web.chatStyle.assistantTextColorLight,
+        userActionIconColorLight:
+          value?.web?.chatStyle?.userActionIconColorLight ?? DEFAULT_SETTINGS.web.chatStyle.userActionIconColorLight,
+        assistantActionIconColorLight:
+          value?.web?.chatStyle?.assistantActionIconColorLight ??
+          DEFAULT_SETTINGS.web.chatStyle.assistantActionIconColorLight,
+        statsTextColorLight:
+          value?.web?.chatStyle?.statsTextColorLight ?? DEFAULT_SETTINGS.web.chatStyle.statsTextColorLight,
         bubbleBackgroundEnabled:
           value?.web?.chatStyle?.bubbleBackgroundEnabled ?? DEFAULT_SETTINGS.web.chatStyle.bubbleBackgroundEnabled,
         borderColor: value?.web?.chatStyle?.borderColor ?? DEFAULT_SETTINGS.web.chatStyle.borderColor,

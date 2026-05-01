@@ -77,6 +77,13 @@ export default function HomePage() {
     userActionIconColor: "#475569",
     assistantActionIconColor: "#475569",
     statsTextColor: "#64748b",
+    userBubbleColorLight: "#dbeafe",
+    assistantBubbleColorLight: "#f5f3ff",
+    userTextColorLight: "#0f172a",
+    assistantTextColorLight: "#0f172a",
+    userActionIconColorLight: "#475569",
+    assistantActionIconColorLight: "#475569",
+    statsTextColorLight: "#475569",
     bubbleBackgroundEnabled: true,
     borderColor: "#94a3b8",
     borderThicknessPx: 1,
@@ -98,6 +105,15 @@ export default function HomePage() {
   const bubbleIconActionClass =
     "inline-flex h-7 w-7 items-center justify-center transition-[filter] hover:brightness-110";
   const isDarkTheme = resolvedTheme !== "light";
+  const userBubbleColorForTheme = isDarkTheme ? chatStyle.userBubbleColor : chatStyle.userBubbleColorLight;
+  const assistantBubbleColorForTheme = isDarkTheme ? chatStyle.assistantBubbleColor : chatStyle.assistantBubbleColorLight;
+  const userTextColorForTheme = isDarkTheme ? chatStyle.userTextColor : chatStyle.userTextColorLight;
+  const assistantTextColorForTheme = isDarkTheme ? chatStyle.assistantTextColor : chatStyle.assistantTextColorLight;
+  const userActionIconColorForTheme = isDarkTheme ? chatStyle.userActionIconColor : chatStyle.userActionIconColorLight;
+  const assistantActionIconColorForTheme = isDarkTheme
+    ? chatStyle.assistantActionIconColor
+    : chatStyle.assistantActionIconColorLight;
+  const statsTextColorForTheme = isDarkTheme ? chatStyle.statsTextColor : chatStyle.statsTextColorLight;
 
   const uploadedMedia = useMemo(
     () =>
@@ -167,6 +183,13 @@ export default function HomePage() {
               userActionIconColor?: string;
               assistantActionIconColor?: string;
               statsTextColor?: string;
+              userBubbleColorLight?: string;
+              assistantBubbleColorLight?: string;
+              userTextColorLight?: string;
+              assistantTextColorLight?: string;
+              userActionIconColorLight?: string;
+              assistantActionIconColorLight?: string;
+              statsTextColorLight?: string;
               bubbleBackgroundEnabled?: boolean;
               borderColor?: string;
               borderThicknessPx?: number;
@@ -192,6 +215,17 @@ export default function HomePage() {
           assistantActionIconColor:
             data.settings?.web?.chatStyle?.assistantActionIconColor ?? prev.assistantActionIconColor,
           statsTextColor: data.settings?.web?.chatStyle?.statsTextColor ?? prev.statsTextColor,
+          userBubbleColorLight: data.settings?.web?.chatStyle?.userBubbleColorLight ?? prev.userBubbleColorLight,
+          assistantBubbleColorLight:
+            data.settings?.web?.chatStyle?.assistantBubbleColorLight ?? prev.assistantBubbleColorLight,
+          userTextColorLight: data.settings?.web?.chatStyle?.userTextColorLight ?? prev.userTextColorLight,
+          assistantTextColorLight:
+            data.settings?.web?.chatStyle?.assistantTextColorLight ?? prev.assistantTextColorLight,
+          userActionIconColorLight:
+            data.settings?.web?.chatStyle?.userActionIconColorLight ?? prev.userActionIconColorLight,
+          assistantActionIconColorLight:
+            data.settings?.web?.chatStyle?.assistantActionIconColorLight ?? prev.assistantActionIconColorLight,
+          statsTextColorLight: data.settings?.web?.chatStyle?.statsTextColorLight ?? prev.statsTextColorLight,
           bubbleBackgroundEnabled: data.settings?.web?.chatStyle?.bubbleBackgroundEnabled ?? prev.bubbleBackgroundEnabled,
           borderColor: data.settings?.web?.chatStyle?.borderColor ?? prev.borderColor,
           borderThicknessPx: data.settings?.web?.chatStyle?.borderThicknessPx ?? prev.borderThicknessPx,
@@ -620,18 +654,18 @@ export default function HomePage() {
                 turn.role === "user"
                   ? {
                       backgroundColor: chatStyle.bubbleBackgroundEnabled
-                        ? withOpacity(chatStyle.userBubbleColor, chatStyle.userBackgroundOpacityPct)
+                        ? withOpacity(userBubbleColorForTheme, chatStyle.userBackgroundOpacityPct)
                         : "transparent",
-                      color: ensureReadableTextColor(chatStyle.userTextColor, isDarkTheme),
+                      color: ensureReadableTextColor(userTextColorForTheme, isDarkTheme),
                       borderColor: chatStyle.borderColor,
                       borderWidth: `${chatStyle.userBorderThicknessPx}px`,
                       borderRadius: `${chatStyle.bubbleRadiusPx}px`
                     }
                   : {
                       backgroundColor: chatStyle.bubbleBackgroundEnabled
-                        ? withOpacity(chatStyle.assistantBubbleColor, chatStyle.assistantBackgroundOpacityPct)
+                        ? withOpacity(assistantBubbleColorForTheme, chatStyle.assistantBackgroundOpacityPct)
                         : "transparent",
-                      color: ensureReadableTextColor(chatStyle.assistantTextColor, isDarkTheme),
+                      color: ensureReadableTextColor(assistantTextColorForTheme, isDarkTheme),
                       borderColor: chatStyle.borderColor,
                       borderWidth: `${chatStyle.assistantBorderThicknessPx}px`,
                       borderRadius: `${chatStyle.bubbleRadiusPx}px`
@@ -653,7 +687,7 @@ export default function HomePage() {
                   <button
                     type="button"
                     className={bubbleIconActionClass}
-                    style={{ color: ensureReadableTextColor(chatStyle.userActionIconColor, isDarkTheme) }}
+                    style={{ color: ensureReadableTextColor(userActionIconColorForTheme, isDarkTheme) }}
                     onClick={() => void copyTurnText(turn.text, turn.id)}
                     title="Copy message"
                   >
@@ -663,7 +697,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       className={bubbleIconActionClass}
-                      style={{ color: ensureReadableTextColor(chatStyle.userActionIconColor, isDarkTheme) }}
+                      style={{ color: ensureReadableTextColor(userActionIconColorForTheme, isDarkTheme) }}
                       onClick={() => {
                         setEditingTurnId(turn.id);
                         setEditingText(turn.text);
@@ -675,7 +709,7 @@ export default function HomePage() {
                     <button
                       type="button"
                       className={bubbleIconActionClass}
-                      style={{ color: ensureReadableTextColor(chatStyle.userActionIconColor, isDarkTheme) }}
+                      style={{ color: ensureReadableTextColor(userActionIconColorForTheme, isDarkTheme) }}
                       onClick={() => {
                         setMessage(turn.text);
                         window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
@@ -689,7 +723,7 @@ export default function HomePage() {
                         <button
                           type="button"
                           className={bubbleIconActionClass}
-                          style={{ color: ensureReadableTextColor(chatStyle.userActionIconColor, isDarkTheme) }}
+                          style={{ color: ensureReadableTextColor(userActionIconColorForTheme, isDarkTheme) }}
                           onClick={() => {
                             const next = editingText.trim();
                             if (!next) return;
@@ -704,7 +738,7 @@ export default function HomePage() {
                         <button
                           type="button"
                           className={bubbleIconActionClass}
-                          style={{ color: ensureReadableTextColor(chatStyle.userActionIconColor, isDarkTheme) }}
+                          style={{ color: ensureReadableTextColor(userActionIconColorForTheme, isDarkTheme) }}
                           onClick={() => setEditingTurnId(null)}
                           title="Cancel"
                         >
@@ -720,7 +754,7 @@ export default function HomePage() {
                   <button
                     type="button"
                     className={bubbleIconActionClass}
-                    style={{ color: ensureReadableTextColor(chatStyle.assistantActionIconColor, isDarkTheme) }}
+                    style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
                     onClick={() => void copyTurnText(turn.text, turn.id)}
                     title="Copy message"
                   >
@@ -750,7 +784,7 @@ export default function HomePage() {
                 </div>
               ) : null}
               {turn.role === "assistant" && turn.stats ? (
-                <div className="mt-2 text-[11px]" style={{ color: ensureReadableTextColor(chatStyle.statsTextColor, isDarkTheme) }}>
+                <div className="mt-2 text-[11px]" style={{ color: ensureReadableTextColor(statsTextColorForTheme, isDarkTheme) }}>
                   {turn.stats.tokensPerSecond} t/s · {turn.stats.tokenCount} tok · {(turn.stats.elapsedMs / 1000).toFixed(2)}s
                   {typeof turn.stats.firstTokenMs === "number" ? ` · first ${(turn.stats.firstTokenMs / 1000).toFixed(2)}s` : ""}
                   {typeof turn.stats.providerTps === "number" ? ` · provider ${turn.stats.providerTps} t/s` : ""}

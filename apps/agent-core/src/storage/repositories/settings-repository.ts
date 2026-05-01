@@ -27,6 +27,13 @@ export type AppSettings = {
       userActionIconColor: string;
       assistantActionIconColor: string;
       statsTextColor: string;
+      userBubbleColorLight: string;
+      assistantBubbleColorLight: string;
+      userTextColorLight: string;
+      assistantTextColorLight: string;
+      userActionIconColorLight: string;
+      assistantActionIconColorLight: string;
+      statsTextColorLight: string;
       bubbleBackgroundEnabled: boolean;
       borderColor: string;
       borderThicknessPx: number;
@@ -175,6 +182,34 @@ export class SettingsRepository {
               typeof parsed.web?.chatStyle?.statsTextColor === "string"
                 ? parsed.web.chatStyle.statsTextColor
                 : "#64748b",
+            userBubbleColorLight:
+              typeof parsed.web?.chatStyle?.userBubbleColorLight === "string"
+                ? parsed.web.chatStyle.userBubbleColorLight
+                : "#dbeafe",
+            assistantBubbleColorLight:
+              typeof parsed.web?.chatStyle?.assistantBubbleColorLight === "string"
+                ? parsed.web.chatStyle.assistantBubbleColorLight
+                : "#f5f3ff",
+            userTextColorLight:
+              typeof parsed.web?.chatStyle?.userTextColorLight === "string"
+                ? parsed.web.chatStyle.userTextColorLight
+                : "#0f172a",
+            assistantTextColorLight:
+              typeof parsed.web?.chatStyle?.assistantTextColorLight === "string"
+                ? parsed.web.chatStyle.assistantTextColorLight
+                : "#0f172a",
+            userActionIconColorLight:
+              typeof parsed.web?.chatStyle?.userActionIconColorLight === "string"
+                ? parsed.web.chatStyle.userActionIconColorLight
+                : "#475569",
+            assistantActionIconColorLight:
+              typeof parsed.web?.chatStyle?.assistantActionIconColorLight === "string"
+                ? parsed.web.chatStyle.assistantActionIconColorLight
+                : "#475569",
+            statsTextColorLight:
+              typeof parsed.web?.chatStyle?.statsTextColorLight === "string"
+                ? parsed.web.chatStyle.statsTextColorLight
+                : "#475569",
             bubbleBackgroundEnabled: parsed.web?.chatStyle?.bubbleBackgroundEnabled !== false,
             borderColor:
               typeof parsed.web?.chatStyle?.borderColor === "string" ? parsed.web.chatStyle.borderColor : "#94a3b8",
