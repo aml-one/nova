@@ -326,7 +326,7 @@ export default function SettingsPage() {
     setPersonaPath(data.filePath ?? "");
   }
   async function loadPersonaVersions(): Promise<void> {
-    const response = await fetch("/api/personas/versions?personaId=default");
+    const response = await fetch("/api/personas/versions?personaId=default&rewritesOnly=true");
     const data = (await response.json()) as { items?: PersonaVersion[] };
     if (response.ok) {
       setPersonaVersions(Array.isArray(data.items) ? data.items : []);

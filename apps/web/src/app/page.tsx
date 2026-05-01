@@ -1061,7 +1061,9 @@ function randomId(): string {
 }
 
 function estimateTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  return Math.ceil(trimmed.length / 4);
 }
 
 function withOpacity(hex: string, opacityPct: number): string {
@@ -1154,6 +1156,10 @@ async function readSseStream(
             firstTokenMs = payload.firstTokenMs ?? firstTokenMs;
             providerTps = payload.tokensPerSecond ?? providerTps;
             onPartial(fullText);
+          }
+          if (eventName === "error") {
+            const message = (payload as { error?: string }).error ?? "stream failed";
+            throw new Error(message);
           }
         }
         eventName = "";

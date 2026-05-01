@@ -4,14 +4,20 @@ import { sqliteUtcDatetimeToIso } from "../util/sqlite-timestamp.js";
 import { getDatabase } from "../storage/sqlite.js";
 
 export class PersonaVersionService {
-  list(personaId: string): Array<{ version: number; createdAt: string }> {
+  list(personaId: string, options?: { rewritesOnly?: boolean }): Array<{ version: number; createdAt: string }> {
     const db = getDatabase();
     const rows = db
       .prepare(
-        "SELECT version, created_at as createdAt FROM persona_versions WHERE persona_id = ? ORDER BY version DESC LIMIT 100"
+        "SELECT version, created_at as createdAt, content FROM persona_versions WHERE persona_id = ? ORDER BY version DESC LIMIT 300"
       )
-      .all(personaId) as Array<{ version: number; createdAt: string }>;
-    return rows.map((row) => ({
+      .all(personaId) as Array<{ version: number; createdAt: string; content?: string }>;
+    const selected = options?.rewritesOnly
+      ? rows.filter((row, index, array) => {
+          const prev = array[index + 1];
+          return !prev || String(row.content ?? "") !== String(prev.content ?? "");
+        })
+      : rows;
+    return selected.slice(0, 100).map((row) => ({
       version: row.version,
       createdAt: sqliteUtcDatetimeToIso(String(row.createdAt ?? ""))
     }));

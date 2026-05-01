@@ -31,7 +31,8 @@ export async function POST(request: Request) {
     headers: {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache, no-transform",
-      connection: "keep-alive"
+      connection: "keep-alive",
+      "x-correlation-id": response.headers.get("x-correlation-id") ?? ""
     }
   });
 }

@@ -138,6 +138,12 @@ export class PersonaLoader {
 
   private persistPersonaVersion(personaId: string, raw: string): void {
     const db = getDatabase();
+    const latest = db
+      .prepare("SELECT content FROM persona_versions WHERE persona_id = ? ORDER BY version DESC LIMIT 1")
+      .get(personaId) as { content?: string } | undefined;
+    if (String(latest?.content ?? "") === raw) {
+      return;
+    }
     const row = db
       .prepare("SELECT COALESCE(MAX(version), 0) AS max_version FROM persona_versions WHERE persona_id = ?")
       .get(personaId) as { max_version?: number } | undefined;

@@ -1797,7 +1797,8 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/personas/versions") {
         const personaId = parsedUrl.searchParams.get("personaId") ?? "default";
-        const items = personas.list(personaId);
+        const rewritesOnly = parsedUrl.searchParams.get("rewritesOnly") === "true";
+        const items = personas.list(personaId, { rewritesOnly });
         return sendJson(response, 200, { items, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/personas/rollback") {

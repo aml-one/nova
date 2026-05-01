@@ -98,15 +98,15 @@ export default function ThoughtsPage() {
             >
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <CategoryBadge category={item.category} />
-                <time className="tabular-nums text-slate-500" dateTime={item.createdAt}>
+                <time className="tabular-nums text-muted" dateTime={item.createdAt}>
                   {new Date(item.createdAt).toLocaleString(undefined, {
                     dateStyle: "medium",
                     timeStyle: "short"
                   })}
                 </time>
               </div>
-              <h3 className="text-[15px] font-semibold leading-snug text-slate-100">{item.title}</h3>
-              <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">{item.content}</p>
+              <h3 className="text-[15px] font-semibold leading-snug text-text">{item.title}</h3>
+              <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-text">{item.content}</p>
               {item.metadata !== undefined && item.metadata !== null ? <ThoughtMetadataDetails metadata={item.metadata} /> : null}
             </article>
           ))}

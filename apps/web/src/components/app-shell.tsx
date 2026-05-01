@@ -49,6 +49,7 @@ const links: NavLink[] = [
   { href: "/reports", label: "Reports", icon: FaBookOpen, subtitle: "Weekly learning summaries and overnight digests." },
   { href: "/learning", label: "Learning", icon: FaRobot, subtitle: "Self-improvement events and autonomous learning runs." },
   { href: "/autonomy", label: "Autonomy", icon: FaRobot, subtitle: "Deep diagnostics for learning loops and independence health." },
+  { href: "/endpoints", label: "Endpoints", icon: FaRoute, subtitle: "Browse and test available web/api endpoints for debugging." },
   { href: "/workflows", label: "Workflows", icon: FaListCheck, subtitle: "Build if-this-then-that automations for Nova tasks." },
   { href: "/replay", label: "Replay", icon: FaRepeat, subtitle: "Fork prior runs and continue alternate chat branches." },
   { href: "/cameras", label: "Camera Timeline", icon: FaCamera, subtitle: "Detection feed and recent camera events." },
@@ -115,7 +116,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
               {!navCollapsed ? <span>{link.label}</span> : null}
             </Link>
-            {index === 1 || index === 7 || index === 11 || index === 14 ? <div className="my-2 h-px w-full bg-slate-300/40" /> : null}
+            {index === 1 || index === 8 || index === 12 || index === 15 ? <div className="my-2 h-px w-full bg-slate-300/40" /> : null}
             </div>
           ))}
           <div className="mt-2 h-px w-full bg-slate-300/40" />
