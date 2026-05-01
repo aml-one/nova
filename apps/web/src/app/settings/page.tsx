@@ -189,6 +189,14 @@ export default function SettingsPage() {
   const [websites, setWebsites] = useState<WebsiteProject[]>([]);
   const [channelsSetupOutput, setChannelsSetupOutput] = useState<string>("");
   const [copilotSetupOutput, setCopilotSetupOutput] = useState<string>("");
+  const [copilotDeviceLoginSessionId, setCopilotDeviceLoginSessionId] = useState<string>("");
+  const [copilotDeviceLoginState, setCopilotDeviceLoginState] = useState<
+    "idle" | "starting" | "waiting_for_user" | "authorized" | "failed" | "cancelled"
+  >("idle");
+  const [copilotDeviceLoginUrl, setCopilotDeviceLoginUrl] = useState<string>("");
+  const [copilotDeviceLoginCode, setCopilotDeviceLoginCode] = useState<string>("");
+  const [copilotDeviceLoginLogs, setCopilotDeviceLoginLogs] = useState<string[]>([]);
+  const [copilotDeviceLoginMessage, setCopilotDeviceLoginMessage] = useState<string>("");
   const [channelsSetupMode, setChannelsSetupMode] = useState<"signal" | "whatsapp" | "both">("both");
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
@@ -281,6 +289,33 @@ export default function SettingsPage() {
     }, 350);
     return () => clearTimeout(timer);
   }, [settings.web.chatStyle, loading]);
+
+  useEffect(() => {
+    if (!copilotDeviceLoginSessionId) return;
+    let cancelled = false;
+    const poll = async (): Promise<void> => {
+      const response = await fetch(`/api/setup/copilot/device-login/status?sessionId=${encodeURIComponent(copilotDeviceLoginSessionId)}`);
+      const data = (await response.json().catch(() => ({}))) as {
+        state?: "starting" | "waiting_for_user" | "authorized" | "failed" | "cancelled";
+        url?: string;
+        userCode?: string;
+        logs?: string[];
+        message?: string;
+      };
+      if (cancelled || !response.ok) return;
+      setCopilotDeviceLoginState(data.state ?? "failed");
+      setCopilotDeviceLoginUrl(data.url ?? "");
+      setCopilotDeviceLoginCode(data.userCode ?? "");
+      setCopilotDeviceLoginLogs(Array.isArray(data.logs) ? data.logs : []);
+      setCopilotDeviceLoginMessage(data.message ?? "");
+      if (data.state === "authorized" || data.state === "failed" || data.state === "cancelled") return;
+      setTimeout(() => void poll(), 1500);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+    };
+  }, [copilotDeviceLoginSessionId]);
 
   async function loadSettings(): Promise<void> {
     const response = await fetch("/api/settings");
@@ -471,6 +506,41 @@ export default function SettingsPage() {
     setStatus("Copilot setup validated. Review result and save settings.");
   }
 
+  async function startCopilotDeviceLogin(): Promise<void> {
+    setError(null);
+    setStatus(null);
+    setCopilotDeviceLoginState("starting");
+    setCopilotDeviceLoginLogs([]);
+    setCopilotDeviceLoginCode("");
+    setCopilotDeviceLoginUrl("");
+    setCopilotDeviceLoginMessage("");
+    const response = await fetch("/api/setup/copilot/device-login/start", { method: "POST" });
+    const data = (await response.json().catch(() => ({}))) as {
+      sessionId?: string;
+      state?: "starting" | "waiting_for_user" | "authorized" | "failed" | "cancelled";
+      error?: string;
+    };
+    if (!response.ok || !data.sessionId) {
+      setCopilotDeviceLoginState("failed");
+      setError(data.error ?? "Could not start Copilot device login.");
+      return;
+    }
+    setCopilotDeviceLoginSessionId(data.sessionId);
+    setCopilotDeviceLoginState(data.state ?? "starting");
+    setStatus("Device login started. Enter the one-time code on GitHub.");
+  }
+
+  async function cancelCopilotDeviceLogin(): Promise<void> {
+    if (!copilotDeviceLoginSessionId) return;
+    await fetch("/api/setup/copilot/device-login/cancel", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: copilotDeviceLoginSessionId })
+    });
+    setCopilotDeviceLoginState("cancelled");
+    setCopilotDeviceLoginMessage("Device login cancelled.");
+  }
+
   async function testWebsiteBuilderSshConnection(): Promise<void> {
     setSshTestResult(null);
     const response = await fetch("/api/websites/test-ssh", {
@@ -540,29 +610,50 @@ export default function SettingsPage() {
         : modelOptions.copilot ?? [];
   const websiteBuilderModel = String(websiteBuilderSettings.model ?? "");
   const updateErrorMessage = normalizeUpdateError(updateStatus?.lastError);
-  const copilotPresets: Array<{ id: string; label: string; baseUrl: string; model: string; note: string }> = [
+  const copilotPresets: Array<{
+    id: string;
+    label: string;
+    baseUrl: string;
+    model: string;
+    note: string;
+    authMode: "api-key" | "device-login";
+  }> = [
     {
       id: "github-models",
       label: "GitHub Models",
       baseUrl: "https://models.inference.ai.azure.com",
       model: "gpt-4o-mini",
-      note: "Use a GitHub personal access token with Models access."
+      note: "Use a GitHub personal access token with Models access.",
+      authMode: "api-key"
     },
     {
       id: "openrouter",
       label: "OpenRouter",
       baseUrl: "https://openrouter.ai/api/v1",
       model: "openai/gpt-4o-mini",
-      note: "Use your OpenRouter API key and pick any listed model id."
+      note: "Use your OpenRouter API key and pick any listed model id.",
+      authMode: "api-key"
     },
     {
       id: "custom",
       label: "Custom OpenAI-compatible",
       baseUrl: "http://127.0.0.1:1234/v1",
       model: "gpt-4o-mini",
-      note: "Works with local gateways (LM Studio, vLLM, LiteLLM, etc.) exposing /models."
+      note: "Works with local gateways (LM Studio, vLLM, LiteLLM, etc.) exposing /models.",
+      authMode: "api-key"
+    },
+    {
+      id: "github-device-login",
+      label: "GitHub Device Login (OpenClaw-style)",
+      baseUrl: "https://api.githubcopilot.com",
+      model: "gpt-4o-mini",
+      note: "Use one-time code login in terminal, then runtime token exchange for Copilot.",
+      authMode: "device-login"
     }
   ];
+  const selectedCopilotPreset =
+    copilotPresets.find((item) => item.baseUrl === settings.copilot.baseUrl) ??
+    copilotPresets.find((item) => item.id === "custom");
   const tabs = [
     { id: "general", label: "General", tone: "blue" as const },
     { id: "models", label: "Models", tone: "purple" as const },
@@ -945,8 +1036,73 @@ export default function SettingsPage() {
               </div>
               <div className="rounded-ui border bg-surface2 p-2 text-xs text-muted">
                 <div><strong>Step 1:</strong> Choose preset (or enter your own base URL).</div>
-                <div><strong>Step 2:</strong> Paste API key and default model.</div>
+                <div>
+                  <strong>Step 2:</strong>{" "}
+                  {selectedCopilotPreset?.authMode === "device-login"
+                    ? "Run device login in terminal, complete one-time code on GitHub, then use generated auth profile."
+                    : "Paste API key and default model."}
+                </div>
                 <div><strong>Step 3:</strong> Click Validate, then Save Settings.</div>
+              </div>
+              {selectedCopilotPreset?.authMode === "device-login" ? (
+                <div className="space-y-2 rounded-ui border border-blue-500/35 bg-blue-500/10 p-2 text-xs">
+                  <div className="font-semibold text-blue-800 dark:text-blue-200">GitHub one-time code login flow</div>
+                  <div className="text-muted">Start from UI, then enter the one-time code on GitHub.</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      tone="blue"
+                      onClick={() => void startCopilotDeviceLogin()}
+                      disabled={copilotDeviceLoginState === "starting" || copilotDeviceLoginState === "waiting_for_user"}
+                    >
+                      {copilotDeviceLoginState === "starting" || copilotDeviceLoginState === "waiting_for_user"
+                        ? "Login running..."
+                        : "Start device login"}
+                    </Button>
+                    <Button
+                      type="button"
+                      tone="neutral"
+                      onClick={() => void cancelCopilotDeviceLogin()}
+                      disabled={!copilotDeviceLoginSessionId || copilotDeviceLoginState !== "waiting_for_user"}
+                    >
+                      Cancel
+                    </Button>
+                    <span className="text-muted">State: {copilotDeviceLoginState}</span>
+                  </div>
+                  {copilotDeviceLoginUrl ? (
+                    <div className="text-muted">
+                      Open:{" "}
+                      <a className="underline" href={copilotDeviceLoginUrl} target="_blank" rel="noreferrer">
+                        {copilotDeviceLoginUrl}
+                      </a>
+                    </div>
+                  ) : null}
+                  {copilotDeviceLoginCode ? (
+                    <div className="rounded-ui border bg-surface px-2 py-1 font-mono text-[12px]">
+                      One-time code: <strong>{copilotDeviceLoginCode}</strong>
+                    </div>
+                  ) : null}
+                  {copilotDeviceLoginMessage ? (
+                    <div className="text-muted">{copilotDeviceLoginMessage}</div>
+                  ) : (
+                    <div className="text-muted">
+                      After login completes, runtime can exchange GitHub auth for Copilot tokens automatically.
+                    </div>
+                  )}
+                  {copilotDeviceLoginLogs.length > 0 ? (
+                    <textarea
+                      className="h-24 w-full rounded-ui border bg-surface p-2 font-mono text-[11px]"
+                      value={copilotDeviceLoginLogs.join("\n")}
+                      readOnly
+                    />
+                  ) : null}
+                  <div className="text-muted">
+                    Manual fallback command: <code>npm run login --provider=github-copilot</code>
+                  </div>
+                </div>
+              ) : null}
+              <div className="rounded-ui border bg-surface2 p-2 text-[11px] text-muted">
+                Optional exchange endpoint for advanced setups: <code>https://api.github.com/copilot_internal/v2/token</code>
               </div>
               <Input value={settings.copilot.baseUrl} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, baseUrl: e.target.value } }))} placeholder="COPILOT_BASE_URL" />
               <Input value={settings.copilot.apiKey} onChange={(e) => setSettings((p) => ({ ...p, copilot: { ...p.copilot, apiKey: e.target.value } }))} placeholder="COPILOT_API_KEY" />

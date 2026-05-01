@@ -154,6 +154,40 @@ export class ModelRouter {
     throw lastError ?? new Error("no model providers are available for streaming");
   }
 
+  async chatStreamLocalFirst(
+    messages: ChatMessage[],
+    onToken: (token: string) => void,
+    model?: string
+  ): Promise<ModelResponse> {
+    await this.maybeRefreshHealth();
+    const preferredOrder = ["ollama", "lmstudio", "copilot"] as const;
+    const ordered = preferredOrder
+      .map((name) => this.providers.find((provider) => provider.name === name))
+      .filter((provider): provider is (typeof this.providers)[number] => Boolean(provider));
+    let lastError: Error | undefined;
+    for (const provider of ordered) {
+      const providerState = this.state.get(provider.name);
+      if (!providerState || providerState.openUntil > Date.now()) {
+        continue;
+      }
+      try {
+        const response = await provider.streamChat({ messages, model }, onToken);
+        providerState.failures = 0;
+        providerState.openUntil = 0;
+        return response;
+      } catch (error) {
+        providerState.failures += 1;
+        const backoff = Math.min(
+          providerState.maxBackoffMs,
+          providerState.baseBackoffMs * Math.pow(2, Math.max(0, providerState.failures - 1))
+        );
+        providerState.openUntil = Date.now() + backoff;
+        lastError = error instanceof Error ? error : new Error("provider stream failed");
+      }
+    }
+    throw lastError ?? new Error("no model providers are available for streaming");
+  }
+
   private async maybeRefreshHealth(): Promise<void> {
     const everyMs = 20_000;
     if (Date.now() - this.lastHealthCheckAt < everyMs) {

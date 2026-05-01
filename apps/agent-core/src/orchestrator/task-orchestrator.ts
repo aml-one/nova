@@ -200,9 +200,29 @@ export class TaskOrchestrator {
       ...(await this.buildVisionContextIfNeeded(input.text, input.imageUrl, input.accessProfile)),
       { role: "user", content: input.text }
     ];
-    const result = input.onToken
-      ? await this.deps.modelRouter.chatStream(promptMessages, input.onToken, selectedModel)
-      : await this.deps.modelRouter.chat(promptMessages, selectedModel);
+    let result;
+    try {
+      result = input.onToken
+        ? await this.deps.modelRouter.chatStream(promptMessages, input.onToken, selectedModel)
+        : await this.deps.modelRouter.chat(promptMessages, selectedModel);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "model request failed";
+      if (/copilot provider is not configured/i.test(message)) {
+        try {
+          result = input.onToken
+            ? await this.deps.modelRouter.chatStreamLocalFirst(promptMessages, input.onToken, selectedModel)
+            : await this.deps.modelRouter.chatLocalFirst(promptMessages, selectedModel);
+        } catch {
+          const fallback =
+            "I can still help without Copilot, but right now I cannot reach a working local model for this task. " +
+            "Please configure Copilot in Settings -> Models -> Copilot quick setup, or enable Ollama/LM Studio and try again.";
+          this.deps.memoryService.appendTurn(userId, input.text, fallback);
+          return fallback;
+        }
+      } else {
+        throw error;
+      }
+    }
 
     this.deps.memoryService.appendTurn(userId, input.text, result.content);
     this.recordRunHistory({

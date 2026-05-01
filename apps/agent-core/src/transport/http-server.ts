@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
-import { exec as execCallback } from "node:child_process";
+import { exec as execCallback, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { TaskOrchestrator } from "../orchestrator/task-orchestrator.js";
 import { WhatsAppChannelAdapter } from "../channels/whatsapp.js";
@@ -52,6 +54,19 @@ type HttpServerOptions = {
   port?: number;
 };
 
+type CopilotDeviceLoginSession = {
+  id: string;
+  state: "starting" | "waiting_for_user" | "authorized" | "failed" | "cancelled";
+  command: string;
+  startedAt: string;
+  completedAt?: string;
+  url?: string;
+  userCode?: string;
+  message?: string;
+  logs: string[];
+  process?: ChildProcessWithoutNullStreams;
+};
+
 export async function startHttpServer(options: HttpServerOptions): Promise<void> {
   const port = options.port ?? Number(process.env.NOVA_AGENT_PORT ?? "8787");
   const wa = new WhatsAppChannelAdapter();
@@ -71,6 +86,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   const thoughtLog = new ThoughtRepository();
   const mobilePush = new MobilePushService();
   let lastThoughtBroadcastAt = "";
+  const copilotDeviceLoginSessions = new Map<string, CopilotDeviceLoginSession>();
   const thoughtWs = new WebSocketServer({ noServer: true });
   dispatcher.start();
   scheduler.start(async (payload) => {
@@ -95,6 +111,16 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       });
     }
   }, 10000).unref();
+  setInterval(() => {
+    const now = Date.now();
+    for (const [id, session] of copilotDeviceLoginSessions.entries()) {
+      if (session.process) continue;
+      const completedAt = Date.parse(session.completedAt ?? session.startedAt);
+      if (Number.isFinite(completedAt) && now - completedAt > 30 * 60 * 1000) {
+        copilotDeviceLoginSessions.delete(id);
+      }
+    }
+  }, 60000).unref();
 
   const server = createServer(async (request, response) => {
     const correlationId = request.headers["x-correlation-id"]?.toString() ?? randomUUID();
@@ -516,6 +542,114 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           ],
           correlationId
         });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/copilot/device-login/start") {
+        const command = (process.env.NOVA_COPILOT_DEVICE_LOGIN_COMMAND || "npm run login --provider=github-copilot").trim();
+        const sessionId = randomUUID();
+        const session: CopilotDeviceLoginSession = {
+          id: sessionId,
+          state: "starting",
+          command,
+          startedAt: new Date().toISOString(),
+          logs: []
+        };
+        copilotDeviceLoginSessions.set(sessionId, session);
+        try {
+          const child = spawn(command, {
+            cwd: resolveCopilotLoginCommandCwd(),
+            shell: true,
+            env: process.env
+          });
+          session.process = child;
+          appendCopilotLoginLog(session, `Started command: ${command}`);
+          const handleOutput = (chunk: Buffer): void => {
+            const text = chunk.toString("utf8");
+            for (const line of text.split(/\r?\n/)) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+              appendCopilotLoginLog(session, trimmed);
+              const urlMatch = trimmed.match(/https?:\/\/[^\s]+/i);
+              if (urlMatch && !session.url) {
+                session.url = urlMatch[0];
+              }
+              const codeMatch = trimmed.match(/\b[A-Z0-9]{4,8}-[A-Z0-9]{4,8}\b/);
+              if (codeMatch && !session.userCode) {
+                session.userCode = codeMatch[0];
+              }
+              if (/device|verification|authorize|one[-\s]?time code|enter code/i.test(trimmed)) {
+                session.state = "waiting_for_user";
+              }
+            }
+          };
+          child.stdout.on("data", handleOutput);
+          child.stderr.on("data", handleOutput);
+          child.on("error", (error) => {
+            session.state = "failed";
+            session.message = error.message;
+            session.completedAt = new Date().toISOString();
+            session.process = undefined;
+            appendCopilotLoginLog(session, `Process error: ${error.message}`);
+          });
+          child.on("exit", (code) => {
+            if (session.state === "cancelled") {
+              session.completedAt = new Date().toISOString();
+              session.process = undefined;
+              return;
+            }
+            session.state = code === 0 ? "authorized" : "failed";
+            session.message = code === 0 ? "Device login completed." : `Command exited with code ${code ?? -1}.`;
+            session.completedAt = new Date().toISOString();
+            session.process = undefined;
+            appendCopilotLoginLog(session, session.message);
+          });
+        } catch (error) {
+          session.state = "failed";
+          session.message = error instanceof Error ? error.message : "Could not start device login command";
+          session.completedAt = new Date().toISOString();
+        }
+        return sendJson(response, 200, {
+          sessionId,
+          state: session.state,
+          command: session.command,
+          startedAt: session.startedAt,
+          correlationId
+        });
+      }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/setup/copilot/device-login/status") {
+        const sessionId = parsedUrl.searchParams.get("sessionId") ?? "";
+        const session = copilotDeviceLoginSessions.get(sessionId);
+        if (!session) {
+          return sendJson(response, 404, { error: "device login session not found", correlationId });
+        }
+        return sendJson(response, 200, {
+          sessionId: session.id,
+          state: session.state,
+          command: session.command,
+          startedAt: session.startedAt,
+          completedAt: session.completedAt,
+          url: session.url,
+          userCode: session.userCode,
+          message: session.message,
+          logs: session.logs.slice(-120),
+          correlationId
+        });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/copilot/device-login/cancel") {
+        const payload = (await readJson(request)) as { sessionId?: string };
+        const sessionId = payload.sessionId?.trim() ?? "";
+        const session = copilotDeviceLoginSessions.get(sessionId);
+        if (!session) {
+          return sendJson(response, 404, { error: "device login session not found", correlationId });
+        }
+        if (session.process) {
+          session.process.kill();
+          session.process = undefined;
+        }
+        session.state = "cancelled";
+        session.message = "Device login cancelled.";
+        session.completedAt = new Date().toISOString();
+        appendCopilotLoginLog(session, session.message);
+        return sendJson(response, 200, { ok: true, correlationId });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/skills/manifests") {
         const items = options.skillRegistry.list().map((item) => ({
@@ -2222,6 +2356,19 @@ function parseJsonSafe(value: string | undefined): unknown {
   } catch {
     return value;
   }
+}
+
+function appendCopilotLoginLog(session: CopilotDeviceLoginSession, line: string): void {
+  session.logs.push(line);
+  if (session.logs.length > 300) {
+    session.logs.splice(0, session.logs.length - 300);
+  }
+}
+
+function resolveCopilotLoginCommandCwd(): string {
+  const candidates = [process.cwd(), resolve(process.cwd(), ".."), resolve(process.cwd(), "../..")];
+  const matched = candidates.find((dir) => existsSync(resolve(dir, "package.json")));
+  return matched ?? process.cwd();
 }
 
 function sendJson(response: ServerResponse, status: number, data: unknown): void {
