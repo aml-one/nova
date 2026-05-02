@@ -76,7 +76,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const activeLink = links.find((link) => link.href === pathname) ?? links[0];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-surface via-surface to-surface2">
+    <div className="flex min-h-screen flex-col bg-gradient-to-br from-surface via-surface to-surface2">
       <aside
         className={cn(
           "fixed left-0 top-0 z-40 h-screen border-r bg-surface/95 p-2 backdrop-blur transition-all",
@@ -144,19 +144,21 @@ export function AppShell({ children }: { children: ReactNode }) {
           {!navCollapsed ? <div className="text-center text-[11px] text-muted">Made by AmL</div> : null}
         </div>
       </aside>
-      <header className={cn("sticky top-0 z-30 border-b bg-surface/90 backdrop-blur", navCollapsed ? "ml-14" : "ml-56")}>
-        <div className="flex items-center justify-between gap-2 px-4 py-2">
-          <div>
-            <div className="text-sm font-semibold">{activeLink.label}</div>
-            <div className="text-xs text-slate-500">{activeLink.subtitle}</div>
+      <div className={cn("flex min-h-0 flex-1 flex-col", navCollapsed ? "ml-14" : "ml-56")}>
+        <header className="sticky top-0 z-30 shrink-0 border-b bg-surface/90 backdrop-blur">
+          <div className="flex items-center justify-between gap-2 px-4 py-2">
+            <div>
+              <div className="text-sm font-semibold">{activeLink.label}</div>
+              <div className="text-xs text-slate-500">{activeLink.subtitle}</div>
+            </div>
+            <div className="flex items-center gap-2">
+              <EmotionBadge />
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <EmotionBadge />
-          </div>
-        </div>
-      </header>
-      <main className={cn("px-4 py-6", navCollapsed ? "ml-14" : "ml-56")}>{children}</main>
-      <footer className={cn("px-4 pb-4 text-[11px] text-muted", navCollapsed ? "ml-14" : "ml-56")} />
+        </header>
+        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-6">{children}</main>
+        <footer className="shrink-0 px-4 pb-4 text-[11px] text-muted" />
+      </div>
     </div>
   );
 }

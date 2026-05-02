@@ -1,7 +1,7 @@
 /* eslint-disable react/no-unescaped-entities */
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
 import { FaBrain, FaCopy, FaFloppyDisk, FaPenToSquare, FaPlus, FaRotateRight, FaSpinner, FaTrash, FaXmark } from "react-icons/fa6";
@@ -298,10 +298,13 @@ export default function HomePage() {
     localStorage.setItem("nova.chat.sessions.v1", JSON.stringify(sessions));
   }, [sessions]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = chatScrollRef.current;
     if (!container || !autoScrollEnabled) return;
-    container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: loading ? "auto" : "smooth"
+    });
   }, [turns, liveThinking, loading, autoScrollEnabled]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -535,9 +538,9 @@ export default function HomePage() {
   }
 
   return (
-    <div className="grid gap-4">
-      <Card className="flex min-h-[calc(100vh-170px)] flex-col">
-        <div className="mb-2 flex items-center justify-between">
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="mb-2 flex shrink-0 items-center justify-between">
           <h1 className="text-2xl font-semibold">Nova Chat</h1>
           <div className="flex items-center gap-1.5">
             <Select
@@ -631,10 +634,11 @@ export default function HomePage() {
         </div>
         <div
           ref={chatScrollRef}
-          className="mb-4 flex-1 space-y-2 overflow-y-auto rounded-xl border bg-surface p-3"
+          className="min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden rounded-xl border bg-surface p-3"
           onScroll={(event) => {
             const target = event.currentTarget;
-            const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 36;
+            const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+            const nearBottom = distanceFromBottom < 56;
             setAutoScrollEnabled(nearBottom);
           }}
         >
@@ -723,7 +727,12 @@ export default function HomePage() {
                       style={{ color: ensureReadableTextColor(userActionIconColorForTheme, isDarkTheme) }}
                       onClick={() => {
                         setMessage(turn.text);
-                        window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+                        requestAnimationFrame(() => {
+                          const el = chatScrollRef.current;
+                          if (el) {
+                            el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+                          }
+                        });
                       }}
                       title="Regenerate"
                     >
@@ -825,7 +834,7 @@ export default function HomePage() {
             </article>
           ))}
         </div>
-        <form onSubmit={onSubmit} className="space-y-2">
+        <form onSubmit={onSubmit} className="mt-3 shrink-0 space-y-2">
           <div
             className={cn(
               "rounded-ui border border-dashed p-3 text-sm transition",

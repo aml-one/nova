@@ -35,6 +35,7 @@
 html,
 body {
   @apply bg-surface text-text;
+  height: 100%;
 }
 
 html {
