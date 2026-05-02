@@ -1,9 +1,10 @@
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../../lib/agent-core";
 
-type Params = { params: { name: string[] } };
+type RouteContext = { params: Promise<{ name: string[] }> };
 
-export async function GET(request: Request, { params }: Params) {
-  const name = (params.name ?? []).map((part) => encodeURIComponent(part)).join("/");
+export async function GET(request: Request, context: RouteContext) {
+  const { name: nameParts } = await context.params;
+  const name = (nameParts ?? []).map((part) => encodeURIComponent(part)).join("/");
   if (!name) {
     return new Response("missing media name", { status: 400 });
   }
