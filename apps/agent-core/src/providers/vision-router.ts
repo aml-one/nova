@@ -1,4 +1,5 @@
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
+import { lmstudioOpenAiBaseToRestRoot, lmstudioUnloadModel } from "./lmstudio-vision-swap.js";
 import { normalizeOllamaBaseUrl, ollamaUnloadModel } from "./ollama-vision-swap.js";
 
 type VisionRequest = {
@@ -26,12 +27,16 @@ export class VisionRouter {
     for (const lane of order) {
       if (lane === "lmstudio" && lmstudioVisionConfigured(settings)) {
         try {
-          const summary = await analyzeViaOpenAICompatible({
-            endpoint: `${resolveLmstudioVisionBase(settings)}/chat/completions`,
-            model: resolveLmstudioVisionModel(settings),
-            userPrompt: request.userPrompt,
-            imageUrl: request.imageUrl
-          });
+          const visionBase = resolveLmstudioVisionBase(settings);
+          const visionModel = resolveLmstudioVisionModel(settings);
+          const runVision = (): Promise<string> =>
+            analyzeViaOpenAICompatible({
+              endpoint: `${visionBase}/chat/completions`,
+              model: visionModel,
+              userPrompt: request.userPrompt,
+              imageUrl: request.imageUrl
+            });
+          const summary = await runWithOptionalLmStudioSwap(settings, visionBase, visionModel, runVision);
           if (summary.trim()) {
             return { used: true, provider: "lmstudio", summary: summary.trim() };
           }
@@ -164,6 +169,14 @@ function resolveChatOllamaModel(settings: AppSettings): string {
   return settings.models.defaultByProvider.ollama.trim() || process.env.OLLAMA_MODEL || "llama3.1";
 }
 
+function resolveChatLmstudioOpenAiBase(): string {
+  return (process.env.LMSTUDIO_BASE_URL ?? "http://127.0.0.1:1234/v1").replace(/\/+$/, "");
+}
+
+function resolveChatLmstudioModel(settings: AppSettings): string {
+  return settings.models.defaultByProvider.lmstudio.trim() || process.env.LMSTUDIO_MODEL || "local-model";
+}
+
 function resolveCloudVisionBase(settings: AppSettings): string {
   return (settings.vision?.cloudBaseUrl?.trim() || process.env.CLOUD_VISION_BASE_URL || "").replace(/\/+$/, "");
 }
@@ -175,6 +188,35 @@ function resolveCloudVisionModel(settings: AppSettings): string {
 function resolveCloudVisionApiKey(settings: AppSettings): string | undefined {
   const k = settings.vision?.cloudApiKey?.trim() || process.env.CLOUD_VISION_API_KEY;
   return k || undefined;
+}
+
+async function runWithOptionalLmStudioSwap(
+  settings: AppSettings,
+  visionOpenAiBase: string,
+  visionModel: string,
+  runVision: () => Promise<string>
+): Promise<string> {
+  const swap = settings.vision?.swapLocalModelsForVision === true;
+  const chatOnLm = settings.activeProvider === "lmstudio" && settings.lmstudio.disabled !== true;
+  if (!swap || !chatOnLm) {
+    return runVision();
+  }
+  const chatOpenAi = resolveChatLmstudioOpenAiBase();
+  const chatModel = resolveChatLmstudioModel(settings);
+  const restVision = lmstudioOpenAiBaseToRestRoot(visionOpenAiBase);
+  const restChat = lmstudioOpenAiBaseToRestRoot(chatOpenAi);
+  if (restVision !== restChat) {
+    return runVision();
+  }
+  if (!chatModel || chatModel === visionModel) {
+    return runVision();
+  }
+  await lmstudioUnloadModel(restChat, chatModel);
+  try {
+    return await runVision();
+  } finally {
+    await lmstudioUnloadModel(restVision, visionModel);
+  }
 }
 
 async function runWithOptionalOllamaSwap(

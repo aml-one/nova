@@ -1402,9 +1402,11 @@ export default function SettingsPage() {
                   }
                 />
                 <span>
-                  <span className="font-medium">Unload chat model for vision (local Ollama only)</span>
+                  <span className="font-medium">Unload chat model for vision (local Ollama / LM Studio)</span>
                   <span className="mt-0.5 block text-[11px] text-muted leading-snug">
-                    When the primary provider is Ollama and vision runs on the <strong>same</strong> Ollama host as chat, Nova asks Ollama to drop the loaded chat model before the vision call, then drops the vision model afterward. The next chat turn reloads your chat model (first reply may be slightly slower). Ignored if you set a different vision Ollama URL.
+                    When the primary provider matches the vision lane and vision uses the <strong>same</strong> host as chat, Nova frees VRAM first: <strong>Ollama</strong> uses a short keep-alive unload; <strong>LM Studio</strong> calls{" "}
+                    <code className="font-mono text-[10px]">POST /api/v1/models/unload</code> (optional bearer{" "}
+                    <code className="font-mono text-[10px]">LMSTUDIO_API_KEY</code> / <code className="font-mono text-[10px]">LM_API_TOKEN</code>). Then it runs the vision model and unloads it afterward. The next chat reloads your chat model (first reply may be slightly slower). Ignored if you set a different vision base URL for that provider.
                   </span>
                 </span>
               </label>
