@@ -373,8 +373,13 @@ async function analyzeViaOllama(input: {
   if (!response.ok) {
     throw new Error(`ollama vision failed (${response.status})`);
   }
-  const payload = (await response.json()) as { message?: { content?: string } };
-  return payload.message?.content ?? "";
+  const payload = (await response.json()) as {
+    message?: { content?: string; thinking?: string };
+  };
+  const msg = payload.message;
+  const content = (msg?.content ?? "").trim();
+  const thinking = (msg?.thinking ?? "").trim();
+  return content || thinking;
 }
 
 async function resolveOllamaImageBase64(imageUrl: string | undefined): Promise<string | undefined> {

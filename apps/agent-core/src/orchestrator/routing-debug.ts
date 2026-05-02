@@ -25,6 +25,8 @@ export function buildRoutingDebugSnapshot(
       modelRouterActiveProvider: modelRouter.getActiveProvider(),
       defaultModelsByProvider: settings.models.defaultByProvider,
       localFirstTryOrder: ["ollama", "lmstudio", "copilot"],
+      visionBaseUrlHint:
+        "If Settings → Vision → Ollama vision base URL is empty, Nova uses localhost (127.0.0.1:11434) or OLLAMA_VISION_BASE_URL / OLLAMA_BASE_URL. A wrong LAN IP here forces vision onto that host only.",
       integrationSkipsProvider: {
         ollama: isOllamaIntegrationDisabled(),
         lmstudio: isLmStudioIntegrationDisabled(),

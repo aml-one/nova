@@ -968,6 +968,16 @@ export class TaskOrchestrator {
       },
       runtimeSettings
     );
+    this.thoughtLog.append({
+      category: "chat",
+      title: "Vision analyze outcome",
+      content: JSON.stringify({
+        used: vision.used,
+        provider: vision.provider ?? null,
+        summaryChars: vision.summary?.trim().length ?? 0,
+        resolvedHint: resolvedImageUrl?.slice(0, 120) ?? null
+      }).slice(0, 480)
+    });
     if (vision.used && vision.summary) {
       return {
         extras: [
@@ -1144,10 +1154,14 @@ function isBudgetExceeded(costGovernor: {
 }
 
 function isVisionIntent(text: string, imageUrl?: string): boolean {
-  if (imageUrl) {
+  if (imageUrl?.trim()) {
     return true;
   }
   const lower = text.toLowerCase();
+  // Uploaded / proxied media in message text (avoid `\b` before `/` — it won't match after ":" or spaces).
+  if (/\/(?:api|v1)\/media\/files\/[^\s)\]>"']+/i.test(lower)) {
+    return true;
+  }
   const hints = [
     "image",
     "photo",
