@@ -99,7 +99,6 @@ export default function HomePage() {
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [sendOnEnter, setSendOnEnter] = useState(false);
-  const [thinkingPhase, setThinkingPhase] = useState(0);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [lastCopiedTurnId, setLastCopiedTurnId] = useState<string | null>(null);
@@ -170,17 +169,6 @@ export default function HomePage() {
       active = false;
       clearInterval(timer);
     };
-  }, [loading]);
-
-  useEffect(() => {
-    if (!loading) {
-      setThinkingPhase(0);
-      return;
-    }
-    const timer = setInterval(() => {
-      setThinkingPhase((prev) => (prev + 1) % 3);
-    }, 1300);
-    return () => clearInterval(timer);
   }, [loading]);
 
   useEffect(() => {
@@ -398,7 +386,6 @@ export default function HomePage() {
         id: assistantId,
         role: "assistant",
         text: "",
-        thinkingText: "Thinking...",
         thinkingCollapsed: false
       }
     ]);
@@ -756,44 +743,21 @@ export default function HomePage() {
                   showThinkingInChat &&
                   loading &&
                   index === turns.length - 1 &&
-                  !turn.text.trim() ? (
+                  !turn.text.trim() &&
+                  !(turn.thinkingText?.trim()) ? (
                     <div className="space-y-2">
                       <div className="text-xs font-semibold text-muted">Nova is working</div>
-                      {(["Thinking", "Reasoning", "Searching the web"] as const).map((label, idx) => {
-                        const active = idx === thinkingPhase;
-                        return (
-                          <div
-                            key={label}
-                            className={cn(
-                              "flex items-center justify-between rounded-full border px-3 py-1.5 transition-all",
-                              active
-                                ? "nova-thinking-row-active border-blue-400/60 bg-blue-500/15"
-                                : "border-slate-400/35 bg-surface"
-                            )}
-                          >
-                            <div className="flex items-center gap-2">
-                              <span
-                                className={cn(
-                                  "h-3.5 w-3.5 rounded-full border",
-                                  active ? "nova-thinking-orb border-blue-300/80" : "border-slate-400/70 bg-slate-400/40"
-                                )}
-                              />
-                              <span className="text-xs font-medium">{label}</span>
-                            </div>
-                            <span className="flex items-center gap-1.5">
-                              <span
-                                className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-1 bg-blue-300" : "bg-slate-400/70")}
-                              />
-                              <span
-                                className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-2 bg-blue-300" : "bg-slate-400/70")}
-                              />
-                              <span
-                                className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-3 bg-blue-300" : "bg-slate-400/70")}
-                              />
-                            </span>
-                          </div>
-                        );
-                      })}
+                      <div className="nova-thinking-row-active flex items-center justify-between rounded-full border border-blue-400/60 bg-blue-500/15 px-3 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className="nova-thinking-orb h-3.5 w-3.5 rounded-full border border-blue-300/80" />
+                          <span className="text-xs font-medium">Composing your reply…</span>
+                        </div>
+                        <span className="flex items-center gap-1.5">
+                          <span className="nova-thinking-dot-1 h-1.5 w-1.5 rounded-full bg-blue-300" />
+                          <span className="nova-thinking-dot-2 h-1.5 w-1.5 rounded-full bg-blue-300" />
+                          <span className="nova-thinking-dot-3 h-1.5 w-1.5 rounded-full bg-blue-300" />
+                        </span>
+                      </div>
                       {!liveThinkingCollapsed ? (
                         <div className="rounded-ui border bg-surface p-2 text-[11px] text-muted">
                           <div className="mb-0.5 flex items-center justify-between">
@@ -923,9 +887,11 @@ export default function HomePage() {
                       )
                     }
                   >
-                    {turn.thinkingCollapsed ? "Show thinking" : "Hide thinking"}
+                    {turn.thinkingCollapsed ? "Show reasoning" : "Hide reasoning"}
                   </button>
-                  {!turn.thinkingCollapsed ? <div className="whitespace-pre-wrap">{turn.thinkingText}</div> : null}
+                  {!turn.thinkingCollapsed ? (
+                    <div className="whitespace-pre-wrap text-[11px] leading-relaxed">{turn.thinkingText}</div>
+                  ) : null}
                 </div>
               ) : null}
               {turn.role === "assistant" && turn.stats ? (
