@@ -65,15 +65,16 @@ const INTEGRITY_SYSTEM_GUARD =
   "If you need live host or environment facts you do not have: say you do not have them; suggest the user run `/run <allowlisted command>` when shell is enabled for them, " +
   "or use an enabled skill (e.g. web search for public web facts), or ask one short clarifying question—never fill gaps with plausible fiction.";
 
-/** Web chat only: lets Nova use a tiny whitelisted set of span classes; UI derives readable shades from the user’s chat colors. */
+/** Web chat only: bracket markers are parsed client-side (no raw HTML); tones follow the user’s chat colors. */
 const WEB_CHAT_TONE_MARKDOWN_HINT =
-  "Web Nova chat (this channel): For long replies you may add subtle emphasis using **only** these exact HTML snippets (no other tags, attributes, or inline styles): " +
-  '<span class="nova-chat-tone-muted">secondary detail</span>, ' +
-  '<span class="nova-chat-tone-strong">key phrase</span>, ' +
-  '<span class="nova-chat-tone-soft">gentle aside</span>, ' +
-  '<span class="nova-chat-tone-heading">short in-reply label</span>. ' +
-  "The UI derives tones from the user’s assistant text and bubble colors (same family, lighter/darker)—readable in light and dark mode. " +
-  "Do not invent rainbow or unrelated colors. Use sparingly (a handful of spans per message, plain markdown for structure).";
+  "Web Nova chat (this channel): For long replies you may add subtle emphasis using **only** these exact bracket wrappers (copy spelling exactly; tone name is lowercase): " +
+  "[nova:muted]secondary detail[/nova], " +
+  "[nova:strong]key phrase[/nova], " +
+  "[nova:soft]gentle aside[/nova], " +
+  "[nova:heading]short in-reply label[/nova]. " +
+  "Do not put these markers inside fenced code blocks. Avoid lists or long multi-paragraph sections inside a marker—short phrases or a single line work best. " +
+  "The UI derives readable shades from the user’s assistant text and bubble colors (same family, lighter/darker) in light and dark mode—no rainbow or arbitrary colors. " +
+  "Use sparingly (a handful per message; plain markdown for structure).";
 
 function mergeToolTimings(hostDiagnosticsMs: number, implicitShellMs: number): Record<string, number> | undefined {
   if (hostDiagnosticsMs <= 0 && implicitShellMs <= 0) return undefined;

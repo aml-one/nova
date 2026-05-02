@@ -1,27 +1,16 @@
 "use client";
 
-import { useMemo, useState, type ComponentProps, type CSSProperties, type ReactNode } from "react";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
-import type { Options as RehypeSanitizeSchema } from "rehype-sanitize";
+import type { Components } from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { cn } from "../lib/cn";
 import { Button } from "./ui/button";
 
-const NOVA_TONE_CLASS = /^(?:nova-chat-tone-muted|nova-chat-tone-strong|nova-chat-tone-soft|nova-chat-tone-heading)$/;
-
-const chatMarkdownSanitizeSchema: RehypeSanitizeSchema = {
-  ...defaultSchema,
-  attributes: {
-    ...defaultSchema.attributes,
-    span: [["className", NOVA_TONE_CLASS]]
-  }
-};
-
-/** rehype plugin tuple; typed loosely because `unified` is not a direct dependency of this package */
-const chatRehypePlugins = [rehypeRaw, [rehypeSanitize, chatMarkdownSanitizeSchema]] as unknown[];
+const NOVA_TONES = new Set(["muted", "strong", "soft", "heading"]);
+export type NovaChatTone = "muted" | "strong" | "soft" | "heading";
 
 export type ChatMarkdownToneSeed = {
   /** Resolved assistant text color (hex), after readability adjustment */
@@ -34,49 +23,154 @@ export type ChatMarkdownToneSeed = {
 
 type ChatMarkdownProps = {
   content: string;
-  /** When set (assistant bubbles), enables seed-based tone spans from sanitized HTML */
+  /** When set (assistant bubbles), enables seed-based tone wrappers from `[nova:tone]…[/nova]` */
   toneSeed?: ChatMarkdownToneSeed;
 };
 
+type RenderUnit =
+  | { kind: "md"; text: string }
+  | { kind: "fence"; text: string }
+  | { kind: "tone"; tone: NovaChatTone; text: string };
+
+/** Legacy HTML from earlier prompts → bracket syntax (only whitelisted classes). */
+function normalizeLegacyNovaSpans(source: string): string {
+  return source.replace(
+    /<span\s+class="nova-chat-tone-(muted|strong|soft|heading)"\s*>([\s\S]*?)<\/span>/gi,
+    (_full, tone: string, inner: string) => `[nova:${String(tone).toLowerCase()}]${inner}[/nova]`
+  );
+}
+
+type FencePiece = { kind: "prose"; text: string } | { kind: "fence"; text: string };
+
+function splitPreservingCodeFences(source: string): FencePiece[] {
+  const out: FencePiece[] = [];
+  let i = 0;
+  while (i < source.length) {
+    const start = source.indexOf("```", i);
+    if (start === -1) {
+      if (i < source.length) out.push({ kind: "prose", text: source.slice(i) });
+      break;
+    }
+    if (start > i) {
+      out.push({ kind: "prose", text: source.slice(i, start) });
+    }
+    const end = source.indexOf("```", start + 3);
+    if (end === -1) {
+      out.push({ kind: "prose", text: source.slice(start) });
+      break;
+    }
+    out.push({ kind: "fence", text: source.slice(start, end + 3) });
+    i = end + 3;
+  }
+  if (out.length === 0 && source.length > 0) {
+    out.push({ kind: "prose", text: source });
+  }
+  return out;
+}
+
+function splitTonesInProse(segment: string): Array<{ kind: "md"; text: string } | { kind: "tone"; tone: NovaChatTone; text: string }> {
+  const re = /\[nova:(muted|strong|soft|heading)\]([\s\S]*?)\[\/nova\]/g;
+  const parts: Array<{ kind: "md"; text: string } | { kind: "tone"; tone: NovaChatTone; text: string }> = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(segment)) !== null) {
+    if (m.index > last) {
+      parts.push({ kind: "md", text: segment.slice(last, m.index) });
+    }
+    const tone = m[1].toLowerCase() as NovaChatTone;
+    if (NOVA_TONES.has(tone)) {
+      parts.push({ kind: "tone", tone, text: m[2] });
+    } else {
+      parts.push({ kind: "md", text: m[0] });
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < segment.length) {
+    parts.push({ kind: "md", text: segment.slice(last) });
+  }
+  if (parts.length === 0 && segment.length > 0) {
+    parts.push({ kind: "md", text: segment });
+  }
+  return parts;
+}
+
+function buildRenderUnits(source: string): RenderUnit[] {
+  const normalized = normalizeLegacyNovaSpans(source);
+  const units: RenderUnit[] = [];
+  for (const piece of splitPreservingCodeFences(normalized)) {
+    if (piece.kind === "fence") {
+      units.push({ kind: "fence", text: piece.text });
+      continue;
+    }
+    for (const chunk of splitTonesInProse(piece.text)) {
+      if (chunk.kind === "md" && chunk.text.length === 0) continue;
+      units.push(chunk.kind === "md" ? { kind: "md", text: chunk.text } : { kind: "tone", tone: chunk.tone, text: chunk.text });
+    }
+  }
+  if (units.length === 0) {
+    units.push({ kind: "md", text: source });
+  }
+  return units;
+}
+
+const markdownComponents: Components = {
+  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="mb-2 list-disc pl-5">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-2 list-decimal pl-5">{children}</ol>,
+  a: ({ href, children }) => (
+    <a href={href} className="underline" target="_blank" rel="noreferrer">
+      {children}
+    </a>
+  ),
+  code: ({ className, children, ...props }) => {
+    const match = /language-(\w+)/.exec(className || "");
+    const language = match?.[1] ?? "text";
+    const raw = reactNodeToPlainText(children).replace(/\n$/, "");
+    if (!match) {
+      return (
+        <code className="rounded-ui border bg-surface2 px-1 py-0.5 font-mono text-[0.85em]" {...props}>
+          {children}
+        </code>
+      );
+    }
+    return <CodeBlock code={raw} language={language} />;
+  }
+};
+
 export function ChatMarkdown({ content, toneSeed }: ChatMarkdownProps) {
-  const markdown = useMemo(
-    () => (
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={chatRehypePlugins as ComponentProps<typeof ReactMarkdown>["rehypePlugins"]}
-        components={{
-          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-          ul: ({ children }) => <ul className="mb-2 list-disc pl-5">{children}</ul>,
-          ol: ({ children }) => <ol className="mb-2 list-decimal pl-5">{children}</ol>,
-          a: ({ href, children }) => (
-            <a href={href} className="underline" target="_blank" rel="noreferrer">
-              {children}
-            </a>
-          ),
-          code: ({ className, children, ...props }) => {
-            const match = /language-(\w+)/.exec(className || "");
-            const language = match?.[1] ?? "text";
-            const raw = reactNodeToPlainText(children).replace(/\n$/, "");
-            if (!match) {
-              return (
-                <code className="rounded-ui border bg-surface2 px-1 py-0.5 font-mono text-[0.85em]" {...props}>
-                  {children}
-                </code>
-              );
-            }
-            return <CodeBlock code={raw} language={language} />;
-          }
-        }}
-      >
+  if (!toneSeed) {
+    return (
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
         {content}
       </ReactMarkdown>
-    ),
-    [content]
-  );
-
-  if (!toneSeed) {
-    return markdown;
+    );
   }
+
+  const units = useMemo(() => buildRenderUnits(content), [content]);
+
+  const body = (
+    <>
+      {units.map((u, idx) => {
+        if (u.kind === "tone") {
+          return (
+            <span key={idx} className={cn(`nova-chat-tone-${u.tone}`, "contents")}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                {u.text}
+              </ReactMarkdown>
+            </span>
+          );
+        }
+        if (u.text.length === 0) {
+          return null;
+        }
+        return (
+          <ReactMarkdown key={idx} remarkPlugins={[remarkGfm]} components={markdownComponents}>
+            {u.text}
+          </ReactMarkdown>
+        );
+      })}
+    </>
+  );
 
   return (
     <div
@@ -89,7 +183,7 @@ export function ChatMarkdown({ content, toneSeed }: ChatMarkdownProps) {
         } as CSSProperties
       }
     >
-      {markdown}
+      {body}
     </div>
   );
 }
