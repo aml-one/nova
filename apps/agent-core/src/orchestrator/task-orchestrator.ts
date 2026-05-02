@@ -8,6 +8,17 @@ import { InMemorySkillRegistry } from "../skills/skill-registry.js";
 import { SelfImprovementLoop } from "../improvement/self-improvement-loop.js";
 import { CommandExecutor } from "../execution/command-executor.js";
 import { evaluateCommandPolicy } from "../execution/policy.js";
+import {
+  detectHostDiagnosticsIntent,
+  implicitHostDiagnosticsShellAllowed,
+  runHostDiagnosticsCollection
+} from "../execution/host-diagnostics.js";
+import {
+  detectSkillAuthoringIntent,
+  enableAuthoredSkill,
+  parseEnableSkillCommand,
+  runSkillAuthoringFlow
+} from "../skills/skill-authoring.js";
 import { JobSupervisor } from "../execution/job-supervisor.js";
 import { ExecutionAuditLog } from "../execution/audit-log.js";
 import { UserProfileStore } from "../identity/user-profile-store.js";
@@ -21,6 +32,16 @@ import { EmotionService } from "../emotion/emotion-service.js";
 import { ThoughtRepository } from "../storage/repositories/thought-repository.js";
 import { getDatabase } from "../storage/sqlite.js";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
+
+function shouldTryLocalModelAfterChatError(message: string): boolean {
+  if (/copilot provider is not configured/i.test(message)) {
+    return true;
+  }
+  const lower = message.toLowerCase();
+  return /fetch failed|failed to fetch|econnrefused|etimedout|enotfound|socket hang up|network|tls|certificate|und_err|abort/i.test(
+    lower
+  );
+}
 
 type TaskOrchestratorDeps = {
   modelRouter: ModelRouter;
@@ -91,6 +112,39 @@ export class TaskOrchestrator {
     const pendingQuestionsForUser = this.deps.improvement.consumePendingQuestions(userId, 2);
     const runId = randomUUID();
     const correlationId = input.correlationId ?? runId;
+    const selectedModel = this.resolveChatModel(input, runtimeSettings);
+
+    const enableSkillId = parseEnableSkillCommand(input.text);
+    if (enableSkillId) {
+      const enabled = enableAuthoredSkill({
+        skillId: enableSkillId,
+        settingsService: this.deps.settingsService,
+        skillRegistry: this.deps.skillRegistry
+      });
+      const reply = enabled.message;
+      this.thoughtLog.append({
+        category: "chat",
+        title: "Enable skill",
+        content: enableSkillId
+      });
+      this.deps.memoryService.appendTurn(userId, input.text, reply);
+      this.recordRunHistory({
+        runId,
+        userId,
+        channel: input.channel,
+        inputText: input.text,
+        outputText: reply,
+        success: enabled.ok,
+        correlationId,
+        latencyMs: Date.now() - startedAt,
+        provider: "skill-settings",
+        tokenInCount: estimateTokens(input.text),
+        tokenOutCount: estimateTokens(reply),
+        toolTimingsMs: {}
+      });
+      this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: enabled.ok });
+      return reply;
+    }
 
     if (input.text.startsWith("/run ")) {
       if (input.accessProfile && !input.accessProfile.capabilities.shellAccess) {
@@ -123,6 +177,18 @@ export class TaskOrchestrator {
       const multi = await this.runMultiAgent(userPrompt, persona.systemPrompt);
       this.deps.memoryService.appendTurn(userId, input.text, multi);
       return multi;
+    }
+
+    if (detectSkillAuthoringIntent(input.text)) {
+      return await this.runSkillAuthoringSession({
+        input,
+        userId,
+        runId,
+        correlationId,
+        startedAt,
+        selectedModel,
+        runtimeSettings
+      });
     }
 
     if (isWebsiteCommand(input.text) || mentionsKnownWebsite(input.text)) {
@@ -172,21 +238,44 @@ export class TaskOrchestrator {
       return generation;
     }
 
+    let hostDiagnosticsAppendix = "";
+    let hostDiagnosticsMs = 0;
+    const diagnosticsIntent = detectHostDiagnosticsIntent(input.text);
+    if (diagnosticsIntent && implicitHostDiagnosticsShellAllowed(input.accessProfile)) {
+      const diagStarted = Date.now();
+      hostDiagnosticsAppendix = await runHostDiagnosticsCollection(
+        this.deps.commandExecutor,
+        diagnosticsIntent,
+        runtimeSettings.shell
+      );
+      hostDiagnosticsMs = Date.now() - diagStarted;
+      if (hostDiagnosticsAppendix.trim()) {
+        this.thoughtLog.append({
+          category: "chat",
+          title: "Host diagnostics (auto)",
+          content: hostDiagnosticsAppendix.slice(0, 500)
+        });
+        this.deps.auditLog.append({
+          runId,
+          actor: userId,
+          action: "host_diagnostics_auto",
+          data: { scope: diagnosticsIntent, ms: String(hostDiagnosticsMs), correlationId }
+        });
+      } else {
+        hostDiagnosticsMs = 0;
+      }
+    }
+
     const activeProvider = runtimeSettings.activeProvider;
-    const modelFromSettings =
-      runtimeSettings.models.defaultByProvider[
-        activeProvider as keyof typeof runtimeSettings.models.defaultByProvider
-      ];
-    const budgetExceeded = isBudgetExceeded(runtimeSettings.costGovernor);
-    const selectedModel =
-      runtimeSettings.costGovernor.enabled && budgetExceeded && runtimeSettings.costGovernor.qualityTier === "economy"
-        ? runtimeSettings.models.defaultByProvider.ollama || undefined
-        : input.model?.trim() || modelFromSettings || undefined;
     this.thoughtLog.append({
       category: "chat",
       title: "Generating assistant response",
       content: `provider=${activeProvider}, model=${selectedModel ?? "default"}`
     });
+    const userMessageForModel =
+      hostDiagnosticsAppendix.trim().length > 0
+        ? `${input.text}\n\n---\nHost diagnostics (read-only, collected automatically by Nova):\n${hostDiagnosticsAppendix.trim()}`
+        : input.text;
     const promptMessages: ChatMessage[] = [
       { role: "system", content: persona.systemPrompt },
       ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
@@ -198,7 +287,7 @@ export class TaskOrchestrator {
         : []),
       ...memoryContext,
       ...(await this.buildVisionContextIfNeeded(input.text, input.imageUrl, input.accessProfile)),
-      { role: "user", content: input.text }
+      { role: "user", content: userMessageForModel }
     ];
     let result;
     try {
@@ -207,7 +296,7 @@ export class TaskOrchestrator {
         : await this.deps.modelRouter.chat(promptMessages, selectedModel);
     } catch (error) {
       const message = error instanceof Error ? error.message : "model request failed";
-      if (/copilot provider is not configured/i.test(message)) {
+      if (shouldTryLocalModelAfterChatError(message)) {
         try {
           result = input.onToken
             ? await this.deps.modelRouter.chatStreamLocalFirst(promptMessages, input.onToken, selectedModel)
@@ -236,12 +325,14 @@ export class TaskOrchestrator {
       latencyMs: Date.now() - startedAt,
       provider: result.provider,
       modelName: result.model,
-      tokenInCount: estimateTokens([persona.systemPrompt, ...memoryContext.map((m) => m.content), input.text].join(" ")),
+      tokenInCount: estimateTokens(
+        [persona.systemPrompt, ...memoryContext.map((m) => m.content), userMessageForModel].join(" ")
+      ),
       tokenOutCount: estimateTokens(result.content),
       firstTokenMs: result.firstTokenMs,
       tokensPerSecond: computeTokensPerSecond(result.content, Date.now() - startedAt),
       costUsd: estimateCostUsd(result.provider, estimateTokens(result.content), runtimeSettings.costGovernor),
-      toolTimingsMs: {}
+      toolTimingsMs: hostDiagnosticsMs > 0 ? { hostDiagnosticsMs } : {}
     });
     this.deps.improvement.recordOutcome({
       runId,
@@ -406,6 +497,87 @@ export class TaskOrchestrator {
       });
       return `Command execution error: ${error instanceof Error ? error.message : "unknown error"}`;
     }
+  }
+
+  private resolveChatModel(
+    input: { model?: string },
+    runtimeSettings: AppSettings
+  ): string | undefined {
+    const activeProvider = runtimeSettings.activeProvider;
+    const modelFromSettings =
+      runtimeSettings.models.defaultByProvider[
+        activeProvider as keyof typeof runtimeSettings.models.defaultByProvider
+      ];
+    const budgetExceeded = isBudgetExceeded(runtimeSettings.costGovernor);
+    return runtimeSettings.costGovernor.enabled &&
+      budgetExceeded &&
+      runtimeSettings.costGovernor.qualityTier === "economy"
+      ? runtimeSettings.models.defaultByProvider.ollama || undefined
+      : input.model?.trim() || modelFromSettings || undefined;
+  }
+
+  private async runSkillAuthoringSession(options: {
+    input: {
+      text: string;
+      onToken?: (token: string) => void;
+      channel: "web" | "whatsapp" | "signal";
+      model?: string;
+    };
+    userId: string;
+    runId: string;
+    correlationId: string;
+    startedAt: number;
+    selectedModel: string | undefined;
+    runtimeSettings: AppSettings;
+  }): Promise<string> {
+    const { input, userId, runId, correlationId, startedAt, selectedModel, runtimeSettings } = options;
+    this.thoughtLog.append({
+      category: "chat",
+      title: "Skill authoring",
+      content: input.text.slice(0, 240)
+    });
+    const result = await runSkillAuthoringFlow({
+      userText: input.text,
+      userId,
+      modelRouter: this.deps.modelRouter,
+      memoryService: this.deps.memoryService,
+      skillRegistry: this.deps.skillRegistry,
+      settingsService: this.deps.settingsService,
+      model: selectedModel,
+      onToken: input.onToken
+    });
+    this.deps.memoryService.appendTurn(userId, input.text, result.reply);
+    this.deps.auditLog.append({
+      runId,
+      actor: userId,
+      action: result.wroteSkillId ? "skill_written" : "skill_authoring",
+      data: { correlationId, skillId: result.wroteSkillId ?? "" }
+    });
+    this.recordRunHistory({
+      runId,
+      userId,
+      channel: input.channel,
+      inputText: input.text,
+      outputText: result.reply,
+      success: true,
+      correlationId,
+      latencyMs: Date.now() - startedAt,
+      provider: result.provider,
+      modelName: result.modelName,
+      tokenInCount: estimateTokens(input.text),
+      tokenOutCount: estimateTokens(result.reply),
+      firstTokenMs: result.firstTokenMs,
+      tokensPerSecond: computeTokensPerSecond(result.reply, Date.now() - startedAt),
+      costUsd: estimateCostUsd(result.provider, estimateTokens(result.reply), runtimeSettings.costGovernor),
+      toolTimingsMs: result.wroteSkillId ? { skillAuthorMs: Date.now() - startedAt } : {}
+    });
+    this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+    this.thoughtLog.append({
+      category: "chat",
+      title: "Skill authoring done",
+      content: result.reply.slice(0, 280)
+    });
+    return result.reply;
   }
 
   private recordRunHistory(input: {

@@ -30,6 +30,10 @@ export class InMemorySkillRegistry {
     this.skills.set(skill.id, skill);
   }
 
+  unregister(skillId: string): boolean {
+    return this.skills.delete(skillId);
+  }
+
   get(skillId: string): RegisteredSkill | undefined {
     return this.skills.get(skillId);
   }

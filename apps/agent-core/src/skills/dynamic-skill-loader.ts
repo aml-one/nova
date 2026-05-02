@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { normalize, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { InMemorySkillRegistry } from "./skill-registry.js";
 
@@ -36,17 +36,49 @@ type RuntimeSkillModule = {
   };
 };
 
-export async function loadWorkspaceSkills(registry: InMemorySkillRegistry): Promise<void> {
-  const skillsRootCandidates = [
-    resolve(process.cwd(), "skills"),
-    resolve(process.cwd(), "..", "..", "skills"),
-    resolve(process.cwd(), "..", "skills")
-  ];
-  const skillsRoot = skillsRootCandidates.find((path) => existsSync(path));
-  if (!skillsRoot) {
-    console.warn("workspace skills directory not found", { candidates: skillsRootCandidates });
-    return;
+const skillsRootCandidates = () => [
+  resolve(process.cwd(), "skills"),
+  resolve(process.cwd(), "..", "..", "skills"),
+  resolve(process.cwd(), "..", "skills")
+];
+
+export function resolveWorkspaceSkillsRoot(): string | undefined {
+  return skillsRootCandidates().find((path) => existsSync(path));
+}
+
+function dirPrefix(root: string): string {
+  const n = normalize(resolve(root));
+  return n.endsWith(sep) ? n : n + sep;
+}
+
+function sourceUnderSkillsRoot(sourcePath: string | undefined, skillsRoot: string): boolean {
+  if (!sourcePath) {
+    return false;
   }
+  const prefix = dirPrefix(skillsRoot);
+  const p = normalize(resolve(sourcePath)) + sep;
+  return p.startsWith(prefix);
+}
+
+export function unregisterWorkspaceSkills(registry: InMemorySkillRegistry, skillsRoot: string): void {
+  for (const skill of registry.list()) {
+    if (sourceUnderSkillsRoot(skill.sourcePath, skillsRoot)) {
+      registry.unregister(skill.id);
+    }
+  }
+}
+
+export type SkillReloadResult = {
+  loaded: string[];
+  errors: Array<{ skill: string; message: string }>;
+};
+
+export async function registerSkillsFromDisk(
+  registry: InMemorySkillRegistry,
+  skillsRoot: string
+): Promise<SkillReloadResult> {
+  const loaded: string[] = [];
+  const errors: Array<{ skill: string; message: string }> = [];
   const entries = readdirSync(skillsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory());
   for (const entry of entries) {
     const candidatePaths = [
@@ -58,7 +90,8 @@ export async function loadWorkspaceSkills(registry: InMemorySkillRegistry): Prom
       continue;
     }
     try {
-      const module = (await import(pathToFileURL(entryPath).href)) as RuntimeSkillModule;
+      const href = pathToFileURL(entryPath).href;
+      const module = (await import(`${href}?t=${Date.now()}`)) as RuntimeSkillModule;
       const runtimeSkill = module.default ?? module.cameraVisionSkill;
       if (!runtimeSkill) {
         continue;
@@ -72,8 +105,30 @@ export async function loadWorkspaceSkills(registry: InMemorySkillRegistry): Prom
         run: runtimeSkill.run,
         sourcePath: entryPath
       });
+      loaded.push(runtimeSkill.manifest.id);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "unknown error";
       console.warn(`failed loading skill ${entry.name}`, error);
+      errors.push({ skill: entry.name, message });
     }
   }
+  return { loaded, errors };
+}
+
+export async function loadWorkspaceSkills(registry: InMemorySkillRegistry): Promise<void> {
+  const skillsRoot = resolveWorkspaceSkillsRoot();
+  if (!skillsRoot) {
+    console.warn("workspace skills directory not found", { candidates: skillsRootCandidates() });
+    return;
+  }
+  await registerSkillsFromDisk(registry, skillsRoot);
+}
+
+export async function reloadWorkspaceSkills(registry: InMemorySkillRegistry): Promise<SkillReloadResult> {
+  const skillsRoot = resolveWorkspaceSkillsRoot();
+  if (!skillsRoot) {
+    return { loaded: [], errors: [{ skill: "_", message: "skills root not found" }] };
+  }
+  unregisterWorkspaceSkills(registry, skillsRoot);
+  return registerSkillsFromDisk(registry, skillsRoot);
 }

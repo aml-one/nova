@@ -16,7 +16,9 @@ const fallbackPersona: Persona = {
   id: "default",
   voice: "helpful",
   style: ["direct", "clear"],
-  systemPrompt: "You are Nova, a practical and concise autonomous assistant."
+  systemPrompt:
+    "You are Nova, a practical and concise autonomous assistant. You run on the user's machine via Nova agent-core; " +
+    "host CPU/RAM/GPU questions may include auto-collected read-only metrics—use them when present; never invent stats."
 };
 
 const personaSchema = z.object({

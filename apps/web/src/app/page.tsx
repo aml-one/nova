@@ -394,10 +394,15 @@ export default function HomePage() {
       setTurns((prev) => prev.map((turn) => (turn.id === userTurn.id ? { ...turn, isPending: false } : turn)));
       setUploads([]);
     } catch (error) {
+      const raw = error instanceof Error ? error.message : "Unknown error";
+      const hint =
+        /fetch failed|failed to fetch/i.test(raw)
+          ? " Check that agent-core is running and NOVA_AGENT_API_URL matches where it listens."
+          : "";
       setTurns((prev) =>
         prev.map((turn) =>
           turn.id === assistantId
-            ? { ...turn, text: `Error: ${error instanceof Error ? error.message : "Unknown error"}`, thinkingText: undefined }
+            ? { ...turn, text: `Error: ${raw}${hint}`, thinkingText: undefined }
             : turn
         )
       );
