@@ -58,7 +58,7 @@ type SettingsState = {
   delegatedFolders: string[];
   requireApprovals: boolean;
   activeProvider: "ollama" | "lmstudio" | "copilot";
-  ollama: { disabled: boolean };
+  ollama: { disabled: boolean; numPredict: number; keepAlive: string };
   lmstudio: { disabled: boolean };
   web: {
     loginEnabled: boolean;
@@ -141,7 +141,7 @@ const DEFAULT_SETTINGS: SettingsState = {
   delegatedFolders: [],
   requireApprovals: false,
   activeProvider: "copilot",
-  ollama: { disabled: true },
+  ollama: { disabled: true, numPredict: 8192, keepAlive: "30m" },
   lmstudio: { disabled: true },
   web: {
     loginEnabled: true,
@@ -1204,7 +1204,7 @@ export default function SettingsPage() {
                 onChange={(e) => {
                   const v = e.target.value as SettingsState["activeProvider"];
                   setSettings((p) => {
-                    if (v === "ollama") return { ...p, activeProvider: "ollama", ollama: { disabled: false } };
+                    if (v === "ollama") return { ...p, activeProvider: "ollama", ollama: { ...p.ollama, disabled: false } };
                     if (v === "lmstudio") return { ...p, activeProvider: "lmstudio", lmstudio: { disabled: false } };
                     return { ...p, activeProvider: "copilot", copilot: { ...p.copilot, disabled: false } };
                   });
@@ -1232,6 +1232,51 @@ export default function SettingsPage() {
                 </span>
               </label>
             </div>
+            <div className="space-y-3 rounded-ui border bg-surface2 p-3">
+              <h3 className="text-sm font-semibold">Ollama generation</h3>
+              <label className="grid gap-1 text-sm">
+                Max reply tokens (<span className="font-mono text-xs">num_predict</span>)
+                <Input
+                  type="number"
+                  min={-1}
+                  max={131072}
+                  value={settings.ollama.numPredict}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    setSettings((p) => ({
+                      ...p,
+                      ollama: {
+                        ...p.ollama,
+                        numPredict: Number.isFinite(v) ? Math.trunc(v) : p.ollama.numPredict
+                      }
+                    }));
+                  }}
+                />
+                <span className="text-[11px] text-muted leading-snug">
+                  Caps how long a single reply can grow before Ollama stops cleanly. Use <strong>-1</strong> for the model/Ollama default.
+                  If <code className="font-mono text-[10px]">NOVA_OLLAMA_NUM_PREDICT</code> is set in the environment, it overrides this field.
+                </span>
+              </label>
+              <label className="grid gap-1 text-sm">
+                keep_alive
+                <Input
+                  value={settings.ollama.keepAlive}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      ollama: { ...p.ollama, keepAlive: e.target.value.slice(0, 32) }
+                    }))
+                  }
+                  placeholder="30m"
+                />
+                <span className="text-[11px] text-muted leading-snug">
+                  How long Ollama keeps the loaded model in memory after a request (e.g.{" "}
+                  <code className="font-mono text-[10px]">30m</code>, <code className="font-mono text-[10px]">5m</code>,{" "}
+                  <code className="font-mono text-[10px]">0</code>). If{" "}
+                  <code className="font-mono text-[10px]">NOVA_OLLAMA_KEEP_ALIVE</code> is set, it overrides this field.
+                </span>
+              </label>
+            </div>
             <div className="grid gap-2 md:grid-cols-3">
               <label className="grid gap-1 text-sm">
                 Ollama default model
@@ -1243,7 +1288,7 @@ export default function SettingsPage() {
                       if (id === OLLAMA_PROVIDER_DISABLED_VALUE) {
                         const next: SettingsState = {
                           ...p,
-                          ollama: { disabled: true },
+                          ollama: { ...p.ollama, disabled: true },
                           models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, ollama: "" } }
                         };
                         return {
@@ -1253,7 +1298,7 @@ export default function SettingsPage() {
                       }
                       return {
                         ...p,
-                        ollama: { disabled: false },
+                        ollama: { ...p.ollama, disabled: false },
                         models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, ollama: id } }
                       };
                     })
@@ -2522,7 +2567,17 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
     delegatedFolders: value?.delegatedFolders ?? DEFAULT_SETTINGS.delegatedFolders,
     requireApprovals: value?.requireApprovals ?? DEFAULT_SETTINGS.requireApprovals,
     activeProvider: value?.activeProvider ?? DEFAULT_SETTINGS.activeProvider,
-    ollama: { disabled: ollamaDisabled },
+    ollama: {
+      disabled: ollamaDisabled,
+      numPredict:
+        typeof value?.ollama?.numPredict === "number" && Number.isFinite(value.ollama.numPredict)
+          ? Math.trunc(value.ollama.numPredict)
+          : DEFAULT_SETTINGS.ollama.numPredict,
+      keepAlive:
+        typeof value?.ollama?.keepAlive === "string" && value.ollama.keepAlive.trim().length > 0
+          ? value.ollama.keepAlive.trim().slice(0, 32)
+          : DEFAULT_SETTINGS.ollama.keepAlive
+    },
     lmstudio: { disabled: lmstudioDisabled },
     web: {
       loginEnabled: value?.web?.loginEnabled ?? DEFAULT_SETTINGS.web.loginEnabled,
@@ -2657,7 +2712,7 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
     skillSettings: value?.skillSettings ?? DEFAULT_SETTINGS.skillSettings
   };
   let merged: SettingsState = { ...draft };
-  if (merged.activeProvider === "ollama") merged = { ...merged, ollama: { disabled: false } };
+  if (merged.activeProvider === "ollama") merged = { ...merged, ollama: { ...merged.ollama, disabled: false } };
   if (merged.activeProvider === "lmstudio") merged = { ...merged, lmstudio: { disabled: false } };
   if (merged.activeProvider === "copilot") merged = { ...merged, copilot: { ...merged.copilot, disabled: false } };
   const wb = merged.skillSettings["website-builder"] as Record<string, unknown> | undefined;

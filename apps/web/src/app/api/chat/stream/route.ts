@@ -22,7 +22,8 @@ export async function POST(request: Request) {
         phoneNumber: payload.phoneNumber,
         imageUrl: payload.imageUrl,
         model: payload.model
-      })
+      }),
+      signal: request.signal
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "upstream connection failed";

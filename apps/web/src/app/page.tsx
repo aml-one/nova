@@ -4,7 +4,7 @@
 import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { FaBrain, FaCheck, FaCopy, FaFloppyDisk, FaPenToSquare, FaPlus, FaRotateRight, FaSpinner, FaTrash, FaXmark } from "react-icons/fa6";
+import { FaBrain, FaCheck, FaCopy, FaFloppyDisk, FaPenToSquare, FaPlus, FaRotateRight, FaStop, FaTrash, FaXmark } from "react-icons/fa6";
 import { Card } from "../components/ui/card";
 import { Textarea } from "../components/ui/textarea";
 import { Select } from "../components/ui/select";
@@ -105,6 +105,7 @@ export default function HomePage() {
   const [streamPhase, setStreamPhase] = useState<StreamPhase>("thinking");
   const webSearchDepthRef = useRef(0);
   const lastStreamRawRef = useRef("");
+  const streamAbortRef = useRef<AbortController | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [lastCopiedTurnId, setLastCopiedTurnId] = useState<string | null>(null);
@@ -371,11 +372,17 @@ export default function HomePage() {
     };
   }, []);
 
+  function stopGeneration(): void {
+    streamAbortRef.current?.abort();
+  }
+
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     const trimmed = message.trim();
     if (!trimmed || loading) return;
-    const readyUploads = await ensureUploads();
+    const streamAbort = new AbortController();
+    streamAbortRef.current = streamAbort;
+    const readyUploads = await ensureUploads(streamAbort.signal);
     const attachmentLines = readyUploads.length
       ? `\n\nAttached media:\n${readyUploads.map((item) => `- ${item.kind}: ${item.url}`).join("\n")}`
       : "";
@@ -398,6 +405,12 @@ export default function HomePage() {
         thinkingCollapsed: false
       }
     ]);
+    if (streamAbort.signal.aborted) {
+      setTurns((prev) => prev.filter((t) => t.id !== userTurn.id && t.id !== assistantId));
+      setLoading(false);
+      streamAbortRef.current = null;
+      return;
+    }
     try {
       const startedAt = Date.now();
       const response = await fetch("/api/chat/stream", {
@@ -406,7 +419,8 @@ export default function HomePage() {
         body: JSON.stringify({
           message: composedMessage,
           imageUrl: toAgentVisionImageUrl(readyUploads.find((item) => item.kind === "image")?.url)
-        })
+        }),
+        signal: streamAbort.signal
       });
       if (!response.ok || !response.body) {
         const data = (await response.json().catch(() => ({}))) as { error?: string };
@@ -414,13 +428,16 @@ export default function HomePage() {
           prev.map((turn) =>
             turn.id === assistantId
               ? { ...turn, text: `Error: ${data.error ?? "Request failed"}`, thinkingText: undefined }
-              : turn
+              : turn.id === userTurn.id
+                ? { ...turn, isPending: false }
+                : turn
           )
         );
         return;
       }
       const streamResult = await readSseStream(
         response.body,
+        streamAbort.signal,
         (partialText) => {
           lastStreamRawRef.current = partialText;
           if (webSearchDepthRef.current > 0) {
@@ -487,25 +504,50 @@ export default function HomePage() {
       setTurns((prev) => prev.map((turn) => (turn.id === userTurn.id ? { ...turn, isPending: false } : turn)));
       setUploads([]);
     } catch (error) {
-      const raw = error instanceof Error ? error.message : "Unknown error";
-      const hint =
-        /fetch failed|failed to fetch/i.test(raw)
-          ? " Check that agent-core is running and NOVA_AGENT_API_URL matches where it listens."
-          : "";
-      setTurns((prev) =>
-        prev.map((turn) =>
-          turn.id === assistantId
-            ? { ...turn, text: `Error: ${raw}${hint}`, thinkingText: undefined }
-            : turn
-        )
-      );
+      const aborted =
+        (error instanceof DOMException && error.name === "AbortError") ||
+        (error instanceof Error &&
+          (error.name === "AbortError" || /aborted a request|AbortError/i.test(error.message)));
+      if (aborted) {
+        const { visible, thinking } = extractThinking({ text: lastStreamRawRef.current });
+        const base = visible.trim() || "(no text yet)";
+        setTurns((prev) =>
+          prev.map((turn) =>
+            turn.id === assistantId
+              ? {
+                  ...turn,
+                  text: `${base}\n\n_Stopped._`,
+                  thinkingText: thinking?.trim() || undefined
+                }
+              : turn.id === userTurn.id
+                ? { ...turn, isPending: false }
+                : turn
+          )
+        );
+      } else {
+        const raw = error instanceof Error ? error.message : "Unknown error";
+        const hint =
+          /fetch failed|failed to fetch/i.test(raw)
+            ? " Check that agent-core is running and NOVA_AGENT_API_URL matches where it listens."
+            : "";
+        setTurns((prev) =>
+          prev.map((turn) =>
+            turn.id === assistantId
+              ? { ...turn, text: `Error: ${raw}${hint}`, thinkingText: undefined }
+              : turn.id === userTurn.id
+                ? { ...turn, isPending: false }
+                : turn
+          )
+        );
+      }
     } finally {
       setStreamPhase("thinking");
       setLoading(false);
+      streamAbortRef.current = null;
     }
   }
 
-  async function ensureUploads(): Promise<MediaItem[]> {
+  async function ensureUploads(signal?: AbortSignal): Promise<MediaItem[]> {
     const latestDone = uploads
       .map((item) => item.uploaded)
       .filter((item): item is MediaItem => Boolean(item));
@@ -513,6 +555,9 @@ export default function HomePage() {
     if (!queued.length) return latestDone;
     const newlyUploaded: MediaItem[] = [];
     for (const item of queued) {
+      if (signal?.aborted) {
+        throw new DOMException("Aborted", "AbortError");
+      }
       const uploaded = await uploadOne(item);
       if (uploaded) newlyUploaded.push(uploaded);
     }
@@ -712,16 +757,6 @@ export default function HomePage() {
             >
               <FaTrash className="h-5 w-5" />
             </Button>
-            {loading ? (
-              <button
-                type="button"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-ui border bg-surface2"
-                title="Nova is streaming"
-                disabled
-              >
-                <FaSpinner className="h-3.5 w-3.5 animate-spin text-slate-600" />
-              </button>
-            ) : null}
           </div>
         </div>
         <div
@@ -974,6 +1009,21 @@ export default function HomePage() {
           ))}
         </div>
         <form onSubmit={onSubmit} className="mt-3 shrink-0 space-y-2">
+          {loading ? (
+            <div className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-rose-500/50 bg-pastelRed/40 px-3 py-2 dark:bg-rose-950/35">
+              <span className="min-w-0 text-sm font-medium text-slate-900 dark:text-slate-100">Nova is generating a reply…</span>
+              <Button
+                type="button"
+                tone="red"
+                className="h-9 shrink-0 px-4 text-sm font-semibold"
+                onClick={() => stopGeneration()}
+                title="Stop immediately"
+              >
+                <FaStop className="mr-2 inline h-3.5 w-3.5" />
+                Stop
+              </Button>
+            </div>
+          ) : null}
           <div
             className={cn(
               "rounded-ui border border-dashed p-3 text-sm transition",
@@ -1060,9 +1110,9 @@ export default function HomePage() {
             rows={4}
             placeholder="Ask Nova to do something..."
           />
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+              <span className="min-w-0 text-xs text-muted">
                 Tip: commands like <code>/run ...</code> can execute shell tasks when command mode is enabled.
               </span>
               <label className="flex items-center gap-1 text-xs text-muted">
@@ -1098,17 +1148,24 @@ export default function HomePage() {
               </Link>
               {uploadedMedia.length > 0 ? <Badge tone="pink">{uploadedMedia.length} media ready</Badge> : null}
             </div>
-            <div className="flex h-8 w-[4.75rem] shrink-0 items-center justify-end">
-              <Button
-                type="submit"
-                tone="green"
-                className={cn(
-                  "h-8 w-[4.5rem] px-3 text-sm transition-opacity",
-                  !loading && message.trim().length > 0 ? "opacity-100" : "pointer-events-none opacity-0 invisible"
-                )}
-              >
-                Send
-              </Button>
+            <div className="flex h-8 min-w-[4.75rem] shrink-0 items-center justify-end">
+              {loading ? (
+                <Button type="button" tone="red" className="h-8 px-3 text-sm" onClick={() => stopGeneration()} title="Stop immediately">
+                  <FaStop className="mr-1.5 inline h-3.5 w-3.5" />
+                  Stop
+                </Button>
+              ) : (
+                <Button
+                  type="submit"
+                  tone="green"
+                  className={cn(
+                    "h-8 w-[4.5rem] px-3 text-sm transition-opacity",
+                    message.trim().length > 0 ? "opacity-100" : "pointer-events-none opacity-0 invisible"
+                  )}
+                >
+                  Send
+                </Button>
+              )}
             </div>
           </div>
         </form>
@@ -1339,6 +1396,7 @@ function parseHexColor(hex: string): { r: number; g: number; b: number } | null 
 
 async function readSseStream(
   body: ReadableStream<Uint8Array>,
+  signal: AbortSignal | undefined,
   onPartial: (text: string) => void,
   onActivity?: (evt: { kind: string; phase: "start" | "end" }) => void
 ): Promise<{ text: string; firstTokenMs?: number; provider?: string; model?: string; hideProviderModel?: boolean; providerTps?: number }> {
@@ -1354,7 +1412,24 @@ async function readSseStream(
   let model: string | undefined;
   let hideProviderModel = false;
   let providerTps: number | undefined;
+
+  const onAbort = () => {
+    void reader.cancel(new DOMException("Aborted", "AbortError"));
+  };
+  if (signal) {
+    if (signal.aborted) {
+      void reader.cancel(new DOMException("Aborted", "AbortError"));
+      throw new DOMException("Aborted", "AbortError");
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
+
+  try {
   while (true) {
+    if (signal?.aborted) {
+      await reader.cancel(new DOMException("Aborted", "AbortError")).catch(() => undefined);
+      throw new DOMException("Aborted", "AbortError");
+    }
     const { value, done } = await reader.read();
     if (done) break;
     sseBuffer += decoder.decode(value, { stream: true });
@@ -1399,8 +1474,10 @@ async function readSseStream(
             fullText += payload.token;
             onPartial(fullText);
           }
-          if (eventName === "done" && payload.reply) {
-            fullText = payload.reply;
+          if (eventName === "done" && payload.reply != null && String(payload.reply).length > 0) {
+            const replyStr = String(payload.reply);
+            // Never replace a longer streamed buffer with a shorter final payload (server/token cap bugs).
+            fullText = replyStr.length >= fullText.length ? replyStr : fullText;
             provider = payload.provider ?? provider;
             model = payload.model ?? model;
             hideProviderModel = payload.hideProviderModelInStats === true;
@@ -1419,4 +1496,9 @@ async function readSseStream(
     }
   }
   return { text: fullText, firstTokenMs, provider, model, hideProviderModel, providerTps };
+  } finally {
+    if (signal) {
+      signal.removeEventListener("abort", onAbort);
+    }
+  }
 }

@@ -332,3 +332,50 @@ function formatBinary(bytes: number): string {
   const precision = size >= 100 ? 0 : size >= 10 ? 1 : 2;
   return `${size.toFixed(precision)}${units[idx]}`;
 }
+
+/** True when the user is asking for real disk / volume free space on the Nova host (not trivia about the word "space"). */
+export function detectHostDiskSpaceIntent(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (t.length === 0 || t.length > 4000) return false;
+  if (/\bdf\s*-?h?\b/.test(t)) return true;
+  if (/\bhow\s+much\b/.test(t) && /\b(space|disk|storage)\b/.test(t) && /\b(free|left|available)\b/.test(t)) return true;
+  if (/\b(free|available|left)\b/.test(t) && /\b(space|disk|storage|drive|volume)\b/.test(t)) return true;
+  if (/\b(disk|storage|drive|volume|filesystem)\b/.test(t) && /\b(free|available|usage|capacity|full|empty)\b/.test(t)) {
+    return true;
+  }
+  if (/\bon\s+your\s+(computer|machine|host|pc|laptop|system)\b/.test(t) && /\b(space|disk|storage|free|drive)\b/.test(t)) {
+    return true;
+  }
+  if (/\bhard\s+drive\b|\bhd\b|\bssd\b|\bmount(ed)?\s+point\b/.test(t) && /\b(free|space|usage)\b/.test(t)) {
+    return true;
+  }
+  return false;
+}
+
+export async function runHostDiskSpaceCollection(
+  executor: CommandExecutor,
+  shell: { timeoutMs: number; maxOutputBytes: number }
+): Promise<string> {
+  const timeoutMs = Math.min(30_000, Math.max(5000, shell.timeoutMs));
+  const maxBytes = shell.maxOutputBytes;
+  const platform = process.platform;
+  if (platform === "win32") {
+    return await runSnippet(
+      executor,
+      "Disk (Win32)",
+      "powershell -NoProfile -Command \"Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | Select-Object DeviceID,FreeSpace,Size | Format-Table -AutoSize | Out-String -Width 200\"",
+      timeoutMs,
+      maxBytes
+    );
+  }
+  return await runSnippet(executor, "Disk (df -h)", "df -h", timeoutMs, maxBytes);
+}
+
+export function formatHostDiskSpaceReply(raw: string): string {
+  const body = raw.trim();
+  return (
+    `Nova ran **real disk usage** on the machine where agent-core runs (stdout from \`df -h\` or WMI — not invented):\n\n` +
+    `\`\`\`text\n${body}\n\`\`\`\n\n` +
+    `_If you expected your laptop’s disks, this only matches that host if Nova is running there._`
+  );
+}

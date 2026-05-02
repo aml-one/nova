@@ -96,7 +96,9 @@ const DEFAULT_SETTINGS: AppSettings = {
       process.env.NOVA_OLLAMA_THINK?.trim().toLowerCase() === "true" || process.env.NOVA_OLLAMA_THINK?.trim() === "1"
   },
   ollama: {
-    disabled: process.env.NOVA_OLLAMA_DISABLED === "false" ? false : true
+    disabled: process.env.NOVA_OLLAMA_DISABLED === "false" ? false : true,
+    numPredict: defaultOllamaNumPredictFromEnv(),
+    keepAlive: process.env.NOVA_OLLAMA_KEEP_ALIVE?.trim() || "30m"
   },
   lmstudio: {
     disabled: process.env.NOVA_LMSTUDIO_DISABLED === "false" ? false : true
@@ -127,10 +129,33 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   offlineMode: {
     enabled: process.env.NOVA_OFFLINE_MODE === "true"
-  }
-  ,
+  },
   skillSettings: {}
 };
+
+function defaultOllamaNumPredictFromEnv(): number {
+  const raw = process.env.NOVA_OLLAMA_NUM_PREDICT?.trim();
+  if (!raw) return 8192;
+  const p = Number(raw);
+  if (!Number.isFinite(p)) return 8192;
+  if (p === -1) return -1;
+  if (p < 1) return 8192;
+  return Math.min(131072, Math.trunc(p));
+}
+
+function normalizeOllamaNumPredict(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return 8192;
+  const n = Math.trunc(raw);
+  if (n === -1) return -1;
+  if (n < 1) return 8192;
+  return Math.min(131072, n);
+}
+
+function normalizeOllamaKeepAlive(raw: unknown): string {
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (!s) return "30m";
+  return s.slice(0, 32);
+}
 
 function mergeSkillSettings(
   current: Record<string, Record<string, unknown>>,
@@ -260,7 +285,13 @@ export class SettingsService {
         labelPrefix: update.identityBackup?.labelPrefix ?? current.identityBackup.labelPrefix
       },
       ollama: {
-        disabled: update.ollama?.disabled ?? current.ollama.disabled
+        disabled: update.ollama?.disabled ?? current.ollama.disabled,
+        numPredict:
+          typeof update.ollama?.numPredict === "number" && Number.isFinite(update.ollama.numPredict)
+            ? update.ollama.numPredict
+            : current.ollama.numPredict,
+        keepAlive:
+          typeof update.ollama?.keepAlive === "string" ? update.ollama.keepAlive : current.ollama.keepAlive
       },
       lmstudio: {
         disabled: update.lmstudio?.disabled ?? current.lmstudio.disabled
@@ -467,7 +498,9 @@ export class SettingsService {
         ollamaThinkingEnabled: settings.models?.ollamaThinkingEnabled === true
       },
       ollama: {
-        disabled: settings.ollama?.disabled !== false
+        disabled: settings.ollama?.disabled !== false,
+        numPredict: normalizeOllamaNumPredict(settings.ollama?.numPredict),
+        keepAlive: normalizeOllamaKeepAlive(settings.ollama?.keepAlive)
       },
       lmstudio: {
         disabled: settings.lmstudio?.disabled !== false

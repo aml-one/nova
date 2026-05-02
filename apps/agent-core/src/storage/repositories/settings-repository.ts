@@ -101,6 +101,10 @@ export type AppSettings = {
   ollama: {
     /** When true (default), Ollama is excluded from routing and health pings. */
     disabled: boolean;
+    /** Ollama `num_predict` (max new tokens per reply). `-1` lets Ollama/model use its default. */
+    numPredict: number;
+    /** Ollama `keep_alive` (e.g. `30m`, `5m`, `0`). */
+    keepAlive: string;
   };
   lmstudio: {
     /** When true (default), LM Studio is excluded from routing and health pings. */
@@ -321,7 +325,15 @@ export class SettingsRepository {
           ollamaThinkingEnabled: parsed.models?.ollamaThinkingEnabled === true
         },
         ollama: {
-          disabled: parsed.ollama?.disabled !== false
+          disabled: parsed.ollama?.disabled !== false,
+          numPredict:
+            typeof parsed.ollama?.numPredict === "number" && Number.isFinite(parsed.ollama.numPredict)
+              ? Math.trunc(parsed.ollama.numPredict)
+              : 8192,
+          keepAlive:
+            typeof parsed.ollama?.keepAlive === "string" && parsed.ollama.keepAlive.trim().length > 0
+              ? parsed.ollama.keepAlive.trim().slice(0, 32)
+              : "30m"
         },
         lmstudio: {
           disabled: parsed.lmstudio?.disabled !== false

@@ -10,11 +10,24 @@ import { SelfImprovementLoop } from "../improvement/self-improvement-loop.js";
 import { CommandExecutor } from "../execution/command-executor.js";
 import { evaluateCommandPolicy } from "../execution/policy.js";
 import {
+  detectHostDiskSpaceIntent,
   detectHostDiagnosticsIntent,
+  formatHostDiskSpaceReply,
   type HostDiagnosticsScope,
   implicitHostDiagnosticsShellAllowed,
+  runHostDiskSpaceCollection,
   runHostDiagnosticsCollection
 } from "../execution/host-diagnostics.js";
+import {
+  buildOllamaInventoryMarkdown,
+  detectOllamaInventoryIntent,
+  formatOllamaInventoryReply
+} from "../execution/ollama-inventory.js";
+import {
+  implicitShellAutoEnabled,
+  planImplicitReadOnlyShell,
+  runImplicitShellPlan
+} from "../execution/implicit-auto-shell.js";
 import { detectHostTimeIntent, formatNovaLocalTimeSentence, runHostTimeCollection } from "../execution/host-time.js";
 import {
   detectSkillAuthoringIntent,
@@ -39,6 +52,24 @@ import { getDatabase } from "../storage/sqlite.js";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 
 const MAX_HOST_DIAG_APPENDIX_CHARS = 12_000;
+
+/** Injected after persona on every channel—hard guard against fabricated “tool” output. */
+const INTEGRITY_SYSTEM_GUARD =
+  "Never fabricate or role-play data as if it were real measurements or command output: no fake terminal/bash/PowerShell blocks, " +
+  "no invented stdout, file listings, JSON/API bodies, URLs, versions, disk/CPU/RAM/GPU numbers, installed packages or model names, " +
+  "or claims that you ran a shell command unless Nova actually returned that output in this conversation. " +
+  "Ground truth = user-pasted text, Nova-injected read-only blocks in this message, real skill/tool results, or clearly labeled general knowledge (not live host facts). " +
+  "When Nova appends automatic read-only shell output below, treat it as authoritative host facts from Nova (not your own invention). " +
+  "If you need live host or environment facts you do not have: say you do not have them; suggest the user run `/run <allowlisted command>` when shell is enabled for them, " +
+  "or use an enabled skill (e.g. web search for public web facts), or ask one short clarifying question—never fill gaps with plausible fiction.";
+
+function mergeToolTimings(hostDiagnosticsMs: number, implicitShellMs: number): Record<string, number> | undefined {
+  if (hostDiagnosticsMs <= 0 && implicitShellMs <= 0) return undefined;
+  const out: Record<string, number> = {};
+  if (hostDiagnosticsMs > 0) out.hostDiagnosticsMs = hostDiagnosticsMs;
+  if (implicitShellMs > 0) out.implicitShellMs = implicitShellMs;
+  return out;
+}
 
 function shouldTryLocalModelAfterChatError(message: string): boolean {
   if (/copilot provider is not configured/i.test(message)) {
@@ -364,6 +395,54 @@ export class TaskOrchestrator {
       }
     }
 
+    let hostDiskMs = 0;
+    let implicitShellAppendix = "";
+    let implicitShellMs = 0;
+    if (detectHostDiskSpaceIntent(input.text) && implicitHostDiagnosticsShellAllowed(input.accessProfile)) {
+      const diskStarted = Date.now();
+      const diskRaw = await runHostDiskSpaceCollection(this.deps.commandExecutor, runtimeSettings.shell);
+      hostDiskMs = Date.now() - diskStarted;
+      const cleaned = diskRaw.trim();
+      const looksLikeDf = /filesystem|^\/dev\/|\/system\/volumes|devfs|map auto_/i.test(cleaned);
+      const looksLikeWinDisk = /deviceid|[a-z]:\\/i.test(cleaned);
+      const looksUsable =
+        cleaned.length > 40 &&
+        !cleaned.includes("(timed out)") &&
+        !/\(empty\)/i.test(cleaned) &&
+        (looksLikeDf || looksLikeWinDisk);
+      if (looksUsable) {
+        const diskReply = formatHostDiskSpaceReply(cleaned);
+        this.deps.memoryService.appendTurn(userId, input.text, diskReply);
+        this.recordRunHistory({
+          runId,
+          userId,
+          channel: input.channel,
+          inputText: input.text,
+          outputText: diskReply,
+          success: true,
+          correlationId,
+          latencyMs: Date.now() - startedAt,
+          provider: "host-disk",
+          tokenInCount: estimateTokens(input.text),
+          tokenOutCount: estimateTokens(diskReply),
+          toolTimingsMs: { hostDiskMs }
+        });
+        this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+        this.thoughtLog.append({
+          category: "chat",
+          title: "Host disk (auto)",
+          content: cleaned.slice(0, 400)
+        });
+        this.deps.auditLog.append({
+          runId,
+          actor: userId,
+          action: "host_disk_auto",
+          data: { ms: String(hostDiskMs), correlationId }
+        });
+        return diskReply;
+      }
+    }
+
     let hostDiagnosticsAppendix = "";
     let hostDiagnosticsMs = 0;
     const diagnosticsIntent = detectHostDiagnosticsIntent(input.text);
@@ -408,7 +487,7 @@ export class TaskOrchestrator {
         provider: "host-diagnostics",
         tokenInCount: estimateTokens(input.text),
         tokenOutCount: estimateTokens(diagnosticsReply),
-        toolTimingsMs: hostDiagnosticsMs > 0 ? { hostDiagnosticsMs } : {}
+        toolTimingsMs: mergeToolTimings(hostDiagnosticsMs, implicitShellMs) ?? {}
       });
       this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
       this.thoughtLog.append({
@@ -417,6 +496,102 @@ export class TaskOrchestrator {
         content: diagnosticsReply.slice(0, 320)
       });
       return diagnosticsReply;
+    }
+
+    if (detectOllamaInventoryIntent(input.text)) {
+      if (runtimeSettings.ollama.disabled === true) {
+        const blocked =
+          "Ollama is disabled in Nova Settings (Models → Ollama default model → **Disabled**). Enable Ollama and pick a default model before I can list tags from the API.";
+        this.deps.memoryService.appendTurn(userId, input.text, blocked);
+        this.recordRunHistory({
+          runId,
+          userId,
+          channel: input.channel,
+          inputText: input.text,
+          outputText: blocked,
+          success: false,
+          correlationId,
+          latencyMs: Date.now() - startedAt,
+          provider: "ollama-inventory",
+          tokenInCount: estimateTokens(input.text),
+          tokenOutCount: estimateTokens(blocked),
+          toolTimingsMs: mergeToolTimings(hostDiagnosticsMs, implicitShellMs) ?? {}
+        });
+        this.thoughtLog.append({ category: "chat", title: "Ollama inventory skipped", content: "provider disabled" });
+        return blocked;
+      }
+      const { markdown, baseUrl } = await buildOllamaInventoryMarkdown(runtimeSettings);
+      if (!markdown.trim()) {
+        const fail =
+          `I could not read **GET ${baseUrl}/api/tags** from Ollama. Check that Ollama is running and that **Settings → Vision → Ollama vision base URL** (or **OLLAMA_BASE_URL**) points at the same host your terminal uses. I will not invent a model list.`;
+        this.deps.memoryService.appendTurn(userId, input.text, fail);
+        this.recordRunHistory({
+          runId,
+          userId,
+          channel: input.channel,
+          inputText: input.text,
+          outputText: fail,
+          success: false,
+          correlationId,
+          latencyMs: Date.now() - startedAt,
+          provider: "ollama-inventory",
+          tokenInCount: estimateTokens(input.text),
+          tokenOutCount: estimateTokens(fail),
+          toolTimingsMs: mergeToolTimings(hostDiagnosticsMs, implicitShellMs) ?? {}
+        });
+        this.thoughtLog.append({ category: "chat", title: "Ollama inventory failed", content: baseUrl });
+        return fail;
+      }
+      const invReply = formatOllamaInventoryReply({
+        baseUrl,
+        markdown,
+        defaultChatModel: runtimeSettings.models.defaultByProvider.ollama,
+        activeProvider: runtimeSettings.activeProvider
+      });
+      this.deps.memoryService.appendTurn(userId, input.text, invReply);
+      this.recordRunHistory({
+        runId,
+        userId,
+        channel: input.channel,
+        inputText: input.text,
+        outputText: invReply,
+        success: true,
+        correlationId,
+        latencyMs: Date.now() - startedAt,
+        provider: "ollama-inventory",
+        tokenInCount: estimateTokens(input.text),
+        tokenOutCount: estimateTokens(invReply),
+        toolTimingsMs: mergeToolTimings(hostDiagnosticsMs, implicitShellMs) ?? {}
+      });
+      this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+      this.thoughtLog.append({ category: "chat", title: "Ollama inventory (API)", content: baseUrl });
+      return invReply;
+    }
+
+    if (
+      implicitShellAutoEnabled() &&
+      !diagnosticsIntent &&
+      implicitHostDiagnosticsShellAllowed(input.accessProfile)
+    ) {
+      const plan = planImplicitReadOnlyShell(input.text);
+      if (plan) {
+        const t0 = Date.now();
+        implicitShellAppendix = await runImplicitShellPlan(this.deps.commandExecutor, plan, runtimeSettings.shell);
+        implicitShellMs = Date.now() - t0;
+        if (implicitShellAppendix.trim()) {
+          this.deps.auditLog.append({
+            runId,
+            actor: userId,
+            action: "implicit_shell_auto",
+            data: { reason: plan.reason, command: plan.command, ms: String(implicitShellMs), correlationId }
+          });
+          this.thoughtLog.append({
+            category: "chat",
+            title: "Implicit read-only shell",
+            content: `${plan.command} · ${plan.reason}`.slice(0, 200)
+          });
+        }
+      }
     }
 
     const activeProvider = runtimeSettings.activeProvider;
@@ -431,13 +606,18 @@ export class TaskOrchestrator {
         ? `${diagRaw.slice(0, MAX_HOST_DIAG_APPENDIX_CHARS)}\n\n[truncated to ${MAX_HOST_DIAG_APPENDIX_CHARS} chars for model context]`
         : diagRaw;
     const timeVoiceHint =
-      preferLocalForHostTime && truncatedDiag.length === 0
+      preferLocalForHostTime && truncatedDiag.length === 0 && !implicitShellAppendix.trim()
         ? "\n\nNova voice: Speak as Nova in first person—never imply a separate user phone, taskbar, or device. If you cannot state the time, ask in one short sentence for city, country, or UTC offset only—never suggest checking hardware or other assistants."
         : "";
+    let composedUser = input.text;
+    if (implicitShellAppendix.trim()) {
+      composedUser += `\n\n---\nRead-only shell (Nova ran automatically for this question):\n${implicitShellAppendix.trim()}`;
+    }
+    if (truncatedDiag.length > 0) {
+      composedUser += `\n\n---\nHost diagnostics (read-only, collected automatically by Nova):\n${truncatedDiag}`;
+    }
     const userMessageForModel =
-      truncatedDiag.length > 0
-        ? `${input.text}\n\n---\nHost diagnostics (read-only, collected automatically by Nova):\n${truncatedDiag}`
-        : `${input.text}${timeVoiceHint}`;
+      truncatedDiag.length > 0 || implicitShellAppendix.trim() ? composedUser + timeVoiceHint : `${input.text}${timeVoiceHint}`;
     const unresolvedVisionRef = this.resolveUnresolvedVisionReference(input.text, input.imageUrl, runtimeSettings);
     if (unresolvedVisionRef) {
       this.deps.memoryService.appendTurn(userId, input.text, unresolvedVisionRef);
@@ -453,7 +633,7 @@ export class TaskOrchestrator {
         provider: "vision-guard",
         tokenInCount: estimateTokens(input.text),
         tokenOutCount: estimateTokens(unresolvedVisionRef),
-        toolTimingsMs: hostDiagnosticsMs > 0 ? { hostDiagnosticsMs } : {}
+        toolTimingsMs: mergeToolTimings(hostDiagnosticsMs, implicitShellMs) ?? {}
       });
       this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: false });
       this.thoughtLog.append({
@@ -483,7 +663,7 @@ export class TaskOrchestrator {
         provider: "vision-guard",
         tokenInCount: estimateTokens(input.text),
         tokenOutCount: estimateTokens(visionResult.blockedReply),
-        toolTimingsMs: hostDiagnosticsMs > 0 ? { hostDiagnosticsMs } : {}
+        toolTimingsMs: mergeToolTimings(hostDiagnosticsMs, implicitShellMs) ?? {}
       });
       this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: false });
       this.thoughtLog.append({
@@ -496,6 +676,7 @@ export class TaskOrchestrator {
     const visionExtras = visionResult.extras;
     const buildPromptMessages = (userContent: string): ChatMessage[] => [
       { role: "system", content: persona.systemPrompt },
+      { role: "system", content: INTEGRITY_SYSTEM_GUARD },
       ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
       ...(pendingQuestionsForUser.length > 0
         ? [{
@@ -508,7 +689,14 @@ export class TaskOrchestrator {
       { role: "user", content: userContent }
     ];
     const promptMessages = buildPromptMessages(userMessageForModel);
-    const promptMessagesSlim = buildPromptMessages(timeVoiceHint ? `${input.text}${timeVoiceHint}` : input.text);
+    let slimUserContent = input.text;
+    if (implicitShellAppendix.trim()) {
+      slimUserContent += `\n\n---\nRead-only shell (Nova ran automatically for this question):\n${implicitShellAppendix.trim()}`;
+    }
+    if (timeVoiceHint) {
+      slimUserContent += timeVoiceHint;
+    }
+    const promptMessagesSlim = buildPromptMessages(slimUserContent);
 
     const runChat = async (messages: ChatMessage[], model: string | undefined): Promise<ModelResponse> =>
       input.onToken
@@ -579,11 +767,16 @@ export class TaskOrchestrator {
     // Last-resort retry: drop memory/diagnostics only — keep vision system context so image flows are not silently demoted to plain chat.
     if (!result) {
       try {
+        let emergencyUser = input.text;
+        if (implicitShellAppendix.trim()) {
+          emergencyUser += `\n\n---\nRead-only shell (Nova ran automatically for this question):\n${implicitShellAppendix.trim()}`;
+        }
         const emergencyPrompt: ChatMessage[] = [
           { role: "system", content: persona.systemPrompt },
+          { role: "system", content: INTEGRITY_SYSTEM_GUARD },
           ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
           ...visionExtras,
-          { role: "user", content: input.text }
+          { role: "user", content: emergencyUser }
         ];
         result = await runLocalFirst(emergencyPrompt, undefined);
       } catch (error) {
@@ -608,7 +801,7 @@ export class TaskOrchestrator {
         success: false,
         correlationId,
         latencyMs: failedAfterMs,
-        toolTimingsMs: hostDiagnosticsMs > 0 ? { hostDiagnosticsMs } : {}
+        toolTimingsMs: mergeToolTimings(hostDiagnosticsMs, implicitShellMs) ?? {}
       });
       this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: false });
       this.thoughtLog.append({
@@ -638,7 +831,7 @@ export class TaskOrchestrator {
       firstTokenMs: result.firstTokenMs,
       tokensPerSecond: computeTokensPerSecond(result.content, Date.now() - startedAt),
       costUsd: estimateCostUsd(result.provider, estimateTokens(result.content), runtimeSettings.costGovernor),
-      toolTimingsMs: hostDiagnosticsMs > 0 ? { hostDiagnosticsMs } : {}
+      toolTimingsMs: mergeToolTimings(hostDiagnosticsMs, implicitShellMs) ?? {}
     });
     this.deps.improvement.recordOutcome({
       runId,
