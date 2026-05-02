@@ -285,7 +285,7 @@ export class ModelRouter {
           await provider.chat({
             messages: [{ role: "user", content: "Reply with exactly the word PONG and nothing else." }],
             model: modelTried,
-            maxTokens: 24,
+            maxTokens: 128,
             temperature: 0
           });
           chatOk = true;

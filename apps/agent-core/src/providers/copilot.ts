@@ -51,7 +51,8 @@ export class CopilotProvider implements ModelProvider {
       apiKey,
       messages: request.messages,
       temperature: request.temperature,
-      maxTokens: request.maxTokens
+      maxTokens: request.maxTokens,
+      extraHeaders: githubCopilotApiExtraHeaders(baseUrl)
     });
   }
 

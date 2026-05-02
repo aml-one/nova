@@ -3,8 +3,28 @@ import type { ChatRequest, ModelProvider, ModelResponse, ProviderHealth } from "
 type OllamaChatResponse = {
   message?: {
     content?: string;
+    /** Present on thinking-capable models when `think` was left enabled. */
+    thinking?: string;
+    reasoning?: string;
   };
 };
+
+function ollamaAssistantText(message: OllamaChatResponse["message"]): string {
+  if (!message) return "";
+  const raw =
+    message.content?.trim() ||
+    message.thinking?.trim() ||
+    message.reasoning?.trim() ||
+    "";
+  return raw;
+}
+
+function ollamaThinkFlag(): boolean | undefined {
+  const raw = process.env.NOVA_OLLAMA_THINK?.trim().toLowerCase();
+  if (raw === "true" || raw === "1") return true;
+  if (raw === "false" || raw === "0") return false;
+  return false;
+}
 
 export class OllamaProvider implements ModelProvider {
   readonly name = "ollama";
@@ -39,6 +59,7 @@ export class OllamaProvider implements ModelProvider {
         model: request.model ?? this.model,
         messages: request.messages,
         stream: false,
+        think: ollamaThinkFlag(),
         keep_alive: this.keepAlive,
         options: {
           temperature: request.temperature ?? 0.2,
@@ -51,7 +72,7 @@ export class OllamaProvider implements ModelProvider {
       throw new Error(`ollama chat failed with status ${response.status}`);
     }
     const payload = (await response.json()) as OllamaChatResponse;
-    const content = payload.message?.content?.trim();
+    const content = ollamaAssistantText(payload.message);
     if (!content) {
       throw new Error("ollama returned empty content");
     }
@@ -73,6 +94,7 @@ export class OllamaProvider implements ModelProvider {
         model: request.model ?? this.model,
         messages: request.messages,
         stream: true,
+        think: ollamaThinkFlag(),
         keep_alive: this.keepAlive,
         options: {
           temperature: request.temperature ?? 0.2,
@@ -98,8 +120,15 @@ export class OllamaProvider implements ModelProvider {
         const trimmed = line.trim();
         if (!trimmed) continue;
         try {
-          const payload = JSON.parse(trimmed) as { message?: { content?: string }; done?: boolean };
-          const token = payload.message?.content ?? "";
+          const payload = JSON.parse(trimmed) as {
+            message?: { content?: string; thinking?: string; reasoning?: string };
+            done?: boolean;
+          };
+          const token =
+            payload.message?.content ??
+            payload.message?.thinking ??
+            payload.message?.reasoning ??
+            "";
           if (!token) continue;
           if (firstTokenMs === undefined) {
             firstTokenMs = Date.now() - startedAt;

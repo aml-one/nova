@@ -39,7 +39,18 @@ export async function chatViaOpenAICompatible(
   });
 
   if (!response.ok) {
-    throw new Error(`${options.provider} request failed with status ${response.status}`);
+    const bodyText = await response.text();
+    let hint = bodyText.slice(0, 400).replace(/\s+/g, " ").trim();
+    try {
+      const errJson = JSON.parse(bodyText) as { error?: { message?: string }; message?: string };
+      const msg = errJson.error?.message ?? errJson.message;
+      if (msg) hint = msg;
+    } catch {
+      // keep truncated body
+    }
+    throw new Error(
+      `${options.provider} request failed with status ${response.status}${hint ? `: ${hint}` : ""}`
+    );
   }
 
   const payload = (await response.json()) as OpenAIResponse;
@@ -74,8 +85,22 @@ export async function streamViaOpenAICompatible(
       stream: true
     })
   });
-  if (!response.ok || !response.body) {
-    throw new Error(`${options.provider} stream failed with status ${response.status}`);
+  if (!response.ok) {
+    const raw = await response.text();
+    let detail = raw.slice(0, 500).replace(/\s+/g, " ").trim();
+    try {
+      const errJson = JSON.parse(raw) as { error?: { message?: string }; message?: string };
+      const msg = errJson.error?.message ?? errJson.message;
+      if (msg) detail = msg;
+    } catch {
+      // keep truncated text
+    }
+    throw new Error(
+      `${options.provider} stream failed with status ${response.status}${detail ? `: ${detail}` : ""}`
+    );
+  }
+  if (!response.body) {
+    throw new Error(`${options.provider} stream missing response body`);
   }
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
