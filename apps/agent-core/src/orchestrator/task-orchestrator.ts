@@ -999,21 +999,83 @@ function stableCohortBucket(userId: string): number {
 }
 
 function formatHostDiagnosticsReply(scope: HostDiagnosticsScope, report: string): string {
-  const label =
-    scope === "cpu"
-      ? "CPU"
-      : scope === "memory"
-        ? "RAM"
-        : scope === "gpu"
-          ? "GPU"
-          : "CPU/RAM/GPU";
   const hostOs = process.platform === "win32" ? "Windows" : process.platform === "darwin" ? "macOS" : "Linux";
+  const normalizedReport = normalizeDiagnosticsReport(report);
   return [
-    `I checked this host directly via Nova shell tools. Detected OS: ${hostOs}.`,
-    `Requested scope: ${label}.`,
+    `OS: ${hostOs}`,
     "",
     "```",
-    report.trim(),
+    normalizedReport,
     "```"
   ].join("\n");
+}
+
+function normalizeDiagnosticsReport(report: string): string {
+  const rawLines = report
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/\s+$/g, ""));
+  const out: string[] = [];
+  for (let i = 0; i < rawLines.length; i += 1) {
+    let line = rawLines[i];
+    // CPU (Darwin): -> CPU:
+    line = line.replace(/^([A-Za-z0-9 _./-]+?)\s+\([^)]+\):\s*$/, "$1:");
+    // brand:\nApple M4 Max -> brand: Apple M4 Max
+    if (/^[^:]+:\s*$/.test(line)) {
+      let j = i + 1;
+      while (j < rawLines.length && rawLines[j].trim() === "") j += 1;
+      if (j < rawLines.length && rawLines[j].trim().length > 0 && !/^[^:]+:\s*$/.test(rawLines[j])) {
+        out.push(`${line} ${rawLines[j].trim()}`);
+        i = j;
+        continue;
+      }
+    }
+    const kv = /^(\s*[^:]+:\s*)(\d+)\s*$/.exec(line);
+    if (kv) {
+      const keyPrefix = kv[1];
+      const key = keyPrefix.toLowerCase();
+      const value = Number(kv[2]);
+      const converted = convertMemoryNumberForKey(key, value);
+      if (converted) {
+        out.push(`${keyPrefix}${converted}`);
+        continue;
+      }
+    }
+    out.push(line);
+  }
+  return out.join("\n").trim();
+}
+
+function convertMemoryNumberForKey(key: string, value: number): string | null {
+  const isMemoryish =
+    key.includes("mem") ||
+    key.includes("memory") ||
+    key.includes("ram") ||
+    key.includes("vram") ||
+    key.includes("adapterram");
+  if (!isMemoryish || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  // WMI Win32_OperatingSystem uses KiB for these fields.
+  if (key.includes("totalvisiblememorysize") || key.includes("freephysicalmemory")) {
+    return formatBinarySize(value * 1024);
+  }
+  // NVIDIA query fields commonly report MiB.
+  if (key.includes("memory.total") || key.includes("memory.used")) {
+    return formatBinarySize(value * 1024 * 1024);
+  }
+  // Default to bytes (Darwin hw.memsize, AdapterRAM, etc).
+  return formatBinarySize(value);
+}
+
+function formatBinarySize(bytes: number): string {
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let size = bytes;
+  let idx = 0;
+  while (size >= 1024 && idx < units.length - 1) {
+    size /= 1024;
+    idx += 1;
+  }
+  const precision = size >= 100 ? 0 : size >= 10 ? 1 : 2;
+  return `${size.toFixed(precision)} ${units[idx]}`;
 }
