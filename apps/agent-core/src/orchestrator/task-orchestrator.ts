@@ -92,6 +92,8 @@ export class TaskOrchestrator {
     accessProfile?: ChannelAccessProfile;
     model?: string;
     onToken?: (token: string) => void;
+    /** Optional UI phases for streaming clients (e.g. SSE `activity` events). */
+    onActivity?: (evt: { kind: string; phase: "start" | "end" }) => void;
   }): Promise<string> {
     this.inFlightCount += 1;
     this.lastActivityAt = Date.now();
@@ -249,52 +251,57 @@ export class TaskOrchestrator {
     const perplexicaQuery = detectPerplexicaSearchIntent(input.text);
     const perplexicaSkill = this.deps.skillRegistry.get("perplexica-websearch");
     if (perplexicaQuery && perplexicaSkill) {
+      input.onActivity?.({ kind: "web-search", phase: "start" });
       try {
-        const cfg = (runtimeSettings.skillSettings["perplexica-websearch"] ?? {}) as Record<string, unknown>;
-        const result = (await this.deps.skillRegistry.run("perplexica-websearch", {
-          query: perplexicaQuery,
-          mode: "search",
-          settings: {
-            baseUrl: String(cfg.baseUrl ?? "http://127.0.0.1:3008"),
-            timeoutMs: Number(cfg.timeoutMs ?? 30000),
-            maxSources: Number(cfg.maxSources ?? 6),
-            focusMode: String(cfg.focusMode ?? "webSearch"),
-            optimizationMode: String(cfg.optimizationMode ?? "speed"),
-            stream: cfg.stream === true
+        try {
+          const cfg = (runtimeSettings.skillSettings["perplexica-websearch"] ?? {}) as Record<string, unknown>;
+          const result = (await this.deps.skillRegistry.run("perplexica-websearch", {
+            query: perplexicaQuery,
+            mode: "search",
+            settings: {
+              baseUrl: String(cfg.baseUrl ?? "http://127.0.0.1:3008"),
+              timeoutMs: Number(cfg.timeoutMs ?? 30000),
+              maxSources: Number(cfg.maxSources ?? 6),
+              focusMode: String(cfg.focusMode ?? "webSearch"),
+              optimizationMode: String(cfg.optimizationMode ?? "speed"),
+              stream: cfg.stream === true
+            }
+          })) as { formatted?: string; answer?: string; sources?: Array<{ title?: string; url?: string }> };
+          const reply =
+            String(result.formatted ?? "").trim() ||
+            buildPerplexicaFallbackResult(String(result.answer ?? ""), result.sources ?? []);
+          if (reply.trim()) {
+            this.deps.memoryService.appendTurn(userId, input.text, reply);
+            this.recordRunHistory({
+              runId,
+              userId,
+              channel: input.channel,
+              inputText: input.text,
+              outputText: reply,
+              success: true,
+              correlationId,
+              latencyMs: Date.now() - startedAt,
+              provider: "skill-perplexica",
+              tokenInCount: estimateTokens(input.text),
+              tokenOutCount: estimateTokens(reply)
+            });
+            this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+            this.thoughtLog.append({
+              category: "chat",
+              title: "Perplexica web search",
+              content: perplexicaQuery.slice(0, 220)
+            });
+            return reply;
           }
-        })) as { formatted?: string; answer?: string; sources?: Array<{ title?: string; url?: string }> };
-        const reply =
-          String(result.formatted ?? "").trim() ||
-          buildPerplexicaFallbackResult(String(result.answer ?? ""), result.sources ?? []);
-        if (reply.trim()) {
-          this.deps.memoryService.appendTurn(userId, input.text, reply);
-          this.recordRunHistory({
-            runId,
-            userId,
-            channel: input.channel,
-            inputText: input.text,
-            outputText: reply,
-            success: true,
-            correlationId,
-            latencyMs: Date.now() - startedAt,
-            provider: "skill-perplexica",
-            tokenInCount: estimateTokens(input.text),
-            tokenOutCount: estimateTokens(reply)
-          });
-          this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+        } catch (error) {
           this.thoughtLog.append({
             category: "chat",
-            title: "Perplexica web search",
-            content: perplexicaQuery.slice(0, 220)
+            title: "Perplexica failed, fallback to model",
+            content: error instanceof Error ? error.message : String(error)
           });
-          return reply;
         }
-      } catch (error) {
-        this.thoughtLog.append({
-          category: "chat",
-          title: "Perplexica failed, fallback to model",
-          content: error instanceof Error ? error.message : String(error)
-        });
+      } finally {
+        input.onActivity?.({ kind: "web-search", phase: "end" });
       }
     }
 

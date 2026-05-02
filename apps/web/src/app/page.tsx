@@ -39,6 +39,9 @@ type ChatTurn = {
   };
   isPending?: boolean;
 };
+
+type StreamPhase = "thinking" | "reasoning" | "web-search";
+
 type ChatSession = {
   id: string;
   title: string;
@@ -99,6 +102,9 @@ export default function HomePage() {
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [sendOnEnter, setSendOnEnter] = useState(false);
+  const [streamPhase, setStreamPhase] = useState<StreamPhase>("thinking");
+  const webSearchDepthRef = useRef(0);
+  const lastStreamRawRef = useRef("");
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [lastCopiedTurnId, setLastCopiedTurnId] = useState<string | null>(null);
@@ -379,6 +385,9 @@ export default function HomePage() {
     setMessage("");
     setLoading(true);
     setLiveThinking("Planning response...");
+    webSearchDepthRef.current = 0;
+    lastStreamRawRef.current = "";
+    setStreamPhase("thinking");
     const assistantId = randomId();
     setTurns((prev) => [
       ...prev,
@@ -410,21 +419,45 @@ export default function HomePage() {
         );
         return;
       }
-      const streamResult = await readSseStream(response.body, (partialText) => {
-        const { visible, thinking } = extractThinking({ text: partialText });
-        setTurns((prev) =>
-          prev.map((turn) =>
-            turn.id === assistantId
-              ? {
-                  ...turn,
-                  text: visible,
-                  attachments: extractMediaFromText(visible),
-                  thinkingText: thinking || undefined
-                }
-              : turn
-          )
-        );
-      });
+      const streamResult = await readSseStream(
+        response.body,
+        (partialText) => {
+          lastStreamRawRef.current = partialText;
+          if (webSearchDepthRef.current > 0) {
+            setStreamPhase("web-search");
+          } else if (isInsideReasoningStream(partialText)) {
+            setStreamPhase("reasoning");
+          } else {
+            setStreamPhase("thinking");
+          }
+          const { visible, thinking } = extractThinking({ text: partialText });
+          setTurns((prev) =>
+            prev.map((turn) =>
+              turn.id === assistantId
+                ? {
+                    ...turn,
+                    text: visible,
+                    attachments: extractMediaFromText(visible),
+                    thinkingText: thinking || undefined
+                  }
+                : turn
+            )
+          );
+        },
+        (evt) => {
+          if (evt.kind !== "web-search") return;
+          if (evt.phase === "start") {
+            webSearchDepthRef.current += 1;
+            setStreamPhase("web-search");
+          } else {
+            webSearchDepthRef.current = Math.max(0, webSearchDepthRef.current - 1);
+            if (webSearchDepthRef.current === 0) {
+              const raw = lastStreamRawRef.current;
+              setStreamPhase(isInsideReasoningStream(raw) ? "reasoning" : "thinking");
+            }
+          }
+        }
+      );
       const { visible, thinking, firstTokenMs, provider, model: modelName, hideProviderModel, providerTps } = extractThinking(streamResult);
       const elapsedMs = Math.max(1, Date.now() - startedAt);
       const tokenCount = estimateTokens(visible);
@@ -467,6 +500,7 @@ export default function HomePage() {
         )
       );
     } finally {
+      setStreamPhase("thinking");
       setLoading(false);
     }
   }
@@ -747,17 +781,47 @@ export default function HomePage() {
                   !(turn.thinkingText?.trim()) ? (
                     <div className="space-y-2">
                       <div className="text-xs font-semibold text-muted">Nova is working</div>
-                      <div className="nova-thinking-row-active flex items-center justify-between rounded-full border border-blue-400/60 bg-blue-500/15 px-3 py-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="nova-thinking-orb h-3.5 w-3.5 rounded-full border border-blue-300/80" />
-                          <span className="text-xs font-medium">Composing your reply…</span>
-                        </div>
-                        <span className="flex items-center gap-1.5">
-                          <span className="nova-thinking-dot-1 h-1.5 w-1.5 rounded-full bg-blue-300" />
-                          <span className="nova-thinking-dot-2 h-1.5 w-1.5 rounded-full bg-blue-300" />
-                          <span className="nova-thinking-dot-3 h-1.5 w-1.5 rounded-full bg-blue-300" />
-                        </span>
-                      </div>
+                      {(
+                        [
+                          { phase: "thinking" as const, label: "Thinking" },
+                          { phase: "reasoning" as const, label: "Reasoning" },
+                          { phase: "web-search" as const, label: "Web search" }
+                        ] as const
+                      ).map(({ phase, label }) => {
+                        const active = streamPhase === phase;
+                        return (
+                          <div
+                            key={phase}
+                            className={cn(
+                              "flex items-center justify-between rounded-full border px-3 py-1.5 transition-all",
+                              active
+                                ? "nova-thinking-row-active border-blue-400/60 bg-blue-500/15"
+                                : "border-slate-400/35 bg-surface opacity-70"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={cn(
+                                  "h-3.5 w-3.5 rounded-full border",
+                                  active ? "nova-thinking-orb border-blue-300/80" : "border-slate-400/70 bg-slate-400/40"
+                                )}
+                              />
+                              <span className="text-xs font-medium">{label}</span>
+                            </div>
+                            <span className="flex items-center gap-1.5">
+                              <span
+                                className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-1 bg-blue-300" : "bg-slate-400/70")}
+                              />
+                              <span
+                                className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-2 bg-blue-300" : "bg-slate-400/70")}
+                              />
+                              <span
+                                className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-3 bg-blue-300" : "bg-slate-400/70")}
+                              />
+                            </span>
+                          </div>
+                        );
+                      })}
                       {!liveThinkingCollapsed ? (
                         <div className="rounded-ui border bg-surface p-2 text-[11px] text-muted">
                           <div className="mb-0.5 flex items-center justify-between">
@@ -1192,6 +1256,22 @@ async function fileToBase64(file: File): Promise<string> {
   return btoa(binary);
 }
 
+/** True while the stream has an opened reasoning tag without its closing tag yet (partial stream safe). */
+function isInsideReasoningStream(full: string): boolean {
+  const lower = full.toLowerCase();
+  const pairs: Array<[string, string]> = [
+    ["<thinking>", "</thinking>"],
+    ["<think>", "</think>"]
+  ];
+  for (const [open, close] of pairs) {
+    const o = lower.lastIndexOf(open);
+    if (o < 0) continue;
+    const c = lower.lastIndexOf(close);
+    if (c < o) return true;
+  }
+  return false;
+}
+
 function extractThinking(input: {
   text: string;
   firstTokenMs?: number;
@@ -1209,12 +1289,18 @@ function extractThinking(input: {
   providerTps?: number;
 } {
   const text = input.text;
-  const pattern = /<thinking>([\s\S]*?)<\/thinking>/gi;
   const thinkingParts: string[] = [];
-  const visible = text.replace(pattern, (_, thought: string) => {
-    thinkingParts.push(thought.trim());
-    return "";
-  });
+  const patterns = [
+    /<thinking>([\s\S]*?)<\/thinking>/gi,
+    /<think>([\s\S]*?)<\/redacted_thinking>/gi
+  ];
+  let visible = text;
+  for (const pattern of patterns) {
+    visible = visible.replace(pattern, (_, thought: string) => {
+      thinkingParts.push(thought.trim());
+      return "";
+    });
+  }
   return {
     visible: visible.trim(),
     thinking: thinkingParts.join("\n\n").trim(),
@@ -1267,7 +1353,8 @@ function parseHexColor(hex: string): { r: number; g: number; b: number } | null 
 
 async function readSseStream(
   body: ReadableStream<Uint8Array>,
-  onPartial: (text: string) => void
+  onPartial: (text: string) => void,
+  onActivity?: (evt: { kind: string; phase: "start" | "end" }) => void
 ): Promise<{ text: string; firstTokenMs?: number; provider?: string; model?: string; hideProviderModel?: boolean; providerTps?: number }> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -1312,6 +1399,12 @@ async function readSseStream(
             provider = payload.provider;
             model = payload.model;
             hideProviderModel = payload.hideProviderModelInStats === true;
+          }
+          if (eventName === "activity") {
+            const act = payload as { kind?: string; phase?: string };
+            if (act.kind && (act.phase === "start" || act.phase === "end")) {
+              onActivity?.({ kind: act.kind, phase: act.phase });
+            }
           }
           if (eventName === "token" && payload.token) {
             if (firstTokenMs === undefined) {

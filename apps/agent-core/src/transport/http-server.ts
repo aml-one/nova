@@ -841,6 +841,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
             model: payload.model,
             onToken: (token) => {
               response.write(`event: token\ndata: ${JSON.stringify({ token })}\n\n`);
+            },
+            onActivity: (evt) => {
+              response.write(`event: activity\ndata: ${JSON.stringify(evt)}\n\n`);
             }
           });
           const runMeta = getDatabase()

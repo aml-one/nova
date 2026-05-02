@@ -21,7 +21,11 @@ const ENDPOINTS: EndpointItem[] = [
   { method: "GET", path: "/api/personas/versions?personaId=default&rewritesOnly=true", note: "Persona rewrite history only." },
   { method: "GET", path: "/api/chat/history?limit=100", note: "Recent chat run records." },
   { method: "POST", path: "/api/chat", note: "Non-streaming chat request." },
-  { method: "POST", path: "/api/chat/stream", note: "Streaming chat request (SSE)." },
+  {
+    method: "POST",
+    path: "/api/chat/stream",
+    note: "Streaming chat (SSE): events start, activity (e.g. web-search), token, done, error."
+  },
   { method: "GET", path: "/api/providers/catalog", note: "Provider models and setup status." },
   { method: "GET", path: "/api/skills/manifests", note: "Loaded skill manifests." },
   { method: "POST", path: "/api/camera/test", note: "Test one configured camera." }
