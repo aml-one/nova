@@ -1,95 +1,209 @@
+import type { AppSettings } from "../storage/repositories/settings-repository.js";
+import { normalizeOllamaBaseUrl, ollamaUnloadModel } from "./ollama-vision-swap.js";
+
 type VisionRequest = {
   userPrompt: string;
   imageUrl?: string;
 };
 
-type VisionResult = {
+export type VisionResult = {
   used: boolean;
   provider?: string;
   summary?: string;
 };
 
-type VisionProvider = {
-  name: "lmstudio" | "ollama" | "cloud";
-  analyze: (request: VisionRequest) => Promise<string>;
-  isConfigured: () => boolean;
-};
+type VisionLane = "lmstudio" | "ollama" | "cloud";
 
 export class VisionRouter {
-  private readonly providers: VisionProvider[];
-  private providerPriorityOverride: Array<"lmstudio" | "ollama" | "cloud"> | undefined;
-
-  constructor() {
-    this.providers = [
-      {
-        name: "lmstudio",
-        analyze: (request) =>
-          analyzeViaOpenAICompatible({
-            endpoint: `${process.env.LMSTUDIO_VISION_BASE_URL ?? "http://127.0.0.1:1234/v1"}/chat/completions`,
-            model: process.env.LMSTUDIO_VISION_MODEL ?? "local-vision-model",
-            userPrompt: request.userPrompt,
-            imageUrl: request.imageUrl
-          }),
-        isConfigured: () => Boolean(process.env.LMSTUDIO_VISION_MODEL || process.env.LMSTUDIO_VISION_BASE_URL)
-      },
-      {
-        name: "ollama",
-        analyze: (request) =>
-          analyzeViaOllama({
-            baseUrl: process.env.OLLAMA_VISION_BASE_URL ?? process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434",
-            model: process.env.OLLAMA_VISION_MODEL ?? "llava",
-            userPrompt: request.userPrompt,
-            imageUrl: request.imageUrl
-          }),
-        isConfigured: () => Boolean(process.env.OLLAMA_VISION_MODEL || process.env.OLLAMA_VISION_BASE_URL)
-      },
-      {
-        name: "cloud",
-        analyze: (request) =>
-          analyzeViaOpenAICompatible({
-            endpoint: `${process.env.CLOUD_VISION_BASE_URL ?? ""}/chat/completions`,
-            model: process.env.CLOUD_VISION_MODEL ?? "gpt-4o-mini",
-            apiKey: process.env.CLOUD_VISION_API_KEY,
-            userPrompt: request.userPrompt,
-            imageUrl: request.imageUrl
-          }),
-        isConfigured: () =>
-          Boolean(process.env.CLOUD_VISION_BASE_URL && process.env.CLOUD_VISION_MODEL && process.env.CLOUD_VISION_API_KEY)
-      }
-    ];
+  hasConfiguredProvider(settings: AppSettings): boolean {
+    return (
+      lmstudioVisionConfigured(settings) || ollamaVisionConfigured(settings) || cloudVisionConfigured(settings)
+    );
   }
 
-  hasConfiguredProvider(): boolean {
-    return this.providers.some((provider) => provider.isConfigured());
-  }
-
-  setProviderPriority(priority: Array<"lmstudio" | "ollama" | "cloud">): void {
-    this.providerPriorityOverride = [...priority];
-  }
-
-  async analyze(request: VisionRequest): Promise<VisionResult> {
-    const ordered = this.getOrderedProviders().filter((provider) => provider.isConfigured());
-    for (const provider of ordered) {
-      try {
-        const summary = await provider.analyze(request);
-        if (summary.trim()) {
-          return { used: true, provider: provider.name, summary: summary.trim() };
+  async analyze(request: VisionRequest, settings: AppSettings): Promise<VisionResult> {
+    const order = normalizeVisionOrder(settings.visionProviderPriority);
+    for (const lane of order) {
+      if (lane === "lmstudio" && lmstudioVisionConfigured(settings)) {
+        try {
+          const summary = await analyzeViaOpenAICompatible({
+            endpoint: `${resolveLmstudioVisionBase(settings)}/chat/completions`,
+            model: resolveLmstudioVisionModel(settings),
+            userPrompt: request.userPrompt,
+            imageUrl: request.imageUrl
+          });
+          if (summary.trim()) {
+            return { used: true, provider: "lmstudio", summary: summary.trim() };
+          }
+        } catch {
+          // try next
         }
-      } catch {
-        // try next provider
+      }
+      if (lane === "ollama" && ollamaVisionConfigured(settings)) {
+        try {
+          const baseUrl = resolveOllamaVisionBase(settings);
+          const model = resolveOllamaVisionModel(settings);
+          const runVision = (): Promise<string> =>
+            analyzeViaOllama({
+              baseUrl,
+              model,
+              userPrompt: request.userPrompt,
+              imageUrl: request.imageUrl
+            });
+          const summary = await runWithOptionalOllamaSwap(settings, baseUrl, model, runVision);
+          if (summary.trim()) {
+            return { used: true, provider: "ollama", summary: summary.trim() };
+          }
+        } catch {
+          // try next
+        }
+      }
+      if (lane === "cloud" && cloudVisionConfigured(settings)) {
+        try {
+          const summary = await analyzeViaOpenAICompatible({
+            endpoint: `${resolveCloudVisionBase(settings)}/chat/completions`,
+            model: resolveCloudVisionModel(settings),
+            apiKey: resolveCloudVisionApiKey(settings),
+            userPrompt: request.userPrompt,
+            imageUrl: request.imageUrl
+          });
+          if (summary.trim()) {
+            return { used: true, provider: "cloud", summary: summary.trim() };
+          }
+        } catch {
+          // try next
+        }
       }
     }
     return { used: false };
   }
+}
 
-  private getOrderedProviders(): VisionProvider[] {
-    const priorities =
-      this.providerPriorityOverride ??
-      ((process.env.NOVA_VISION_PROVIDER_PRIORITY ?? "lmstudio,ollama,cloud")
-        .split(",")
-        .map((item) => item.trim().toLowerCase())
-        .filter((item): item is "lmstudio" | "ollama" | "cloud" => item === "lmstudio" || item === "ollama" || item === "cloud"));
-    return [...this.providers].sort((a, b) => priorities.indexOf(a.name) - priorities.indexOf(b.name));
+function normalizeVisionOrder(
+  priority: Array<VisionLane> | undefined
+): Array<VisionLane> {
+  const defaults: Array<VisionLane> = ["lmstudio", "ollama", "cloud"];
+  const raw = Array.isArray(priority) && priority.length > 0 ? priority : defaults;
+  const seen = new Set<VisionLane>();
+  const out: Array<VisionLane> = [];
+  for (const item of raw) {
+    if (item === "lmstudio" || item === "ollama" || item === "cloud") {
+      if (!seen.has(item)) {
+        seen.add(item);
+        out.push(item);
+      }
+    }
+  }
+  for (const d of defaults) {
+    if (!seen.has(d)) out.push(d);
+  }
+  return out;
+}
+
+function lmstudioVisionConfigured(settings: AppSettings): boolean {
+  const v = settings.vision;
+  return Boolean(
+    (v?.lmstudioModel?.trim() ?? "") ||
+      (v?.lmstudioBaseUrl?.trim() ?? "") ||
+      process.env.LMSTUDIO_VISION_MODEL ||
+      process.env.LMSTUDIO_VISION_BASE_URL
+  );
+}
+
+function ollamaVisionConfigured(settings: AppSettings): boolean {
+  const v = settings.vision;
+  return Boolean(
+    (v?.ollamaModel?.trim() ?? "") ||
+      (v?.ollamaBaseUrl?.trim() ?? "") ||
+      process.env.OLLAMA_VISION_MODEL ||
+      process.env.OLLAMA_VISION_BASE_URL
+  );
+}
+
+function cloudVisionConfigured(settings: AppSettings): boolean {
+  const v = settings.vision;
+  const base = (v?.cloudBaseUrl?.trim() ?? "") || (process.env.CLOUD_VISION_BASE_URL ?? "").trim();
+  const model = (v?.cloudModel?.trim() ?? "") || (process.env.CLOUD_VISION_MODEL ?? "").trim();
+  const key = (v?.cloudApiKey?.trim() ?? "") || (process.env.CLOUD_VISION_API_KEY ?? "").trim();
+  return Boolean(base && model && key);
+}
+
+function resolveLmstudioVisionBase(settings: AppSettings): string {
+  const fromSettings = settings.vision?.lmstudioBaseUrl?.trim();
+  if (fromSettings) return fromSettings.replace(/\/+$/, "");
+  const fromEnv = process.env.LMSTUDIO_VISION_BASE_URL ?? process.env.LMSTUDIO_BASE_URL ?? "http://127.0.0.1:1234/v1";
+  return fromEnv.replace(/\/+$/, "");
+}
+
+function resolveLmstudioVisionModel(settings: AppSettings): string {
+  return (
+    settings.vision?.lmstudioModel?.trim() ||
+    process.env.LMSTUDIO_VISION_MODEL ||
+    "local-vision-model"
+  );
+}
+
+function resolveOllamaVisionBase(settings: AppSettings): string {
+  const fromSettings = settings.vision?.ollamaBaseUrl?.trim();
+  if (fromSettings) return normalizeOllamaBaseUrl(fromSettings, "http://127.0.0.1:11434");
+  return normalizeOllamaBaseUrl(
+    process.env.OLLAMA_VISION_BASE_URL || process.env.OLLAMA_BASE_URL,
+    "http://127.0.0.1:11434"
+  );
+}
+
+function resolveOllamaVisionModel(settings: AppSettings): string {
+  return settings.vision?.ollamaModel?.trim() || process.env.OLLAMA_VISION_MODEL || "llava";
+}
+
+function resolveChatOllamaBase(settings: AppSettings): string {
+  return normalizeOllamaBaseUrl(process.env.OLLAMA_BASE_URL, "http://127.0.0.1:11434");
+}
+
+function resolveChatOllamaModel(settings: AppSettings): string {
+  return settings.models.defaultByProvider.ollama.trim() || process.env.OLLAMA_MODEL || "llama3.1";
+}
+
+function resolveCloudVisionBase(settings: AppSettings): string {
+  return (settings.vision?.cloudBaseUrl?.trim() || process.env.CLOUD_VISION_BASE_URL || "").replace(/\/+$/, "");
+}
+
+function resolveCloudVisionModel(settings: AppSettings): string {
+  return settings.vision?.cloudModel?.trim() || process.env.CLOUD_VISION_MODEL || "gpt-4o-mini";
+}
+
+function resolveCloudVisionApiKey(settings: AppSettings): string | undefined {
+  const k = settings.vision?.cloudApiKey?.trim() || process.env.CLOUD_VISION_API_KEY;
+  return k || undefined;
+}
+
+async function runWithOptionalOllamaSwap(
+  settings: AppSettings,
+  visionBase: string,
+  visionModel: string,
+  runVision: () => Promise<string>
+): Promise<string> {
+  const swap = settings.vision?.swapLocalModelsForVision === true;
+  const chatOnOllama =
+    settings.activeProvider === "ollama" && settings.ollama.disabled !== true;
+  if (!swap || !chatOnOllama) {
+    return runVision();
+  }
+  const chatBase = resolveChatOllamaBase(settings);
+  const chatModel = resolveChatOllamaModel(settings);
+  const vBase = normalizeOllamaBaseUrl(visionBase, chatBase);
+  const cBase = normalizeOllamaBaseUrl(chatBase, visionBase);
+  if (vBase !== cBase) {
+    return runVision();
+  }
+  if (!chatModel || chatModel === visionModel) {
+    return runVision();
+  }
+  await ollamaUnloadModel(cBase, chatModel);
+  try {
+    return await runVision();
+  } finally {
+    await ollamaUnloadModel(vBase, visionModel);
   }
 }
 
@@ -136,7 +250,8 @@ async function analyzeViaOllama(input: {
   userPrompt: string;
   imageUrl?: string;
 }): Promise<string> {
-  const response = await fetch(`${input.baseUrl}/api/chat`, {
+  const base = normalizeOllamaBaseUrl(input.baseUrl, "http://127.0.0.1:11434");
+  const response = await fetch(`${base}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

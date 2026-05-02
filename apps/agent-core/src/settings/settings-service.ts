@@ -107,6 +107,16 @@ const DEFAULT_SETTINGS: AppSettings = {
     defaultModel: process.env.COPILOT_MODEL ?? "gpt-4o-mini",
     disabled: process.env.NOVA_COPILOT_DISABLED === "true"
   },
+  vision: {
+    ollamaModel: "",
+    ollamaBaseUrl: "",
+    lmstudioModel: "",
+    lmstudioBaseUrl: "",
+    cloudModel: "",
+    cloudBaseUrl: "",
+    cloudApiKey: "",
+    swapLocalModelsForVision: false
+  },
   updates: {
     enabled: process.env.NOVA_UPDATES_ENABLED === "true",
     checkIntervalMs: Number(process.env.NOVA_UPDATES_INTERVAL_MS ?? String(24 * 60 * 60 * 1000)),
@@ -251,6 +261,16 @@ export class SettingsService {
         apiKey: update.copilot?.apiKey ?? current.copilot.apiKey,
         defaultModel: update.copilot?.defaultModel ?? current.copilot.defaultModel,
         disabled: update.copilot?.disabled ?? current.copilot.disabled
+      },
+      vision: {
+        ollamaModel: update.vision?.ollamaModel ?? current.vision.ollamaModel,
+        ollamaBaseUrl: update.vision?.ollamaBaseUrl ?? current.vision.ollamaBaseUrl,
+        lmstudioModel: update.vision?.lmstudioModel ?? current.vision.lmstudioModel,
+        lmstudioBaseUrl: update.vision?.lmstudioBaseUrl ?? current.vision.lmstudioBaseUrl,
+        cloudModel: update.vision?.cloudModel ?? current.vision.cloudModel,
+        cloudBaseUrl: update.vision?.cloudBaseUrl ?? current.vision.cloudBaseUrl,
+        cloudApiKey: update.vision?.cloudApiKey ?? current.vision.cloudApiKey,
+        swapLocalModelsForVision: update.vision?.swapLocalModelsForVision ?? current.vision.swapLocalModelsForVision
       },
       updates: {
         enabled: update.updates?.enabled ?? current.updates.enabled,
@@ -441,6 +461,16 @@ export class SettingsService {
         defaultModel: String(settings.copilot?.defaultModel ?? "gpt-4o-mini").trim(),
         disabled: settings.copilot?.disabled === true
       },
+      vision: {
+        ollamaModel: String(settings.vision?.ollamaModel ?? "").trim(),
+        ollamaBaseUrl: String(settings.vision?.ollamaBaseUrl ?? "").trim(),
+        lmstudioModel: String(settings.vision?.lmstudioModel ?? "").trim(),
+        lmstudioBaseUrl: String(settings.vision?.lmstudioBaseUrl ?? "").trim(),
+        cloudModel: String(settings.vision?.cloudModel ?? "").trim(),
+        cloudBaseUrl: String(settings.vision?.cloudBaseUrl ?? "").trim(),
+        cloudApiKey: String(settings.vision?.cloudApiKey ?? "").trim(),
+        swapLocalModelsForVision: settings.vision?.swapLocalModelsForVision === true
+      },
       updates: {
         enabled: settings.updates?.enabled === true,
         checkIntervalMs: clampInt(
@@ -469,7 +499,7 @@ function firstEnabledProvider(s: AppSettings): AppSettings["activeProvider"] {
   if (s.ollama.disabled !== true) return "ollama";
   if (s.lmstudio.disabled !== true) return "lmstudio";
   if (s.copilot.disabled !== true) return "copilot";
-  return "ollama";
+  return "copilot";
 }
 
 function normalizeActiveProvider(

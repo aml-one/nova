@@ -8,6 +8,16 @@ type AppSettingsPayload = {
   ollama?: { disabled?: boolean };
   lmstudio?: { disabled?: boolean };
   visionProviderPriority?: Array<"lmstudio" | "ollama" | "cloud">;
+  vision?: {
+    ollamaModel?: string;
+    ollamaBaseUrl?: string;
+    lmstudioModel?: string;
+    lmstudioBaseUrl?: string;
+    cloudModel?: string;
+    cloudBaseUrl?: string;
+    cloudApiKey?: string;
+    swapLocalModelsForVision?: boolean;
+  };
   mediaProviderPriority?: Array<"comfyui" | "cloud">;
   shell?: {
     timeoutMs?: number;

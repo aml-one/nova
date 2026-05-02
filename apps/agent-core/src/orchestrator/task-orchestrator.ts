@@ -108,7 +108,6 @@ export class TaskOrchestrator {
     if (this.deps.modelRouter.getActiveProvider() !== runtimeSettings.activeProvider) {
       this.deps.modelRouter.setActiveProvider(runtimeSettings.activeProvider);
     }
-    this.deps.visionRouter.setProviderPriority(runtimeSettings.visionProviderPriority);
     this.deps.mediaGeneration.setProviderPriority(runtimeSettings.mediaProviderPriority);
 
     const profile = this.deps.userProfiles.get(userId);
@@ -288,7 +287,12 @@ export class TaskOrchestrator {
       truncatedDiag.length > 0
         ? `${input.text}\n\n---\nHost diagnostics (read-only, collected automatically by Nova):\n${truncatedDiag}`
         : input.text;
-    const visionExtras = await this.buildVisionContextIfNeeded(input.text, input.imageUrl, input.accessProfile);
+    const visionExtras = await this.buildVisionContextIfNeeded(
+      input.text,
+      input.imageUrl,
+      input.accessProfile,
+      runtimeSettings
+    );
     const buildPromptMessages = (userContent: string): ChatMessage[] => [
       { role: "system", content: persona.systemPrompt },
       ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
@@ -687,19 +691,23 @@ export class TaskOrchestrator {
 
   private async buildVisionContextIfNeeded(
     userText: string,
-    imageUrl?: string,
-    accessProfile?: ChannelAccessProfile
+    imageUrl: string | undefined,
+    accessProfile: ChannelAccessProfile | undefined,
+    runtimeSettings: AppSettings
   ): Promise<Array<{ role: "system"; content: string }>> {
     const needsVision = isVisionIntent(userText, imageUrl);
-    if (!needsVision || !this.deps.visionRouter.hasConfiguredProvider()) {
+    if (!needsVision || !this.deps.visionRouter.hasConfiguredProvider(runtimeSettings)) {
       return [];
     }
     const skillVision = await this.tryCameraSkillVision(userText, accessProfile);
     const effectivePrompt = skillVision ? `${userText}\nCamera observations: ${skillVision}` : userText;
-    const vision = await this.deps.visionRouter.analyze({
-      userPrompt: effectivePrompt,
-      imageUrl
-    });
+    const vision = await this.deps.visionRouter.analyze(
+      {
+        userPrompt: effectivePrompt,
+        imageUrl
+      },
+      runtimeSettings
+    );
     if (!vision.used || !vision.summary) {
       return skillVision ? [{ role: "system", content: `Vision context (auto): ${skillVision}` }] : [];
     }
@@ -926,6 +934,10 @@ function applyRolloutCohortSettings(userId: string, base: AppSettings): AppSetti
         ...base.costGovernor.providerPricing,
         ...(candidateSettings.costGovernor?.providerPricing ?? {})
       }
+    },
+    vision: {
+      ...base.vision,
+      ...(candidateSettings.vision ?? {})
     }
   };
 }

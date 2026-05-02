@@ -113,6 +113,18 @@ export type AppSettings = {
     /** When true, Nova never routes chat to Copilot (router + catalog skip). */
     disabled: boolean;
   };
+  /** Image/video understanding (separate from chat defaults). Remote base URLs delegate to another host. */
+  vision: {
+    ollamaModel: string;
+    ollamaBaseUrl: string;
+    lmstudioModel: string;
+    lmstudioBaseUrl: string;
+    cloudModel: string;
+    cloudBaseUrl: string;
+    cloudApiKey: string;
+    /** When true and chat uses local Ollama, unload the chat model before vision, then unload the vision model after. */
+    swapLocalModelsForVision: boolean;
+  };
   updates: {
     enabled: boolean;
     checkIntervalMs: number;
@@ -144,6 +156,10 @@ export class SettingsRepository {
       const copilotApiKey = copilotApiKeyRaw.startsWith("enc:v1:")
         ? decryptValue(copilotApiKeyRaw) ?? ""
         : copilotApiKeyRaw;
+      const visionCloudKeyRaw = typeof parsed.vision?.cloudApiKey === "string" ? parsed.vision.cloudApiKey : "";
+      const visionCloudApiKey = visionCloudKeyRaw.startsWith("enc:v1:")
+        ? decryptValue(visionCloudKeyRaw) ?? ""
+        : visionCloudKeyRaw;
       return {
         delegatedFolders: Array.isArray(parsed.delegatedFolders)
           ? parsed.delegatedFolders.filter((entry): entry is string => typeof entry === "string")
@@ -316,6 +332,16 @@ export class SettingsRepository {
           defaultModel: typeof parsed.copilot?.defaultModel === "string" ? parsed.copilot.defaultModel : "",
           disabled: parsed.copilot?.disabled === true
         },
+        vision: {
+          ollamaModel: typeof parsed.vision?.ollamaModel === "string" ? parsed.vision.ollamaModel : "",
+          ollamaBaseUrl: typeof parsed.vision?.ollamaBaseUrl === "string" ? parsed.vision.ollamaBaseUrl : "",
+          lmstudioModel: typeof parsed.vision?.lmstudioModel === "string" ? parsed.vision.lmstudioModel : "",
+          lmstudioBaseUrl: typeof parsed.vision?.lmstudioBaseUrl === "string" ? parsed.vision.lmstudioBaseUrl : "",
+          cloudModel: typeof parsed.vision?.cloudModel === "string" ? parsed.vision.cloudModel : "",
+          cloudBaseUrl: typeof parsed.vision?.cloudBaseUrl === "string" ? parsed.vision.cloudBaseUrl : "",
+          cloudApiKey: visionCloudApiKey,
+          swapLocalModelsForVision: parsed.vision?.swapLocalModelsForVision === true
+        },
         updates: {
           enabled: parsed.updates?.enabled === true,
           checkIntervalMs: Number(parsed.updates?.checkIntervalMs ?? 0),
@@ -344,6 +370,10 @@ export class SettingsRepository {
       copilot: {
         ...settings.copilot,
         apiKey: settings.copilot.apiKey ? encryptValue(settings.copilot.apiKey) : ""
+      },
+      vision: {
+        ...settings.vision,
+        cloudApiKey: settings.vision.cloudApiKey ? encryptValue(settings.vision.cloudApiKey) : ""
       }
     };
     db.prepare(

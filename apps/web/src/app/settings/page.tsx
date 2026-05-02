@@ -92,6 +92,17 @@ type SettingsState = {
   identityBackup: { enabled: boolean; intervalDays: number; labelPrefix: string };
   models: { defaultByProvider: { ollama: string; lmstudio: string; copilot: string }; ollamaThinkingEnabled: boolean };
   copilot: { baseUrl: string; apiKey: string; defaultModel: string; disabled: boolean };
+  visionProviderPriority: Array<"lmstudio" | "ollama" | "cloud">;
+  vision: {
+    ollamaModel: string;
+    ollamaBaseUrl: string;
+    lmstudioModel: string;
+    lmstudioBaseUrl: string;
+    cloudModel: string;
+    cloudBaseUrl: string;
+    cloudApiKey: string;
+    swapLocalModelsForVision: boolean;
+  };
   updates: { enabled: boolean; checkIntervalMs: number; repoOwner: string; repoName: string; channel: "stable" | "beta"; autoApply: boolean };
   offlineMode: { enabled: boolean };
   skillSettings: Record<string, Record<string, unknown>>;
@@ -164,6 +175,17 @@ const DEFAULT_SETTINGS: SettingsState = {
   identityBackup: { enabled: false, intervalDays: 1, labelPrefix: "nova-core" },
   models: { defaultByProvider: { ollama: "", lmstudio: "", copilot: "" }, ollamaThinkingEnabled: false },
   copilot: { baseUrl: "", apiKey: "", defaultModel: "gpt-4o-mini", disabled: false },
+  visionProviderPriority: ["lmstudio", "ollama", "cloud"],
+  vision: {
+    ollamaModel: "",
+    ollamaBaseUrl: "",
+    lmstudioModel: "",
+    lmstudioBaseUrl: "",
+    cloudModel: "",
+    cloudBaseUrl: "",
+    cloudApiKey: "",
+    swapLocalModelsForVision: false
+  },
   updates: { enabled: false, checkIntervalMs: 1800000, repoOwner: "", repoName: "", channel: "stable", autoApply: false }
   , offlineMode: { enabled: false },
   skillSettings: {}
@@ -220,7 +242,38 @@ function firstAvailableProviderId(s: SettingsState): SettingsState["activeProvid
   if (s.ollama.disabled !== true) return "ollama";
   if (s.lmstudio.disabled !== true) return "lmstudio";
   if (s.copilot.disabled !== true) return "copilot";
-  return "ollama";
+  return "copilot";
+}
+
+function normalizeVisionPriorityWeb(
+  value: Array<"lmstudio" | "ollama" | "cloud"> | undefined
+): Array<"lmstudio" | "ollama" | "cloud"> {
+  const defaults: Array<"lmstudio" | "ollama" | "cloud"> = ["lmstudio", "ollama", "cloud"];
+  const raw = Array.isArray(value) && value.length > 0 ? value : defaults;
+  const seen = new Set<"lmstudio" | "ollama" | "cloud">();
+  const out: Array<"lmstudio" | "ollama" | "cloud"> = [];
+  for (const item of raw) {
+    if (item === "lmstudio" || item === "ollama" || item === "cloud") {
+      if (!seen.has(item)) {
+        seen.add(item);
+        out.push(item);
+      }
+    }
+  }
+  for (const d of defaults) {
+    if (!seen.has(d)) out.push(d);
+  }
+  return out;
+}
+
+function patchVisionPriorityAt(
+  prev: Array<"lmstudio" | "ollama" | "cloud">,
+  index: 0 | 1 | 2,
+  choice: "lmstudio" | "ollama" | "cloud"
+): Array<"lmstudio" | "ollama" | "cloud"> {
+  const next = [...prev];
+  next[index] = choice;
+  return normalizeVisionPriorityWeb(next);
 }
 
 function dedupeCatalogModelsById<T extends { id: string }>(models: T[]): T[] {
@@ -403,6 +456,11 @@ export default function SettingsPage() {
     if (copilotDeviceLoginState !== "authorized") return;
     void loadCatalog();
   }, [copilotDeviceLoginState]);
+
+  useEffect(() => {
+    if (loading) return;
+    void loadCatalog();
+  }, [settings.ollama.disabled, settings.lmstudio.disabled, loading]);
 
   async function loadSettings(): Promise<void> {
     const response = await fetch("/api/settings");
@@ -730,11 +788,20 @@ export default function SettingsPage() {
   const modelOptions = catalog?.models ?? {};
   const websiteBuilderSettings = (settings.skillSettings["website-builder"] ?? {}) as Record<string, unknown>;
   const cameraVisionSettings = (settings.skillSettings["camera-vision"] ?? {}) as Record<string, unknown>;
-  const selectedWebsiteBuilderProvider = String(websiteBuilderSettings.provider ?? settings.activeProvider);
+  const websiteBuilderProviderStored = String(websiteBuilderSettings.provider ?? settings.activeProvider);
+  const websiteBuilderProviderEffective = ((): "ollama" | "lmstudio" | "copilot" => {
+    if (websiteBuilderProviderStored === "ollama" && settings.ollama.disabled === true) return firstAvailableProviderId(settings);
+    if (websiteBuilderProviderStored === "lmstudio" && settings.lmstudio.disabled === true) return firstAvailableProviderId(settings);
+    if (websiteBuilderProviderStored === "copilot" && settings.copilot.disabled === true) return firstAvailableProviderId(settings);
+    if (websiteBuilderProviderStored === "ollama" || websiteBuilderProviderStored === "lmstudio" || websiteBuilderProviderStored === "copilot") {
+      return websiteBuilderProviderStored;
+    }
+    return firstAvailableProviderId(settings);
+  })();
   const selectedWebsiteBuilderModels =
-    selectedWebsiteBuilderProvider === "ollama"
+    websiteBuilderProviderEffective === "ollama"
       ? modelOptions.ollama ?? []
-      : selectedWebsiteBuilderProvider === "lmstudio"
+      : websiteBuilderProviderEffective === "lmstudio"
         ? modelOptions.lmstudio ?? []
         : modelOptions.copilot ?? [];
   const websiteBuilderModel = String(websiteBuilderSettings.model ?? "");
@@ -785,8 +852,8 @@ export default function SettingsPage() {
           </div>
         </div>
         {loading ? <Card>Loading...</Card> : null}
-        <div className="grid gap-4 lg:grid-cols-[220px_1fr]">
-          <Card className="h-fit lg:sticky lg:top-24">
+        <div className="grid items-start gap-4 lg:grid-cols-[220px_1fr]">
+          <Card className="h-fit self-start lg:sticky lg:top-0">
             <div className="mb-2 flex items-center justify-between">
               <h2 className="text-sm font-semibold">Settings Menu</h2>
             </div>
@@ -814,7 +881,7 @@ export default function SettingsPage() {
               ))}
             </div>
           </Card>
-          <div>
+          <div className="min-w-0 self-start">
         {tab === "general" ? (
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">General & Safety</h2>
@@ -1113,7 +1180,17 @@ export default function SettingsPage() {
             <h2 className="text-lg font-semibold">Providers & Model Selection</h2>
             <label className="grid gap-1 text-sm">
               Primary provider
-              <Select value={settings.activeProvider} onChange={(e) => setSettings((p) => ({ ...p, activeProvider: e.target.value as SettingsState["activeProvider"] }))}>
+              <Select
+                value={settings.activeProvider}
+                onChange={(e) => {
+                  const v = e.target.value as SettingsState["activeProvider"];
+                  setSettings((p) => {
+                    if (v === "ollama") return { ...p, activeProvider: "ollama", ollama: { disabled: false } };
+                    if (v === "lmstudio") return { ...p, activeProvider: "lmstudio", lmstudio: { disabled: false } };
+                    return { ...p, activeProvider: "copilot", copilot: { ...p.copilot, disabled: false } };
+                  });
+                }}
+              >
                 <option value="ollama">Ollama</option>
                 <option value="lmstudio">LM Studio</option>
                 <option value="copilot">Copilot</option>
@@ -1245,6 +1322,153 @@ export default function SettingsPage() {
                 </Select>
               </label>
             </div>
+            <div className="space-y-3 rounded-ui border bg-surface2 p-3">
+              <h3 className="text-sm font-semibold">Vision (images / video)</h3>
+              <p className="text-[11px] text-muted leading-snug">
+                Used when Nova detects a vision-style request. Leave model fields empty to use environment defaults (
+                <code className="font-mono text-[10px]">OLLAMA_VISION_*</code>, <code className="font-mono text-[10px]">LMSTUDIO_VISION_*</code>,{" "}
+                <code className="font-mono text-[10px]">CLOUD_VISION_*</code>). Set a <strong>remote base URL</strong> to send vision work to another machine (e.g. home PC) without changing chat routing.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <label className="grid gap-1 text-xs">
+                  Try vision first
+                  <Select
+                    value={settings.visionProviderPriority[0] ?? "lmstudio"}
+                    onChange={(e) =>
+                      setSettings((p) => ({
+                        ...p,
+                        visionProviderPriority: patchVisionPriorityAt(
+                          normalizeVisionPriorityWeb(p.visionProviderPriority),
+                          0,
+                          e.target.value as "lmstudio" | "ollama" | "cloud"
+                        )
+                      }))
+                    }
+                  >
+                    <option value="lmstudio">LM Studio</option>
+                    <option value="ollama">Ollama</option>
+                    <option value="cloud">Cloud (OpenAI-compatible)</option>
+                  </Select>
+                </label>
+                <label className="grid gap-1 text-xs">
+                  Then
+                  <Select
+                    value={settings.visionProviderPriority[1] ?? "ollama"}
+                    onChange={(e) =>
+                      setSettings((p) => ({
+                        ...p,
+                        visionProviderPriority: patchVisionPriorityAt(
+                          normalizeVisionPriorityWeb(p.visionProviderPriority),
+                          1,
+                          e.target.value as "lmstudio" | "ollama" | "cloud"
+                        )
+                      }))
+                    }
+                  >
+                    <option value="lmstudio">LM Studio</option>
+                    <option value="ollama">Ollama</option>
+                    <option value="cloud">Cloud (OpenAI-compatible)</option>
+                  </Select>
+                </label>
+                <label className="grid gap-1 text-xs">
+                  Then
+                  <Select
+                    value={settings.visionProviderPriority[2] ?? "cloud"}
+                    onChange={(e) =>
+                      setSettings((p) => ({
+                        ...p,
+                        visionProviderPriority: patchVisionPriorityAt(
+                          normalizeVisionPriorityWeb(p.visionProviderPriority),
+                          2,
+                          e.target.value as "lmstudio" | "ollama" | "cloud"
+                        )
+                      }))
+                    }
+                  >
+                    <option value="lmstudio">LM Studio</option>
+                    <option value="ollama">Ollama</option>
+                    <option value="cloud">Cloud (OpenAI-compatible)</option>
+                  </Select>
+                </label>
+              </div>
+              <label className="flex items-start gap-2 text-xs">
+                <Checkbox
+                  checked={settings.vision.swapLocalModelsForVision}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      vision: { ...p.vision, swapLocalModelsForVision: e.target.checked }
+                    }))
+                  }
+                />
+                <span>
+                  <span className="font-medium">Unload chat model for vision (local Ollama only)</span>
+                  <span className="mt-0.5 block text-[11px] text-muted leading-snug">
+                    When the primary provider is Ollama and vision runs on the <strong>same</strong> Ollama host as chat, Nova asks Ollama to drop the loaded chat model before the vision call, then drops the vision model afterward. The next chat turn reloads your chat model (first reply may be slightly slower). Ignored if you set a different vision Ollama URL.
+                  </span>
+                </span>
+              </label>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="grid gap-1 text-xs">
+                  Ollama vision model
+                  <Input
+                    value={settings.vision.ollamaModel}
+                    onChange={(e) => setSettings((p) => ({ ...p, vision: { ...p.vision, ollamaModel: e.target.value } }))}
+                    placeholder="e.g. llava (empty = env default)"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs">
+                  Ollama vision base URL (optional remote)
+                  <Input
+                    value={settings.vision.ollamaBaseUrl}
+                    onChange={(e) => setSettings((p) => ({ ...p, vision: { ...p.vision, ollamaBaseUrl: e.target.value } }))}
+                    placeholder="http://192.168.1.50:11434"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs">
+                  LM Studio vision model
+                  <Input
+                    value={settings.vision.lmstudioModel}
+                    onChange={(e) => setSettings((p) => ({ ...p, vision: { ...p.vision, lmstudioModel: e.target.value } }))}
+                    placeholder="empty = env default"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs">
+                  LM Studio vision API base (optional remote)
+                  <Input
+                    value={settings.vision.lmstudioBaseUrl}
+                    onChange={(e) => setSettings((p) => ({ ...p, vision: { ...p.vision, lmstudioBaseUrl: e.target.value } }))}
+                    placeholder="http://host:1234/v1"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs">
+                  Cloud vision model
+                  <Input
+                    value={settings.vision.cloudModel}
+                    onChange={(e) => setSettings((p) => ({ ...p, vision: { ...p.vision, cloudModel: e.target.value } }))}
+                    placeholder="e.g. gpt-4o-mini"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs">
+                  Cloud vision base URL
+                  <Input
+                    value={settings.vision.cloudBaseUrl}
+                    onChange={(e) => setSettings((p) => ({ ...p, vision: { ...p.vision, cloudBaseUrl: e.target.value } }))}
+                    placeholder="https://api.openai.com/v1"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs md:col-span-2">
+                  Cloud vision API key
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    value={settings.vision.cloudApiKey}
+                    onChange={(e) => setSettings((p) => ({ ...p, vision: { ...p.vision, cloudApiKey: e.target.value } }))}
+                    placeholder="Stored encrypted when NOVA_SETTINGS_SECRET is set"
+                  />
+                </label>
+              </div>
+            </div>
             <div className="flex flex-wrap items-center gap-2 rounded-ui border bg-surface2 p-2">
               <Button type="button" tone="green" disabled={modelPingLoading} onClick={() => void runModelConnectivityTest()}>
                 {modelPingLoading ? "Testing…" : "Test model connections"}
@@ -1304,10 +1528,11 @@ export default function SettingsPage() {
                 />
                 Enable smart cost governor
               </label>
-              <div className="grid gap-2 md:grid-cols-2">
-                <label className="grid gap-1 text-sm">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3">
+                <label className="grid min-w-0 flex-1 gap-1 text-sm">
                   <span>Daily budget (USD)</span>
                   <Input
+                    className="h-10 py-0 leading-normal"
                     type="number"
                     min={0}
                     step={0.5}
@@ -1319,13 +1544,11 @@ export default function SettingsPage() {
                       }))
                     }
                   />
-                  <span className="text-[10px] text-muted leading-snug">
-                    Maximum <strong>estimated</strong> spend for today before governor rules kick in (default is often 5). Not a hard cloud invoice — only Nova’s internal estimate vs this number.
-                  </span>
                 </label>
-                <label className="grid gap-1 text-sm">
+                <label className="grid min-w-0 flex-1 gap-1 text-sm">
                   <span>Quality tier</span>
                   <Select
+                    className="h-10 py-0 leading-normal"
                     value={settings.costGovernor.qualityTier}
                     onChange={(e) =>
                       setSettings((p) => ({
@@ -1338,11 +1561,12 @@ export default function SettingsPage() {
                     <option value="balanced">Balanced — baseline estimate</option>
                     <option value="economy">Economy — looser estimate (0.85×); over budget nudges to local defaults</option>
                   </Select>
-                  <span className="text-[10px] text-muted leading-snug">
-                    Fine-tunes how quickly you hit the daily cap; Economy also enables the local-model nudge when over budget.
-                  </span>
                 </label>
               </div>
+              <p className="text-[10px] text-muted leading-snug">
+                <strong>Daily budget:</strong> maximum <strong>estimated</strong> spend for today before governor rules kick in (default is often 5). Not a hard cloud invoice — only Nova’s internal estimate vs this number.{" "}
+                <strong>Quality tier</strong> fine-tunes how quickly you hit the daily cap; Economy also enables the local-model nudge when over budget.
+              </p>
             </div>
             <div className="space-y-2 rounded-ui border bg-surface p-3">
               <h3 className="font-semibold">Copilot quick setup</h3>
@@ -1854,7 +2078,7 @@ export default function SettingsPage() {
               <label className="grid gap-1 text-xs">
                 Website Builder provider
                 <Select
-                  value={selectedWebsiteBuilderProvider}
+                  value={websiteBuilderProviderEffective}
                   onChange={(e) =>
                     setSettings((p) => ({
                       ...p,
@@ -1865,9 +2089,15 @@ export default function SettingsPage() {
                     }))
                   }
                 >
-                  <option value="ollama">Ollama</option>
-                  <option value="lmstudio">LM Studio</option>
-                  <option value="copilot">Copilot</option>
+                  <option value="ollama" disabled={settings.ollama.disabled === true}>
+                    Ollama{settings.ollama.disabled === true ? " (disabled in Models)" : ""}
+                  </option>
+                  <option value="lmstudio" disabled={settings.lmstudio.disabled === true}>
+                    LM Studio{settings.lmstudio.disabled === true ? " (disabled in Models)" : ""}
+                  </option>
+                  <option value="copilot" disabled={settings.copilot.disabled === true}>
+                    Copilot{settings.copilot.disabled === true ? " (disabled in Models)" : ""}
+                  </option>
                 </Select>
               </label>
               <label className="grid gap-1 text-xs">
@@ -2189,6 +2419,19 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
       defaultModel: value?.copilot?.defaultModel ?? DEFAULT_SETTINGS.copilot.defaultModel,
       disabled: value?.copilot?.disabled ?? DEFAULT_SETTINGS.copilot.disabled
     },
+    visionProviderPriority: normalizeVisionPriorityWeb(
+      value?.visionProviderPriority as Array<"lmstudio" | "ollama" | "cloud"> | undefined
+    ),
+    vision: {
+      ollamaModel: value?.vision?.ollamaModel ?? DEFAULT_SETTINGS.vision.ollamaModel,
+      ollamaBaseUrl: value?.vision?.ollamaBaseUrl ?? DEFAULT_SETTINGS.vision.ollamaBaseUrl,
+      lmstudioModel: value?.vision?.lmstudioModel ?? DEFAULT_SETTINGS.vision.lmstudioModel,
+      lmstudioBaseUrl: value?.vision?.lmstudioBaseUrl ?? DEFAULT_SETTINGS.vision.lmstudioBaseUrl,
+      cloudModel: value?.vision?.cloudModel ?? DEFAULT_SETTINGS.vision.cloudModel,
+      cloudBaseUrl: value?.vision?.cloudBaseUrl ?? DEFAULT_SETTINGS.vision.cloudBaseUrl,
+      cloudApiKey: value?.vision?.cloudApiKey ?? DEFAULT_SETTINGS.vision.cloudApiKey,
+      swapLocalModelsForVision: value?.vision?.swapLocalModelsForVision ?? DEFAULT_SETTINGS.vision.swapLocalModelsForVision
+    },
     updates: {
       enabled: value?.updates?.enabled ?? DEFAULT_SETTINGS.updates.enabled,
       checkIntervalMs: value?.updates?.checkIntervalMs ?? DEFAULT_SETTINGS.updates.checkIntervalMs,
@@ -2202,17 +2445,39 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
     },
     skillSettings: value?.skillSettings ?? DEFAULT_SETTINGS.skillSettings
   };
-  let ap = draft.activeProvider;
-  if (ap === "ollama" && draft.ollama.disabled === true) {
-    ap = firstAvailableProviderId(draft);
+  let merged: SettingsState = { ...draft };
+  if (merged.activeProvider === "ollama") merged = { ...merged, ollama: { disabled: false } };
+  if (merged.activeProvider === "lmstudio") merged = { ...merged, lmstudio: { disabled: false } };
+  if (merged.activeProvider === "copilot") merged = { ...merged, copilot: { ...merged.copilot, disabled: false } };
+  const wb = merged.skillSettings["website-builder"] as Record<string, unknown> | undefined;
+  if (wb && typeof wb === "object") {
+    const rawProv = String(wb.provider ?? merged.activeProvider);
+    let fixed = rawProv;
+    if (fixed === "ollama" && merged.ollama.disabled === true) fixed = firstAvailableProviderId(merged);
+    else if (fixed === "lmstudio" && merged.lmstudio.disabled === true) fixed = firstAvailableProviderId(merged);
+    else if (fixed === "copilot" && merged.copilot.disabled === true) fixed = firstAvailableProviderId(merged);
+    else if (fixed !== "ollama" && fixed !== "lmstudio" && fixed !== "copilot") fixed = firstAvailableProviderId(merged);
+    if (fixed !== rawProv) {
+      merged = {
+        ...merged,
+        skillSettings: {
+          ...merged.skillSettings,
+          ["website-builder"]: { ...wb, provider: fixed }
+        }
+      };
+    }
   }
-  if (ap === "lmstudio" && draft.lmstudio.disabled === true) {
-    ap = firstAvailableProviderId(draft);
+  let ap = merged.activeProvider;
+  if (ap === "ollama" && merged.ollama.disabled === true) {
+    ap = firstAvailableProviderId(merged);
   }
-  if (ap === "copilot" && draft.copilot.disabled === true) {
-    ap = firstAvailableProviderId(draft);
+  if (ap === "lmstudio" && merged.lmstudio.disabled === true) {
+    ap = firstAvailableProviderId(merged);
   }
-  return { ...draft, activeProvider: ap };
+  if (ap === "copilot" && merged.copilot.disabled === true) {
+    ap = firstAvailableProviderId(merged);
+  }
+  return { ...merged, activeProvider: ap };
 }
 
 function withOpacity(hex: string, opacityPct: number): string {
