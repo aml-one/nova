@@ -4,7 +4,7 @@ import { SettingsRepository, type AppSettings } from "../storage/repositories/se
 const DEFAULT_SETTINGS: AppSettings = {
   delegatedFolders: [resolvePath(process.cwd())],
   requireApprovals: process.env.NOVA_REQUIRE_APPROVALS === "true",
-  activeProvider: (process.env.NOVA_PROVIDER as "ollama" | "lmstudio" | "copilot" | undefined) ?? "ollama",
+  activeProvider: (process.env.NOVA_PROVIDER as "ollama" | "lmstudio" | "copilot" | undefined) ?? "copilot",
   visionProviderPriority: parseVisionPriority(process.env.NOVA_VISION_PROVIDER_PRIORITY),
   mediaProviderPriority: parseMediaPriority(process.env.NOVA_MEDIA_PROVIDER_PRIORITY),
   shell: {
@@ -94,6 +94,12 @@ const DEFAULT_SETTINGS: AppSettings = {
     },
     ollamaThinkingEnabled:
       process.env.NOVA_OLLAMA_THINK?.trim().toLowerCase() === "true" || process.env.NOVA_OLLAMA_THINK?.trim() === "1"
+  },
+  ollama: {
+    disabled: process.env.NOVA_OLLAMA_DISABLED === "false" ? false : true
+  },
+  lmstudio: {
+    disabled: process.env.NOVA_LMSTUDIO_DISABLED === "false" ? false : true
   },
   copilot: {
     baseUrl: process.env.COPILOT_BASE_URL ?? "",
@@ -226,6 +232,12 @@ export class SettingsService {
         intervalDays: update.identityBackup?.intervalDays ?? current.identityBackup.intervalDays,
         labelPrefix: update.identityBackup?.labelPrefix ?? current.identityBackup.labelPrefix
       },
+      ollama: {
+        disabled: update.ollama?.disabled ?? current.ollama.disabled
+      },
+      lmstudio: {
+        disabled: update.lmstudio?.disabled ?? current.lmstudio.disabled
+      },
       models: {
         defaultByProvider: {
           ollama: update.models?.defaultByProvider?.ollama ?? current.models.defaultByProvider.ollama,
@@ -264,7 +276,7 @@ export class SettingsService {
     return {
       delegatedFolders: delegatedFolders.length > 0 ? delegatedFolders : [resolvePath(process.cwd())],
       requireApprovals: settings.requireApprovals === true,
-      activeProvider: normalizeActiveProvider(settings.activeProvider, settings.copilot?.disabled === true),
+      activeProvider: normalizeActiveProvider(settings.activeProvider, settings),
       visionProviderPriority: normalizeVisionPriority(settings.visionProviderPriority),
       mediaProviderPriority: normalizeMediaPriority(settings.mediaProviderPriority),
       shell: {
@@ -417,6 +429,12 @@ export class SettingsService {
         },
         ollamaThinkingEnabled: settings.models?.ollamaThinkingEnabled === true
       },
+      ollama: {
+        disabled: settings.ollama?.disabled !== false
+      },
+      lmstudio: {
+        disabled: settings.lmstudio?.disabled !== false
+      },
       copilot: {
         baseUrl: String(settings.copilot?.baseUrl ?? "").trim(),
         apiKey: String(settings.copilot?.apiKey ?? "").trim(),
@@ -447,14 +465,29 @@ export class SettingsService {
   }
 }
 
+function firstEnabledProvider(s: AppSettings): AppSettings["activeProvider"] {
+  if (s.ollama.disabled !== true) return "ollama";
+  if (s.lmstudio.disabled !== true) return "lmstudio";
+  if (s.copilot.disabled !== true) return "copilot";
+  return "ollama";
+}
+
 function normalizeActiveProvider(
   value: AppSettings["activeProvider"] | undefined,
-  copilotDisabled?: boolean
+  settings: AppSettings
 ): AppSettings["activeProvider"] {
-  const base: AppSettings["activeProvider"] =
+  const preferred: AppSettings["activeProvider"] =
     value === "lmstudio" || value === "copilot" ? value : "ollama";
-  if (copilotDisabled && base === "copilot") return "ollama";
-  return base;
+  if (preferred === "ollama" && settings.ollama.disabled === true) {
+    return firstEnabledProvider(settings);
+  }
+  if (preferred === "lmstudio" && settings.lmstudio.disabled === true) {
+    return firstEnabledProvider(settings);
+  }
+  if (preferred === "copilot" && settings.copilot.disabled === true) {
+    return firstEnabledProvider(settings);
+  }
+  return preferred;
 }
 
 function normalizeVisionPriority(

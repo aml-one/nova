@@ -1,7 +1,11 @@
 import type { ChatMessage, ChatRequest, ModelResponse, ProviderHealth } from "@nova/sdk/provider";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import { CopilotProvider } from "./copilot.js";
-import { isCopilotIntegrationDisabled } from "./copilot-credentials.js";
+import {
+  isCopilotIntegrationDisabled,
+  isLmStudioIntegrationDisabled,
+  isOllamaIntegrationDisabled
+} from "./provider-integration.js";
 import { LMStudioProvider } from "./lmstudio.js";
 import { OllamaProvider } from "./ollama.js";
 
@@ -57,20 +61,27 @@ export class ModelRouter {
 
   async health(): Promise<Record<string, boolean>> {
     const checks = await Promise.all(
-      this.providers.map(async (provider): Promise<ProviderHealth> => {
+      this.providers.map(async (provider): Promise<ProviderHealth | null> => {
         if (provider.name === "copilot" && isCopilotIntegrationDisabled()) {
-          return { name: "copilot", ok: false, details: "integration disabled in Settings" };
+          return null;
+        }
+        if (provider.name === "ollama" && isOllamaIntegrationDisabled()) {
+          return null;
+        }
+        if (provider.name === "lmstudio" && isLmStudioIntegrationDisabled()) {
+          return null;
         }
         return provider.health();
       })
     );
-    for (const check of checks) {
+    const present = checks.filter((check): check is ProviderHealth => check !== null);
+    for (const check of present) {
       const state = this.state.get(check.name);
       if (state) {
         state.healthy = check.ok;
       }
     }
-    return Object.fromEntries(checks.map((check) => [check.name, check.ok]));
+    return Object.fromEntries(present.map((check) => [check.name, check.ok]));
   }
 
   async chat(messages: ChatMessage[], model?: string): Promise<ModelResponse> {
@@ -84,6 +95,12 @@ export class ModelRouter {
         continue;
       }
       if (provider.name === "copilot" && isCopilotIntegrationDisabled()) {
+        continue;
+      }
+      if (provider.name === "ollama" && isOllamaIntegrationDisabled()) {
+        continue;
+      }
+      if (provider.name === "lmstudio" && isLmStudioIntegrationDisabled()) {
         continue;
       }
       if (providerState.openUntil > Date.now()) {
@@ -113,6 +130,8 @@ export class ModelRouter {
     const preferredOrder = ["ollama", "lmstudio", "copilot"] as const;
     const ordered = preferredOrder
       .filter((name) => name !== "copilot" || !isCopilotIntegrationDisabled())
+      .filter((name) => name !== "ollama" || !isOllamaIntegrationDisabled())
+      .filter((name) => name !== "lmstudio" || !isLmStudioIntegrationDisabled())
       .map((name) => this.providers.find((provider) => provider.name === name))
       .filter((provider): provider is (typeof this.providers)[number] => Boolean(provider));
     let lastError: Error | undefined;
@@ -152,6 +171,12 @@ export class ModelRouter {
       if (provider.name === "copilot" && isCopilotIntegrationDisabled()) {
         continue;
       }
+      if (provider.name === "ollama" && isOllamaIntegrationDisabled()) {
+        continue;
+      }
+      if (provider.name === "lmstudio" && isLmStudioIntegrationDisabled()) {
+        continue;
+      }
       try {
         const response = await provider.streamChat({ messages, model }, onToken);
         providerState.failures = 0;
@@ -179,6 +204,8 @@ export class ModelRouter {
     const preferredOrder = ["ollama", "lmstudio", "copilot"] as const;
     const ordered = preferredOrder
       .filter((name) => name !== "copilot" || !isCopilotIntegrationDisabled())
+      .filter((name) => name !== "ollama" || !isOllamaIntegrationDisabled())
+      .filter((name) => name !== "lmstudio" || !isLmStudioIntegrationDisabled())
       .map((name) => this.providers.find((provider) => provider.name === name))
       .filter((provider): provider is (typeof this.providers)[number] => Boolean(provider));
     let lastError: Error | undefined;
@@ -215,9 +242,16 @@ export class ModelRouter {
   }
 
   private selectProviders(): typeof this.providers {
-    const pool = isCopilotIntegrationDisabled()
-      ? this.providers.filter((provider) => provider.name !== "copilot")
-      : [...this.providers];
+    let pool = [...this.providers];
+    if (isCopilotIntegrationDisabled()) {
+      pool = pool.filter((provider) => provider.name !== "copilot");
+    }
+    if (isOllamaIntegrationDisabled()) {
+      pool = pool.filter((provider) => provider.name !== "ollama");
+    }
+    if (isLmStudioIntegrationDisabled()) {
+      pool = pool.filter((provider) => provider.name !== "lmstudio");
+    }
     const activeFirst = pool.sort((a, b) => {
       if (a.name === this.activeProvider) {
         return -1;
@@ -262,11 +296,12 @@ export class ModelRouter {
     }> = [];
     for (const name of order) {
       if (name === "copilot" && isCopilotIntegrationDisabled()) {
-        results.push({
-          provider: name,
-          healthOk: false,
-          healthDetail: "integration disabled in Settings"
-        });
+        continue;
+      }
+      if (name === "ollama" && isOllamaIntegrationDisabled()) {
+        continue;
+      }
+      if (name === "lmstudio" && isLmStudioIntegrationDisabled()) {
         continue;
       }
       const provider = this.providers.find((p) => p.name === name);

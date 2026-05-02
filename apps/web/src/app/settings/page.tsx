@@ -46,6 +46,8 @@ type SettingsState = {
   delegatedFolders: string[];
   requireApprovals: boolean;
   activeProvider: "ollama" | "lmstudio" | "copilot";
+  ollama: { disabled: boolean };
+  lmstudio: { disabled: boolean };
   web: {
     loginEnabled: boolean;
     hideProviderModelInStats: boolean;
@@ -115,7 +117,9 @@ type SshTestResult = { ok: boolean; detail: string } | null;
 const DEFAULT_SETTINGS: SettingsState = {
   delegatedFolders: [],
   requireApprovals: false,
-  activeProvider: "ollama",
+  activeProvider: "copilot",
+  ollama: { disabled: true },
+  lmstudio: { disabled: true },
   web: {
     loginEnabled: true,
     hideProviderModelInStats: false,
@@ -209,6 +213,15 @@ const COPILOT_PRESETS: Array<{
 
 /** Select value when Copilot routing is turned off (persisted as copilot.disabled). */
 const COPILOT_MODEL_DISABLED_VALUE = "__nova_disabled__";
+const OLLAMA_PROVIDER_DISABLED_VALUE = "__nova_ollama_provider_disabled__";
+const LMSTUDIO_PROVIDER_DISABLED_VALUE = "__nova_lmstudio_provider_disabled__";
+
+function firstAvailableProviderId(s: SettingsState): SettingsState["activeProvider"] {
+  if (s.ollama.disabled !== true) return "ollama";
+  if (s.lmstudio.disabled !== true) return "lmstudio";
+  if (s.copilot.disabled !== true) return "copilot";
+  return "ollama";
+}
 
 function dedupeCatalogModelsById<T extends { id: string }>(models: T[]): T[] {
   const seen = new Set<string>();
@@ -1126,8 +1139,32 @@ export default function SettingsPage() {
             <div className="grid gap-2 md:grid-cols-3">
               <label className="grid gap-1 text-sm">
                 Ollama default model
-                <Select value={settings.models.defaultByProvider.ollama} onChange={(e) => setSettings((p) => ({ ...p, models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, ollama: e.target.value } } }))}>
+                <Select
+                  value={settings.ollama.disabled ? OLLAMA_PROVIDER_DISABLED_VALUE : settings.models.defaultByProvider.ollama}
+                  onChange={(e) =>
+                    setSettings((p) => {
+                      const id = e.target.value;
+                      if (id === OLLAMA_PROVIDER_DISABLED_VALUE) {
+                        const next: SettingsState = {
+                          ...p,
+                          ollama: { disabled: true },
+                          models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, ollama: "" } }
+                        };
+                        return {
+                          ...next,
+                          activeProvider: p.activeProvider === "ollama" ? firstAvailableProviderId(next) : p.activeProvider
+                        };
+                      }
+                      return {
+                        ...p,
+                        ollama: { disabled: false },
+                        models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, ollama: id } }
+                      };
+                    })
+                  }
+                >
                   <option value="">Auto / env default</option>
+                  <option value={OLLAMA_PROVIDER_DISABLED_VALUE}>Disabled — never use Ollama</option>
                   {dedupeCatalogModelsById(modelOptions.ollama ?? []).map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.id}
@@ -1137,8 +1174,34 @@ export default function SettingsPage() {
               </label>
               <label className="grid gap-1 text-sm">
                 LM Studio default model
-                <Select value={settings.models.defaultByProvider.lmstudio} onChange={(e) => setSettings((p) => ({ ...p, models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, lmstudio: e.target.value } } }))}>
+                <Select
+                  value={
+                    settings.lmstudio.disabled ? LMSTUDIO_PROVIDER_DISABLED_VALUE : settings.models.defaultByProvider.lmstudio
+                  }
+                  onChange={(e) =>
+                    setSettings((p) => {
+                      const id = e.target.value;
+                      if (id === LMSTUDIO_PROVIDER_DISABLED_VALUE) {
+                        const next: SettingsState = {
+                          ...p,
+                          lmstudio: { disabled: true },
+                          models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, lmstudio: "" } }
+                        };
+                        return {
+                          ...next,
+                          activeProvider: p.activeProvider === "lmstudio" ? firstAvailableProviderId(next) : p.activeProvider
+                        };
+                      }
+                      return {
+                        ...p,
+                        lmstudio: { disabled: false },
+                        models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, lmstudio: id } }
+                      };
+                    })
+                  }
+                >
                   <option value="">Auto / env default</option>
+                  <option value={LMSTUDIO_PROVIDER_DISABLED_VALUE}>Disabled — never use LM Studio</option>
                   {dedupeCatalogModelsById(modelOptions.lmstudio ?? []).map((m) => (
                     <option key={m.id} value={m.id}>
                       {m.id}
@@ -1154,11 +1217,14 @@ export default function SettingsPage() {
                     setSettings((p) => {
                       const id = e.target.value;
                       if (id === COPILOT_MODEL_DISABLED_VALUE) {
-                        return {
+                        const next: SettingsState = {
                           ...p,
                           copilot: { ...p.copilot, disabled: true, defaultModel: "" },
-                          models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, copilot: "" } },
-                          activeProvider: p.activeProvider === "copilot" ? "ollama" : p.activeProvider
+                          models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, copilot: "" } }
+                        };
+                        return {
+                          ...next,
+                          activeProvider: p.activeProvider === "copilot" ? firstAvailableProviderId(next) : p.activeProvider
                         };
                       }
                       return {
@@ -1184,7 +1250,7 @@ export default function SettingsPage() {
                 {modelPingLoading ? "Testing…" : "Test model connections"}
               </Button>
               <span className="text-[11px] text-muted">
-                Health check plus a minimal chat on each provider using <strong>saved</strong> default models (save the form below if you just changed them).
+                Health check plus a minimal chat on each <strong>enabled</strong> provider using saved default models (disabled providers are omitted). Save the form if you just changed them.
               </span>
             </div>
             {modelPingError ? <p className="text-xs text-rose-600">{modelPingError}</p> : null}
@@ -1219,7 +1285,7 @@ export default function SettingsPage() {
             <p className="text-[11px] text-muted leading-snug">
               Copilot usage follows your GitHub Copilot plan. Pick <em>Disabled</em> to remove Copilot from routing entirely (local-first only when using Ollama/LM Studio fallbacks). Otherwise choose a mini/smaller model for lighter chat.{" "}
               <em>Auto / env default</em> uses <code className="font-mono text-[10px]">COPILOT_MODEL</code> when set, otherwise Nova uses{" "}
-              <code className="font-mono text-[10px]">gpt-4o-mini</code>. For no cloud inference spend, keep primary provider Ollama (local).
+              <code className="font-mono text-[10px]">gpt-4o-mini</code>. Ollama and LM Studio default to <em>Disabled</em> until you enable them and pick models.
             </p>
             <div className="space-y-3 rounded-ui border bg-surface2 p-3">
               <div>
@@ -1228,7 +1294,7 @@ export default function SettingsPage() {
                   Nova records a rough <strong>estimated cost in USD</strong> on each completed reply (using simple per-provider rates per 1k output tokens; local Ollama/LM Studio are tiny by default, cloud Copilot higher). When the governor is on, it adds up today’s estimates from the run history and compares them to your daily cap.
                 </p>
                 <p className="mt-1 text-[11px] text-muted leading-snug">
-                  <strong>Quality tier</strong> tweaks those estimates (High counts a bit higher, Economy a bit lower) so the budget feels stricter or looser. If the budget is already met or exceeded and the tier is <strong>Economy</strong>, normal chat will prefer your <strong>Ollama default</strong> model when one is set, to steer away from further paid cloud use.
+                  <strong>Quality tier</strong> tweaks those estimates (High counts a bit higher, Economy a bit lower) so the budget feels stricter or looser. If the budget is already met or exceeded and the tier is <strong>Economy</strong>, normal chat prefers the first available <strong>local</strong> default (Ollama, then LM Studio) when those providers are enabled, to steer away from further paid cloud use.
                 </p>
               </div>
               <label className="flex items-center gap-2 text-sm">
@@ -1270,7 +1336,7 @@ export default function SettingsPage() {
                   >
                     <option value="high">High — stricter cost estimate (1.25×)</option>
                     <option value="balanced">Balanced — baseline estimate</option>
-                    <option value="economy">Economy — looser estimate (0.85×); over budget nudges chat to Ollama</option>
+                    <option value="economy">Economy — looser estimate (0.85×); over budget nudges to local defaults</option>
                   </Select>
                   <span className="text-[10px] text-muted leading-snug">
                     Fine-tunes how quickly you hit the daily cap; Economy also enables the local-model nudge when over budget.
@@ -2009,10 +2075,14 @@ function ColorPickerRow(input: { label: string; value: string; onChange: (value:
 }
 
 function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsState {
-  return {
+  const ollamaDisabled = value?.ollama?.disabled !== false;
+  const lmstudioDisabled = value?.lmstudio?.disabled !== false;
+  const draft: SettingsState = {
     delegatedFolders: value?.delegatedFolders ?? DEFAULT_SETTINGS.delegatedFolders,
     requireApprovals: value?.requireApprovals ?? DEFAULT_SETTINGS.requireApprovals,
     activeProvider: value?.activeProvider ?? DEFAULT_SETTINGS.activeProvider,
+    ollama: { disabled: ollamaDisabled },
+    lmstudio: { disabled: lmstudioDisabled },
     web: {
       loginEnabled: value?.web?.loginEnabled ?? DEFAULT_SETTINGS.web.loginEnabled,
       hideProviderModelInStats: value?.web?.hideProviderModelInStats ?? DEFAULT_SETTINGS.web.hideProviderModelInStats,
@@ -2132,6 +2202,17 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
     },
     skillSettings: value?.skillSettings ?? DEFAULT_SETTINGS.skillSettings
   };
+  let ap = draft.activeProvider;
+  if (ap === "ollama" && draft.ollama.disabled === true) {
+    ap = firstAvailableProviderId(draft);
+  }
+  if (ap === "lmstudio" && draft.lmstudio.disabled === true) {
+    ap = firstAvailableProviderId(draft);
+  }
+  if (ap === "copilot" && draft.copilot.disabled === true) {
+    ap = firstAvailableProviderId(draft);
+  }
+  return { ...draft, activeProvider: ap };
 }
 
 function withOpacity(hex: string, opacityPct: number): string {

@@ -2,6 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { resolve as resolvePath } from "node:path";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
+import { registerAppSettingsForProviderToggles, isCopilotIntegrationDisabled } from "./provider-integration.js";
+
+export { isCopilotIntegrationDisabled };
 
 export const DEFAULT_GITHUB_COPILOT_BASE_URL = "https://api.githubcopilot.com";
 
@@ -44,6 +47,7 @@ let copilotSettingsGetter: (() => AppSettings) | undefined;
 /** Must be registered from bootstrap so Copilot can read SQLite-backed settings + device-login profile. */
 export function registerCopilotSettingsSource(getter: () => AppSettings): void {
   copilotSettingsGetter = getter;
+  registerAppSettingsForProviderToggles(getter);
 }
 
 export function copilotAuthFilePath(): string {
@@ -75,15 +79,6 @@ export async function fetchCopilotTokenFromGithub(githubAccessToken: string): Pr
     return typeof body?.token === "string" ? body.token : undefined;
   } catch {
     return undefined;
-  }
-}
-
-export function isCopilotIntegrationDisabled(): boolean {
-  if (process.env.NOVA_COPILOT_DISABLED === "true") return true;
-  try {
-    return copilotSettingsGetter?.().copilot.disabled === true;
-  } catch {
-    return false;
   }
 }
 

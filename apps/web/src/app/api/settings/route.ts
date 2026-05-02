@@ -5,6 +5,8 @@ type AppSettingsPayload = {
   delegatedFolders?: string[];
   requireApprovals?: boolean;
   activeProvider?: "ollama" | "lmstudio" | "copilot";
+  ollama?: { disabled?: boolean };
+  lmstudio?: { disabled?: boolean };
   visionProviderPriority?: Array<"lmstudio" | "ollama" | "cloud">;
   mediaProviderPriority?: Array<"comfyui" | "cloud">;
   shell?: {

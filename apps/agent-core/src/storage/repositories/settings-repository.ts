@@ -98,6 +98,14 @@ export type AppSettings = {
     /** When true, Ollama `/api/chat` sends `think: true` (native reasoning traces). Default false avoids empty `content` on Gemma 4 / thinking models. */
     ollamaThinkingEnabled: boolean;
   };
+  ollama: {
+    /** When true (default), Ollama is excluded from routing and health pings. */
+    disabled: boolean;
+  };
+  lmstudio: {
+    /** When true (default), LM Studio is excluded from routing and health pings. */
+    disabled: boolean;
+  };
   copilot: {
     baseUrl: string;
     apiKey: string;
@@ -295,6 +303,12 @@ export class SettingsRepository {
               typeof parsed.models?.defaultByProvider?.copilot === "string" ? parsed.models.defaultByProvider.copilot : ""
           },
           ollamaThinkingEnabled: parsed.models?.ollamaThinkingEnabled === true
+        },
+        ollama: {
+          disabled: parsed.ollama?.disabled !== false
+        },
+        lmstudio: {
+          disabled: parsed.lmstudio?.disabled !== false
         },
         copilot: {
           baseUrl: typeof parsed.copilot?.baseUrl === "string" ? parsed.copilot.baseUrl : "",

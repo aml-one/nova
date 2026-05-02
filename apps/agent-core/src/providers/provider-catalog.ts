@@ -5,6 +5,7 @@ import {
   isCopilotIntegrationDisabled,
   resolveCopilotRuntime
 } from "./copilot-credentials.js";
+import { isLmStudioIntegrationDisabled, isOllamaIntegrationDisabled } from "./provider-integration.js";
 
 type ProviderName = "ollama" | "lmstudio" | "copilot";
 
@@ -28,8 +29,8 @@ export class ProviderCatalogService {
 
   async listModels(): Promise<Record<ProviderName, ProviderModelInfo[]>> {
     const [ollama, lmstudio, copilot] = await Promise.all([
-      this.listOllamaModels(),
-      this.listLmstudioModels(),
+      isOllamaIntegrationDisabled() ? Promise.resolve([]) : this.listOllamaModels(),
+      isLmStudioIntegrationDisabled() ? Promise.resolve([]) : this.listLmstudioModels(),
       this.listCopilotModels()
     ]);
     return { ollama, lmstudio, copilot };
@@ -39,28 +40,43 @@ export class ProviderCatalogService {
     ProviderName | "signalBridge" | "whatsAppBridge",
     { configured: boolean; steps: string[]; details: string }
   > {
-    const copilotDisabled = this.getSettings().copilot.disabled === true;
+    const s = this.getSettings();
+    const ollamaDisabled = s.ollama.disabled !== false;
+    const lmstudioDisabled = s.lmstudio.disabled !== false;
+    const copilotDisabled = s.copilot.disabled === true;
     const copilotConfigured = !copilotDisabled && copilotLikelyConfigured(this.getSettings);
     const waConfigured = Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TOKEN);
     const signalConfigured = Boolean(process.env.SIGNAL_API_URL && process.env.SIGNAL_ACCOUNT_NUMBER);
     return {
       ollama: {
-        configured: Boolean(process.env.OLLAMA_BASE_URL),
-        details: process.env.OLLAMA_BASE_URL ? "Endpoint configured" : "Set OLLAMA_BASE_URL and OLLAMA_MODEL",
-        steps: [
-          "Install Ollama and pull a model",
-          "Set OLLAMA_BASE_URL",
-          "Choose default model in Settings > Models"
-        ]
+        configured: ollamaDisabled || Boolean(process.env.OLLAMA_BASE_URL),
+        details: ollamaDisabled
+          ? "Ollama is disabled (Models → Ollama default model → Disabled)."
+          : process.env.OLLAMA_BASE_URL
+            ? "Endpoint configured"
+            : "Set OLLAMA_BASE_URL and OLLAMA_MODEL",
+        steps: ollamaDisabled
+          ? ["Choose Auto / env default or a model to enable Ollama."]
+          : [
+              "Install Ollama and pull a model",
+              "Set OLLAMA_BASE_URL",
+              "Choose default model in Settings > Models"
+            ]
       },
       lmstudio: {
-        configured: Boolean(process.env.LMSTUDIO_BASE_URL),
-        details: process.env.LMSTUDIO_BASE_URL ? "Endpoint configured" : "Set LMSTUDIO_BASE_URL and LMSTUDIO_MODEL",
-        steps: [
-          "Start LM Studio local server",
-          "Set LMSTUDIO_BASE_URL",
-          "Choose default model in Settings > Models"
-        ]
+        configured: lmstudioDisabled || Boolean(process.env.LMSTUDIO_BASE_URL),
+        details: lmstudioDisabled
+          ? "LM Studio is disabled (Models → LM Studio default model → Disabled)."
+          : process.env.LMSTUDIO_BASE_URL
+            ? "Endpoint configured"
+            : "Set LMSTUDIO_BASE_URL and LMSTUDIO_MODEL",
+        steps: lmstudioDisabled
+          ? ["Choose Auto / env default or a model to enable LM Studio."]
+          : [
+              "Start LM Studio local server",
+              "Set LMSTUDIO_BASE_URL",
+              "Choose default model in Settings > Models"
+            ]
       },
       copilot: {
         configured: copilotConfigured,

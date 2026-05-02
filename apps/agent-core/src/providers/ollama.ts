@@ -1,11 +1,13 @@
 import type { ChatRequest, ModelProvider, ModelResponse, ProviderHealth } from "@nova/sdk/provider";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
+import { registerAppSettingsForProviderToggles } from "./provider-integration.js";
 
 let appSettingsGetter: (() => AppSettings) | undefined;
 
 /** Call from bootstrap so Ollama can read `models.ollamaThinkingEnabled` (env overrides when set). */
 export function registerOllamaSettingsSource(getter: () => AppSettings): void {
   appSettingsGetter = getter;
+  registerAppSettingsForProviderToggles(getter);
 }
 
 type OllamaChatResponse = {

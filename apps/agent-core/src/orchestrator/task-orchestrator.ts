@@ -565,10 +565,22 @@ export class TaskOrchestrator {
         activeProvider as keyof typeof runtimeSettings.models.defaultByProvider
       ];
     const budgetExceeded = isBudgetExceeded(runtimeSettings.costGovernor);
+    const economyLocalFallback = (): string | undefined => {
+      if (runtimeSettings.ollama.disabled !== true) {
+        return runtimeSettings.models.defaultByProvider.ollama || undefined;
+      }
+      if (runtimeSettings.lmstudio.disabled !== true) {
+        return runtimeSettings.models.defaultByProvider.lmstudio || undefined;
+      }
+      if (runtimeSettings.copilot.disabled !== true) {
+        return runtimeSettings.models.defaultByProvider.copilot || undefined;
+      }
+      return undefined;
+    };
     return runtimeSettings.costGovernor.enabled &&
       budgetExceeded &&
       runtimeSettings.costGovernor.qualityTier === "economy"
-      ? runtimeSettings.models.defaultByProvider.ollama || undefined
+      ? economyLocalFallback()
       : input.model?.trim() || modelFromSettings || undefined;
   }
 
@@ -898,6 +910,14 @@ function applyRolloutCohortSettings(userId: string, base: AppSettings): AppSetti
         ...base.models.defaultByProvider,
         ...(candidateSettings.models?.defaultByProvider ?? {})
       }
+    },
+    ollama: {
+      ...base.ollama,
+      ...(candidateSettings.ollama ?? {})
+    },
+    lmstudio: {
+      ...base.lmstudio,
+      ...(candidateSettings.lmstudio ?? {})
     },
     costGovernor: {
       ...base.costGovernor,
