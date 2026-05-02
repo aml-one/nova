@@ -43,6 +43,18 @@ html {
   scrollbar-gutter: stable;
 }
 
+html[data-text-scale="normal"] {
+  font-size: 100%;
+}
+
+html[data-text-scale="medium"] {
+  font-size: 125%;
+}
+
+html[data-text-scale="big"] {
+  font-size: 150%;
+}
+
 * {
   @apply border-border;
 }

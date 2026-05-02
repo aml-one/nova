@@ -29,6 +29,7 @@ import {
   FaShareNodes
 } from "react-icons/fa6";
 import { ThemeToggle } from "./theme-toggle";
+import { TextScaleToggle } from "./text-scale-toggle";
 import { EmotionBadge } from "./emotion-badge";
 import { cn } from "../lib/cn";
 
@@ -138,7 +139,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </nav>
         <div className={cn("absolute bottom-2 left-2 right-2", navCollapsed ? "" : "")}>
-          <div className={cn("mb-1 flex", navCollapsed ? "justify-center" : "justify-end")}>
+          <div className={cn("mb-1 flex items-center gap-1", navCollapsed ? "justify-center" : "justify-end")}>
+            <TextScaleToggle />
             <ThemeToggle />
           </div>
           {!navCollapsed ? <div className="text-center text-[11px] text-muted">Made by AmL</div> : null}
