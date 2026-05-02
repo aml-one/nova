@@ -787,41 +787,27 @@ export default function HomePage() {
                           { phase: "reasoning" as const, label: "Reasoning" },
                           { phase: "web-search" as const, label: "Web search" }
                         ] as const
-                      ).map(({ phase, label }) => {
-                        const active = streamPhase === phase;
-                        return (
+                      )
+                        .filter(({ phase }) => streamPhase === phase)
+                        .map(({ phase, label }) => (
                           <div
                             key={phase}
                             className={cn(
                               "flex items-center justify-between rounded-full border px-3 py-1.5 transition-all",
-                              active
-                                ? "nova-thinking-row-active border-blue-400/60 bg-blue-500/15"
-                                : "border-slate-400/35 bg-surface opacity-70"
+                              "nova-thinking-row-active border-blue-400/60 bg-blue-500/15"
                             )}
                           >
                             <div className="flex items-center gap-2">
-                              <span
-                                className={cn(
-                                  "h-3.5 w-3.5 rounded-full border",
-                                  active ? "nova-thinking-orb border-blue-300/80" : "border-slate-400/70 bg-slate-400/40"
-                                )}
-                              />
+                              <span className="h-3.5 w-3.5 rounded-full border nova-thinking-orb border-blue-300/80" />
                               <span className="text-xs font-medium">{label}</span>
                             </div>
                             <span className="flex items-center gap-1.5">
-                              <span
-                                className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-1 bg-blue-300" : "bg-slate-400/70")}
-                              />
-                              <span
-                                className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-2 bg-blue-300" : "bg-slate-400/70")}
-                              />
-                              <span
-                                className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-3 bg-blue-300" : "bg-slate-400/70")}
-                              />
+                              <span className="h-1.5 w-1.5 rounded-full nova-thinking-dot-1 bg-blue-300" />
+                              <span className="h-1.5 w-1.5 rounded-full nova-thinking-dot-2 bg-blue-300" />
+                              <span className="h-1.5 w-1.5 rounded-full nova-thinking-dot-3 bg-blue-300" />
                             </span>
                           </div>
-                        );
-                      })}
+                        ))}
                       {!liveThinkingCollapsed ? (
                         <div className="rounded-ui border bg-surface p-2 text-[11px] text-muted">
                           <div className="mb-0.5 flex items-center justify-between">

@@ -33,7 +33,10 @@ async function bootstrap(): Promise<void> {
   const settings = new SettingsService();
   registerCopilotSettingsSource(() => settings.get());
   registerOllamaSettingsSource(() => settings.get());
-  const skillRegistry = new InMemorySkillRegistry(() => settings.get().skills);
+  const skillRegistry = new InMemorySkillRegistry(
+    () => settings.get().skills,
+    () => settings.get().skillSettings
+  );
   const router = new ModelRouter();
   const memory = new MemoryService();
   const personas = new PersonaLoader();

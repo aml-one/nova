@@ -132,6 +132,23 @@ const DEFAULT_SETTINGS: AppSettings = {
   skillSettings: {}
 };
 
+function mergeSkillSettings(
+  current: Record<string, Record<string, unknown>>,
+  patch?: Record<string, Record<string, unknown>>
+): Record<string, Record<string, unknown>> {
+  if (!patch || typeof patch !== "object") {
+    return current;
+  }
+  const out: Record<string, Record<string, unknown>> = { ...current };
+  for (const [skillId, vals] of Object.entries(patch)) {
+    if (!vals || typeof vals !== "object" || Array.isArray(vals)) {
+      continue;
+    }
+    out[skillId] = { ...(current[skillId] ?? {}), ...(vals as Record<string, unknown>) };
+  }
+  return out;
+}
+
 export class SettingsService {
   private readonly repo = new SettingsRepository();
 
@@ -283,7 +300,7 @@ export class SettingsService {
       offlineMode: {
         enabled: update.offlineMode?.enabled ?? current.offlineMode.enabled
       },
-      skillSettings: update.skillSettings ?? current.skillSettings
+      skillSettings: mergeSkillSettings(current.skillSettings, update.skillSettings)
     });
     this.repo.upsert(next);
     return next;

@@ -5,6 +5,7 @@ import { MemoryService } from "../memory/memory-service.js";
 import { PersonaLoader } from "../persona/persona-loader.js";
 import { PhoneIdentityResolver } from "../identity/phone-identity.js";
 import { InMemorySkillRegistry } from "../skills/skill-registry.js";
+import { isSkillRuntimeEnabled } from "../skills/skill-enabled.js";
 import { SelfImprovementLoop } from "../improvement/self-improvement-loop.js";
 import { CommandExecutor } from "../execution/command-executor.js";
 import { evaluateCommandPolicy } from "../execution/policy.js";
@@ -14,7 +15,7 @@ import {
   implicitHostDiagnosticsShellAllowed,
   runHostDiagnosticsCollection
 } from "../execution/host-diagnostics.js";
-import { detectHostTimeIntent, runHostTimeCollection } from "../execution/host-time.js";
+import { detectHostTimeIntent, formatNovaLocalTimeSentence, runHostTimeCollection } from "../execution/host-time.js";
 import {
   detectSkillAuthoringIntent,
   enableAuthoredSkill,
@@ -203,7 +204,10 @@ export class TaskOrchestrator {
       });
     }
 
-    if (isWebsiteCommand(input.text) || mentionsKnownWebsite(input.text)) {
+    if (
+      (isWebsiteCommand(input.text) || mentionsKnownWebsite(input.text)) &&
+      isSkillRuntimeEnabled(runtimeSettings.skillSettings, "website-builder")
+    ) {
       const websiteSkill = this.deps.skillRegistry.get("website-builder");
       if (websiteSkill) {
         const mode = /\b(deploy|upload|publish)\b/i.test(input.text)
@@ -252,7 +256,11 @@ export class TaskOrchestrator {
 
     const perplexicaQuery = detectPerplexicaSearchIntent(input.text);
     const perplexicaSkill = this.deps.skillRegistry.get("perplexica-websearch");
-    if (perplexicaQuery && perplexicaSkill) {
+    if (
+      perplexicaQuery &&
+      perplexicaSkill &&
+      isSkillRuntimeEnabled(runtimeSettings.skillSettings, "perplexica-websearch")
+    ) {
       input.onActivity?.({ kind: "web-search", phase: "start" });
       try {
         try {
@@ -314,7 +322,7 @@ export class TaskOrchestrator {
       hostTimeMs = Date.now() - timeStarted;
       const cleaned = timeRaw.trim();
       if (cleaned && cleaned !== "(timed out)" && cleaned !== "(empty)") {
-        const timeReply = formatHostTimeReply(cleaned);
+        const timeReply = formatNovaLocalTimeSentence(cleaned);
         this.deps.memoryService.appendTurn(userId, input.text, timeReply);
         this.recordRunHistory({
           runId,
@@ -414,7 +422,7 @@ export class TaskOrchestrator {
         : diagRaw;
     const timeVoiceHint =
       preferLocalForHostTime && truncatedDiag.length === 0
-        ? "\n\nNova voice: You are only Nova on this host—never imply a separate user phone, taskbar, or device. If you still cannot state wall time, ask in one short sentence for city, country, or UTC offset only—never suggest checking hardware or assistants the user might own."
+        ? "\n\nNova voice: Speak as Nova in first person—never imply a separate user phone, taskbar, or device. If you cannot state the time, ask in one short sentence for city, country, or UTC offset only—never suggest checking hardware or other assistants."
         : "";
     const userMessageForModel =
       truncatedDiag.length > 0
@@ -967,6 +975,10 @@ export class TaskOrchestrator {
     if (accessProfile && !accessProfile.capabilities.cameraAccess) {
       return "Camera access denied by policy.";
     }
+    const runtimeSettings = this.deps.settingsService.get();
+    if (!isSkillRuntimeEnabled(runtimeSettings.skillSettings, "camera-vision")) {
+      return undefined;
+    }
     const cameraName = extractCameraName(userText);
     if (!cameraName) {
       return undefined;
@@ -1140,11 +1152,6 @@ function detectMediaGenerationIntent(text: string): "image" | "video" | undefine
     return "image";
   }
   return undefined;
-}
-
-function formatHostTimeReply(raw: string): string {
-  const body = raw.trim();
-  return `I read the clock on the machine I run on:\n\n\`\`\`\n${body}\n\`\`\`\n\nIf you want a different zone, say the city, country, or IANA name (for example Europe/Budapest).`;
 }
 
 function detectPerplexicaSearchIntent(text: string): string | undefined {

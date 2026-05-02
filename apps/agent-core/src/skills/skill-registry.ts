@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
+import { isSkillRuntimeEnabled } from "./skill-enabled.js";
 
 export type RegisteredSkill = {
   id: string;
@@ -24,7 +25,10 @@ type SkillRuntimeSettings = {
 
 export class InMemorySkillRegistry {
   private readonly skills = new Map<string, RegisteredSkill>();
-  constructor(private readonly getRuntimeSettings?: () => SkillRuntimeSettings) {}
+  constructor(
+    private readonly getRuntimeSettings?: () => SkillRuntimeSettings,
+    private readonly getSkillSettings?: () => Record<string, Record<string, unknown>>
+  ) {}
 
   register(skill: RegisteredSkill): void {
     this.skills.set(skill.id, skill);
@@ -50,6 +54,12 @@ export class InMemorySkillRegistry {
     const skill = this.skills.get(skillId);
     if (!skill) {
       throw new Error(`skill not found: ${skillId}`);
+    }
+    const skillSettings = this.getSkillSettings?.() ?? {};
+    if (!isSkillRuntimeEnabled(skillSettings, skillId)) {
+      throw new Error(
+        `Skill "${skillId}" is disabled in Settings. Enable it on the Skills page or under Settings → the skill tab, then save.`
+      );
     }
     const runtimeSettings = this.getRuntimeSettings?.();
     const envIso = process.env.NOVA_SKILL_ISOLATION?.trim().toLowerCase();

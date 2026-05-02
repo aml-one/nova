@@ -16,6 +16,7 @@ import {
   type ImprovementHistoryByDate,
   type TimelineFilterKey
 } from "../../components/identity-evolution-graph";
+import { isSkillRuntimeEnabled } from "../../lib/skill-enabled";
 
 type HealthCheck = { id: string; name: string; level: "green" | "orange" | "red"; detail: string; lastSuccessfulAt?: string };
 type FullHealth = { level: "green" | "orange" | "red"; checks: HealthCheck[] };
@@ -2017,7 +2018,7 @@ export default function SettingsPage() {
             </p>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
-                checked={Boolean(cameraVisionSettings.enabled ?? false)}
+                checked={isSkillRuntimeEnabled(settings.skillSettings, "camera-vision")}
                 onChange={(e) =>
                   setSettings((p) => ({
                     ...p,
@@ -2029,7 +2030,7 @@ export default function SettingsPage() {
                   }))
                 }
               />
-              Enable camera vision automation
+              Enable camera vision skill
             </label>
             <textarea
               className="min-h-[120px] w-full rounded-ui border bg-surface px-2 py-1 text-sm"
@@ -2073,6 +2074,21 @@ export default function SettingsPage() {
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">Website Builder Skill</h2>
             <p className="text-xs text-muted">Configure SSH/Caddy defaults and manage created websites.</p>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={isSkillRuntimeEnabled(settings.skillSettings, "website-builder")}
+                onChange={(e) =>
+                  setSettings((p) => ({
+                    ...p,
+                    skillSettings: {
+                      ...p.skillSettings,
+                      ["website-builder"]: { ...(p.skillSettings["website-builder"] ?? {}), enabled: e.target.checked }
+                    }
+                  }))
+                }
+              />
+              Enable website builder skill
+            </label>
             <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
               SSH must be passwordless (public key auth). Do not use passwords here. Optionally provide a private key path.
             </div>
@@ -2201,6 +2217,21 @@ export default function SettingsPage() {
             <p className="text-xs text-muted">
               Configure local or remote Perplexica endpoint. Nova will use this skill for explicit web-search/current-events queries, alongside normal model chat.
             </p>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={isSkillRuntimeEnabled(settings.skillSettings, "perplexica-websearch")}
+                onChange={(e) =>
+                  setSettings((p) => ({
+                    ...p,
+                    skillSettings: {
+                      ...p.skillSettings,
+                      ["perplexica-websearch"]: { ...(p.skillSettings["perplexica-websearch"] ?? {}), enabled: e.target.checked }
+                    }
+                  }))
+                }
+              />
+              Enable Perplexica web search skill
+            </label>
             <div className="grid gap-2 md:grid-cols-2">
               <label className="grid gap-1 text-xs">
                 Perplexica base URL
@@ -2309,9 +2340,32 @@ export default function SettingsPage() {
         ) : null}
 
         {tab.startsWith("skill:") && tab !== "skill:website-builder" && tab !== "skill:perplexica-websearch" && tab !== "skill:camera-vision" && tab !== "skill:cameraVision" ? (
-          <Card>
-            <h2 className="text-lg font-semibold">Skill Settings</h2>
+          <Card className="space-y-3">
+            <h2 className="text-lg font-semibold">
+              {((): string => {
+                const sid = tab.replace(/^skill:/, "");
+                const m = skillManifests.find((item) => (item.settingsTab?.id ?? item.id) === sid);
+                return m?.name ?? sid;
+              })()}
+            </h2>
             <p className="text-sm text-muted">This tab is contributed by a skill. Custom UI can be added here by that skill.</p>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={isSkillRuntimeEnabled(settings.skillSettings, tab.replace(/^skill:/, ""))}
+                onChange={(e) => {
+                  const sid = tab.replace(/^skill:/, "");
+                  setSettings((p) => ({
+                    ...p,
+                    skillSettings: {
+                      ...p.skillSettings,
+                      [sid]: { ...(p.skillSettings[sid] ?? {}), enabled: e.target.checked }
+                    }
+                  }));
+                }}
+              />
+              Enable this skill
+            </label>
+            <p className="text-xs text-muted">Click <strong>Save Settings</strong> above to persist changes on this page.</p>
           </Card>
         ) : null}
           </div>

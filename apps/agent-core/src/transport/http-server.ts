@@ -30,6 +30,7 @@ import type { AppSettings } from "../storage/repositories/settings-repository.js
 import { ModelRouter } from "../providers/router.js";
 import { SelfImprovementLoop } from "../improvement/self-improvement-loop.js";
 import { InMemorySkillRegistry } from "../skills/skill-registry.js";
+import { isSkillRuntimeEnabled } from "../skills/skill-enabled.js";
 import { resolveChannelAccess } from "../security/phone-access.js";
 import { ApprovalService } from "../execution/approval-service.js";
 import {
@@ -357,6 +358,12 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         return sendJson(response, 400, { error: "service must be dispatcher|scheduler|agent-core", correlationId });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/security/analyze") {
+        if (!isSkillRuntimeEnabled(options.settings.get().skillSettings, "network-defense")) {
+          return sendJson(response, 409, {
+            error: "network-defense skill is disabled in Settings. Enable it on the Skills page or Settings, then save.",
+            correlationId
+          });
+        }
         const threshold = Number(parsedUrl.searchParams.get("thresholdPerIp") ?? "40");
         const result = await options.skillRegistry.run("network-defense", {
           mode: "detect",
@@ -366,6 +373,12 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         return sendJson(response, 200, { result, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/security/action") {
+        if (!isSkillRuntimeEnabled(options.settings.get().skillSettings, "network-defense")) {
+          return sendJson(response, 409, {
+            error: "network-defense skill is disabled in Settings. Enable it on the Skills page or Settings, then save.",
+            correlationId
+          });
+        }
         const payload = (await readJson(request)) as {
           action?: "block_ip" | "harden";
           ipToBlock?: string;
@@ -1915,6 +1928,12 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         return sendJson(response, 200, { items: rows, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/camera/test") {
+        if (!isSkillRuntimeEnabled(options.settings.get().skillSettings, "camera-vision")) {
+          return sendJson(response, 409, {
+            error: "Camera vision skill is disabled in Settings. Enable it under Settings → Camera Vision (or the Skills page), then save.",
+            correlationId
+          });
+        }
         const payload = (await readJson(request)) as { cameraName?: string };
         const requestedCameraName = payload.cameraName?.trim();
         if (!requestedCameraName) {
