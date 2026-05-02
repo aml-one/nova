@@ -1110,7 +1110,7 @@ export default function SettingsPage() {
               </label>
             </div>
             <div className="flex flex-wrap items-center gap-2 rounded-ui border bg-surface2 p-2">
-              <Button type="button" tone="purple" disabled={modelPingLoading} onClick={() => void runModelConnectivityTest()}>
+              <Button type="button" tone="green" disabled={modelPingLoading} onClick={() => void runModelConnectivityTest()}>
                 {modelPingLoading ? "Testing…" : "Test model connections"}
               </Button>
               <span className="text-[11px] text-muted">
