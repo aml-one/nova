@@ -1151,14 +1151,62 @@ export default function SettingsPage() {
               <em>Auto / env default</em> uses <code className="font-mono text-[10px]">COPILOT_MODEL</code> when set, otherwise Nova uses{" "}
               <code className="font-mono text-[10px]">gpt-4o-mini</code>. For no cloud inference spend, keep primary provider Ollama (local).
             </p>
-            <label className="flex items-center gap-2"><Checkbox checked={settings.costGovernor.enabled} onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, enabled: e.target.checked } }))} /> Enable smart cost governor</label>
-            <div className="grid gap-2 md:grid-cols-2">
-              <Input type="number" value={settings.costGovernor.dailyBudgetUsd} onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, dailyBudgetUsd: Number(e.target.value || 0) } }))} placeholder="Daily budget USD" />
-              <Select value={settings.costGovernor.qualityTier} onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, qualityTier: e.target.value as "high" | "balanced" | "economy" } }))}>
-                <option value="high">High quality</option>
-                <option value="balanced">Balanced</option>
-                <option value="economy">Economy</option>
-              </Select>
+            <div className="space-y-3 rounded-ui border bg-surface2 p-3">
+              <div>
+                <h3 className="text-sm font-semibold">Smart cost governor</h3>
+                <p className="mt-1 text-[11px] text-muted leading-snug">
+                  Nova records a rough <strong>estimated cost in USD</strong> on each completed reply (using simple per-provider rates per 1k output tokens; local Ollama/LM Studio are tiny by default, cloud Copilot higher). When the governor is on, it adds up today’s estimates from the run history and compares them to your daily cap.
+                </p>
+                <p className="mt-1 text-[11px] text-muted leading-snug">
+                  <strong>Quality tier</strong> tweaks those estimates (High counts a bit higher, Economy a bit lower) so the budget feels stricter or looser. If the budget is already met or exceeded and the tier is <strong>Economy</strong>, normal chat will prefer your <strong>Ollama default</strong> model when one is set, to steer away from further paid cloud use.
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={settings.costGovernor.enabled}
+                  onChange={(e) => setSettings((p) => ({ ...p, costGovernor: { ...p.costGovernor, enabled: e.target.checked } }))}
+                />
+                Enable smart cost governor
+              </label>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="grid gap-1 text-sm">
+                  <span>Daily budget (USD)</span>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    value={settings.costGovernor.dailyBudgetUsd}
+                    onChange={(e) =>
+                      setSettings((p) => ({
+                        ...p,
+                        costGovernor: { ...p.costGovernor, dailyBudgetUsd: Number(e.target.value || 0) }
+                      }))
+                    }
+                  />
+                  <span className="text-[10px] text-muted leading-snug">
+                    Maximum <strong>estimated</strong> spend for today before governor rules kick in (default is often 5). Not a hard cloud invoice — only Nova’s internal estimate vs this number.
+                  </span>
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span>Quality tier</span>
+                  <Select
+                    value={settings.costGovernor.qualityTier}
+                    onChange={(e) =>
+                      setSettings((p) => ({
+                        ...p,
+                        costGovernor: { ...p.costGovernor, qualityTier: e.target.value as "high" | "balanced" | "economy" }
+                      }))
+                    }
+                  >
+                    <option value="high">High — stricter cost estimate (1.25×)</option>
+                    <option value="balanced">Balanced — baseline estimate</option>
+                    <option value="economy">Economy — looser estimate (0.85×); over budget nudges chat to Ollama</option>
+                  </Select>
+                  <span className="text-[10px] text-muted leading-snug">
+                    Fine-tunes how quickly you hit the daily cap; Economy also enables the local-model nudge when over budget.
+                  </span>
+                </label>
+              </div>
             </div>
             <div className="space-y-2 rounded-ui border bg-surface p-3">
               <h3 className="font-semibold">Copilot quick setup</h3>
