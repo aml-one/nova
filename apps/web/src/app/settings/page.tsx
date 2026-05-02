@@ -793,6 +793,7 @@ export default function SettingsPage() {
   const modelOptions = catalog?.models ?? {};
   const ollamaVisionCatalog = modelOptions.ollamaVision ?? [];
   const websiteBuilderSettings = (settings.skillSettings["website-builder"] ?? {}) as Record<string, unknown>;
+  const perplexicaSettings = (settings.skillSettings["perplexica-websearch"] ?? {}) as Record<string, unknown>;
   const cameraVisionSettings = (settings.skillSettings["camera-vision"] ?? {}) as Record<string, unknown>;
   const websiteBuilderProviderStored = String(websiteBuilderSettings.provider ?? settings.activeProvider);
   const websiteBuilderProviderEffective = ((): "ollama" | "lmstudio" | "copilot" => {
@@ -2194,7 +2195,120 @@ export default function SettingsPage() {
           </Card>
         ) : null}
 
-        {tab.startsWith("skill:") && tab !== "skill:website-builder" && tab !== "skill:camera-vision" && tab !== "skill:cameraVision" ? (
+        {tab === "skill:perplexica-websearch" ? (
+          <Card className="space-y-3">
+            <h2 className="text-lg font-semibold">Perplexica Web Search Skill</h2>
+            <p className="text-xs text-muted">
+              Configure local or remote Perplexica endpoint. Nova will use this skill for explicit web-search/current-events queries, alongside normal model chat.
+            </p>
+            <div className="grid gap-2 md:grid-cols-2">
+              <label className="grid gap-1 text-xs">
+                Perplexica base URL
+                <Input
+                  value={String(perplexicaSettings.baseUrl ?? "http://127.0.0.1:3008")}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      skillSettings: {
+                        ...p.skillSettings,
+                        ["perplexica-websearch"]: { ...p.skillSettings["perplexica-websearch"], baseUrl: e.target.value }
+                      }
+                    }))
+                  }
+                  placeholder="http://127.0.0.1:3008"
+                />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Request timeout (ms)
+                <Input
+                  type="number"
+                  min={1000}
+                  max={120000}
+                  value={String(perplexicaSettings.timeoutMs ?? 30000)}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      skillSettings: {
+                        ...p.skillSettings,
+                        ["perplexica-websearch"]: { ...p.skillSettings["perplexica-websearch"], timeoutMs: Number(e.target.value || 30000) }
+                      }
+                    }))
+                  }
+                />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Max sources
+                <Input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={String(perplexicaSettings.maxSources ?? 6)}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      skillSettings: {
+                        ...p.skillSettings,
+                        ["perplexica-websearch"]: { ...p.skillSettings["perplexica-websearch"], maxSources: Number(e.target.value || 6) }
+                      }
+                    }))
+                  }
+                />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Focus mode
+                <Input
+                  value={String(perplexicaSettings.focusMode ?? "webSearch")}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      skillSettings: {
+                        ...p.skillSettings,
+                        ["perplexica-websearch"]: { ...p.skillSettings["perplexica-websearch"], focusMode: e.target.value }
+                      }
+                    }))
+                  }
+                  placeholder="webSearch"
+                />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Optimization mode
+                <Input
+                  value={String(perplexicaSettings.optimizationMode ?? "speed")}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      skillSettings: {
+                        ...p.skillSettings,
+                        ["perplexica-websearch"]: { ...p.skillSettings["perplexica-websearch"], optimizationMode: e.target.value }
+                      }
+                    }))
+                  }
+                  placeholder="speed"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-xs md:pt-6">
+                <Checkbox
+                  checked={Boolean(perplexicaSettings.stream ?? false)}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      skillSettings: {
+                        ...p.skillSettings,
+                        ["perplexica-websearch"]: { ...p.skillSettings["perplexica-websearch"], stream: e.target.checked }
+                      }
+                    }))
+                  }
+                />
+                Stream responses when endpoint supports it
+              </label>
+            </div>
+            <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
+              Your current setup example: <code className="font-mono">http://127.0.0.1:3008</code>. You can point to LAN/remote hosts too.
+            </div>
+          </Card>
+        ) : null}
+
+        {tab.startsWith("skill:") && tab !== "skill:website-builder" && tab !== "skill:perplexica-websearch" && tab !== "skill:camera-vision" && tab !== "skill:cameraVision" ? (
           <Card>
             <h2 className="text-lg font-semibold">Skill Settings</h2>
             <p className="text-sm text-muted">This tab is contributed by a skill. Custom UI can be added here by that skill.</p>

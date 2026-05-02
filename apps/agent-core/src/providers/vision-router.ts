@@ -293,6 +293,7 @@ async function analyzeViaOllama(input: {
   imageUrl?: string;
 }): Promise<string> {
   const base = normalizeOllamaBaseUrl(input.baseUrl, "http://127.0.0.1:11434");
+  const imageBase64 = await resolveOllamaImageBase64(input.imageUrl);
   const response = await fetch(`${base}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -303,7 +304,7 @@ async function analyzeViaOllama(input: {
         {
           role: "user",
           content: input.userPrompt,
-          images: input.imageUrl ? [input.imageUrl] : []
+          images: imageBase64 ? [imageBase64] : []
         }
       ]
     })
@@ -313,4 +314,36 @@ async function analyzeViaOllama(input: {
   }
   const payload = (await response.json()) as { message?: { content?: string } };
   return payload.message?.content ?? "";
+}
+
+async function resolveOllamaImageBase64(imageUrl: string | undefined): Promise<string | undefined> {
+  const raw = imageUrl?.trim();
+  if (!raw) return undefined;
+  // Already base64 payload (or data URL) from callers that pre-encode.
+  if (/^[A-Za-z0-9+/=]+$/.test(raw) && raw.length > 128) {
+    return raw;
+  }
+  const local = normalizeLocalMediaPath(raw);
+  const target = local.startsWith("http") ? local : `${resolveAgentBaseUrl()}${local}`;
+  try {
+    const response = await fetch(target);
+    if (!response.ok) return undefined;
+    const bytes = Buffer.from(await response.arrayBuffer());
+    return bytes.toString("base64");
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveAgentBaseUrl(): string {
+  const port = Number(process.env.NOVA_AGENT_PORT ?? "8787");
+  const safePort = Number.isFinite(port) && port > 0 ? port : 8787;
+  return `http://127.0.0.1:${safePort}`;
+}
+
+function normalizeLocalMediaPath(url: string): string {
+  if (url.startsWith("/api/media/files/")) {
+    return `/v1/media/files/${url.slice("/api/media/files/".length)}`;
+  }
+  return url;
 }

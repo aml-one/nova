@@ -245,6 +245,58 @@ export class TaskOrchestrator {
       return generation;
     }
 
+    const perplexicaQuery = detectPerplexicaSearchIntent(input.text);
+    const perplexicaSkill = this.deps.skillRegistry.get("perplexica-websearch");
+    if (perplexicaQuery && perplexicaSkill) {
+      try {
+        const cfg = (runtimeSettings.skillSettings["perplexica-websearch"] ?? {}) as Record<string, unknown>;
+        const result = (await this.deps.skillRegistry.run("perplexica-websearch", {
+          query: perplexicaQuery,
+          mode: "search",
+          settings: {
+            baseUrl: String(cfg.baseUrl ?? "http://127.0.0.1:3008"),
+            timeoutMs: Number(cfg.timeoutMs ?? 30000),
+            maxSources: Number(cfg.maxSources ?? 6),
+            focusMode: String(cfg.focusMode ?? "webSearch"),
+            optimizationMode: String(cfg.optimizationMode ?? "speed"),
+            stream: cfg.stream === true
+          }
+        })) as { formatted?: string; answer?: string; sources?: Array<{ title?: string; url?: string }> };
+        const reply =
+          String(result.formatted ?? "").trim() ||
+          buildPerplexicaFallbackResult(String(result.answer ?? ""), result.sources ?? []);
+        if (reply.trim()) {
+          this.deps.memoryService.appendTurn(userId, input.text, reply);
+          this.recordRunHistory({
+            runId,
+            userId,
+            channel: input.channel,
+            inputText: input.text,
+            outputText: reply,
+            success: true,
+            correlationId,
+            latencyMs: Date.now() - startedAt,
+            provider: "skill-perplexica",
+            tokenInCount: estimateTokens(input.text),
+            tokenOutCount: estimateTokens(reply)
+          });
+          this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+          this.thoughtLog.append({
+            category: "chat",
+            title: "Perplexica web search",
+            content: perplexicaQuery.slice(0, 220)
+          });
+          return reply;
+        }
+      } catch (error) {
+        this.thoughtLog.append({
+          category: "chat",
+          title: "Perplexica failed, fallback to model",
+          content: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+
     let hostDiagnosticsAppendix = "";
     let hostDiagnosticsMs = 0;
     const diagnosticsIntent = detectHostDiagnosticsIntent(input.text);
@@ -910,6 +962,42 @@ function detectMediaGenerationIntent(text: string): "image" | "video" | undefine
   return undefined;
 }
 
+function detectPerplexicaSearchIntent(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith("/web ") || lower.startsWith("/search ")) {
+    return trimmed.replace(/^\/(web|search)\s+/i, "").trim() || undefined;
+  }
+  const explicit =
+    /\b(search the web|web search|look (it|this) up|find online|browse web|current news|latest news|latest updates|what happened today)\b/i.test(
+      trimmed
+    );
+  const currentEvents = /\b(current|latest|today|now|recent)\b/i.test(trimmed);
+  const asksFact = /\b(what|who|when|where|why|how)\b/i.test(trimmed);
+  if (explicit || (currentEvents && asksFact)) {
+    return trimmed;
+  }
+  return undefined;
+}
+
+function buildPerplexicaFallbackResult(
+  answer: string,
+  sources: Array<{ title?: string; url?: string }>
+): string {
+  const lines = [answer.trim()].filter(Boolean);
+  const validSources = sources.filter((s) => String(s.url ?? "").trim().length > 0);
+  if (validSources.length > 0) {
+    lines.push("", "Sources:");
+    validSources.slice(0, 6).forEach((source, index) => {
+      const url = String(source.url ?? "").trim();
+      const title = String(source.title ?? url).trim() || url;
+      lines.push(`${index + 1}. ${title} - ${url}`);
+    });
+  }
+  return lines.join("\n").trim();
+}
+
 function isWebsiteCommand(text: string): boolean {
   const lower = text.toLowerCase();
   return (
@@ -1016,10 +1104,21 @@ function normalizeDiagnosticsReport(report: string): string {
     .split("\n")
     .map((line) => line.replace(/\s+$/g, ""));
   const out: string[] = [];
+  let vmPageSizeBytes: number | null = null;
   for (let i = 0; i < rawLines.length; i += 1) {
     let line = rawLines[i];
     // CPU (Darwin): -> CPU:
     line = line.replace(/^([A-Za-z0-9 _./-]+?)\s+\([^)]+\):\s*$/, "$1:");
+    const pageSizeMatch = line.match(/page size of\s+(\d+)\s+bytes/i);
+    if (pageSizeMatch) {
+      vmPageSizeBytes = Number(pageSizeMatch[1]);
+      if (Number.isFinite(vmPageSizeBytes) && vmPageSizeBytes > 0) {
+        line = line.replace(
+          /(page size of)\s+\d+\s+bytes/i,
+          `$1 ${formatBinarySize(vmPageSizeBytes)}`
+        );
+      }
+    }
     // brand:\nApple M4 Max -> brand: Apple M4 Max
     if (/^[^:]+:\s*$/.test(line)) {
       let j = i + 1;
@@ -1040,10 +1139,28 @@ function normalizeDiagnosticsReport(report: string): string {
         out.push(`${keyPrefix}${converted}`);
         continue;
       }
+      if (vmPageSizeBytes && isVmPageCountKey(key)) {
+        out.push(`${keyPrefix}${formatBinarySize(value * vmPageSizeBytes)}`);
+        continue;
+      }
     }
     out.push(line);
   }
   return out.join("\n").trim();
+}
+
+function isVmPageCountKey(key: string): boolean {
+  return (
+    key.includes("pages free") ||
+    key.includes("pages active") ||
+    key.includes("pages inactive") ||
+    key.includes("pages speculative") ||
+    key.includes("pages throttled") ||
+    key.includes("pages wired down") ||
+    key.includes("pages purgeable") ||
+    key.includes("file-backed pages") ||
+    key.includes("anonymous pages")
+  );
 }
 
 function convertMemoryNumberForKey(key: string, value: number): string | null {

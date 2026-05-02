@@ -39,5 +39,12 @@ function toWebReachableUrl(url: string | undefined, baseUrl: string): string {
   if (!url) {
     return "";
   }
-  return url.replace(baseUrl, "");
+  const asRelative = url.replace(baseUrl, "");
+  if (asRelative.startsWith("/v1/media/files/")) {
+    return `/api/media/files/${asRelative.slice("/v1/media/files/".length)}`;
+  }
+  if (url.includes("/v1/media/files/")) {
+    return `/api/media/files/${url.split("/v1/media/files/")[1] ?? ""}`;
+  }
+  return asRelative;
 }

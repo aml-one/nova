@@ -51,6 +51,7 @@ type PendingUpload = {
   file: File;
   progress: number;
   status: "queued" | "uploading" | "done" | "failed";
+  previewUrl?: string;
   uploaded?: MediaItem;
   error?: string;
 };
@@ -103,6 +104,7 @@ export default function HomePage() {
   const [lastCopiedTurnId, setLastCopiedTurnId] = useState<string | null>(null);
   const hasLoadedSessionsRef = useRef(false);
   const hasDoneInitialBottomScrollRef = useRef(false);
+  const uploadPreviewUrlsRef = useRef<Map<string, string>>(new Map());
   const compactActionClass = "inline-flex h-9 min-w-9 items-center justify-center px-2";
   const bubbleIconActionClass =
     "inline-flex h-7 w-7 items-center justify-center transition-[filter] hover:brightness-110";
@@ -280,18 +282,28 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!hasLoadedSessionsRef.current || !activeSessionId) return;
-    setSessions((prev) =>
-      prev.map((session) =>
-        session.id === activeSessionId
-          ? {
-              ...session,
-              turns,
-              title: buildSessionTitle(turns),
-              updatedAt: new Date().toISOString()
-            }
-          : session
-      )
-    );
+    const nextTitle = buildSessionTitle(turns);
+    setSessions((prev) => {
+      let changed = false;
+      const next = prev.map((session) => {
+        if (session.id !== activeSessionId) {
+          return session;
+        }
+        const sameTurns = equalTurns(session.turns ?? [], turns);
+        const sameTitle = session.title === nextTitle;
+        if (sameTurns && sameTitle) {
+          return session;
+        }
+        changed = true;
+        return {
+          ...session,
+          turns: turns.map((turn) => ({ ...turn })),
+          title: nextTitle,
+          updatedAt: new Date().toISOString()
+        };
+      });
+      return changed ? next : prev;
+    });
   }, [turns, activeSessionId]);
 
   useEffect(() => {
@@ -320,6 +332,38 @@ export default function HomePage() {
       container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
     });
   }, [chatStyleReady, turns.length, activeSessionId]);
+
+  useEffect(() => {
+    const nextMap = new Map<string, string>();
+    for (const item of uploads) {
+      if (item.previewUrl) {
+        nextMap.set(item.id, item.previewUrl);
+      }
+    }
+    for (const [id, url] of uploadPreviewUrlsRef.current.entries()) {
+      if (!nextMap.has(id)) {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // Ignore revoke failures.
+        }
+      }
+    }
+    uploadPreviewUrlsRef.current = nextMap;
+  }, [uploads]);
+
+  useEffect(() => {
+    return () => {
+      for (const url of uploadPreviewUrlsRef.current.values()) {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {
+          // Ignore revoke failures.
+        }
+      }
+      uploadPreviewUrlsRef.current.clear();
+    };
+  }, []);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -353,7 +397,7 @@ export default function HomePage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           message: composedMessage,
-          imageUrl: readyUploads.find((item) => item.kind === "image")?.url
+          imageUrl: toAgentVisionImageUrl(readyUploads.find((item) => item.kind === "image")?.url)
         })
       });
       if (!response.ok || !response.body) {
@@ -502,7 +546,8 @@ export default function HomePage() {
       id: `${file.name}-${file.size}-${Math.random().toString(16).slice(2)}`,
       file,
       progress: 0,
-      status: "queued"
+      status: "queued",
+      previewUrl: URL.createObjectURL(file)
     }));
     setUploads((prev) => [...prev, ...next]);
   }
@@ -889,7 +934,10 @@ export default function HomePage() {
             <div className="rounded-2xl border bg-surface2 p-2">
               <div className="mb-2 flex flex-wrap gap-2">
                 {uploads.map((item, idx) => {
-                  const previewUrl = item.uploaded?.kind === "video" ? (item.uploaded.posterUrl || item.uploaded.url) : item.uploaded?.url;
+                  const previewUrl =
+                    item.uploaded?.kind === "video"
+                      ? (item.uploaded.posterUrl || item.uploaded.url)
+                      : (item.uploaded?.url || item.previewUrl);
                   return (
                     <div key={item.id} className="relative h-14 w-14 overflow-hidden rounded-lg border bg-surface">
                       {previewUrl ? (
@@ -1027,6 +1075,30 @@ function buildSessionTitle(turns: ChatTurn[]): string {
   return firstUser.slice(0, 40);
 }
 
+function equalTurns(a: ChatTurn[], b: ChatTurn[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (left.id !== right.id) return false;
+    if (left.role !== right.role) return false;
+    if (left.text !== right.text) return false;
+    if (left.isPending !== right.isPending) return false;
+    if (left.thinkingText !== right.thinkingText) return false;
+    if (left.thinkingCollapsed !== right.thinkingCollapsed) return false;
+    const leftAttachments = left.attachments ?? [];
+    const rightAttachments = right.attachments ?? [];
+    if (leftAttachments.length !== rightAttachments.length) return false;
+    for (let j = 0; j < leftAttachments.length; j += 1) {
+      if (leftAttachments[j].url !== rightAttachments[j].url || leftAttachments[j].kind !== rightAttachments[j].kind) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 function inferMediaKind(value?: string): "image" | "video" | undefined {
   if (!value) return undefined;
   const lower = value.toLowerCase();
@@ -1047,11 +1119,32 @@ function extractMediaFromText(text: string): MediaItem[] {
   );
   return urls
     .map((url) => {
-      const kind = inferMediaKind(url);
+      const normalizedUrl = normalizeMediaUrl(url);
+      const kind = inferMediaKind(normalizedUrl);
       if (!kind) return undefined;
-      return { url, kind } satisfies MediaItem;
+      return { url: normalizedUrl, kind } satisfies MediaItem;
     })
     .filter((item): item is MediaItem => Boolean(item));
+}
+
+function normalizeMediaUrl(url: string): string {
+  if (url.startsWith("/v1/media/files/")) {
+    return `/api/media/files/${url.slice("/v1/media/files/".length)}`;
+  }
+  const marker = "/v1/media/files/";
+  const idx = url.indexOf(marker);
+  if (idx >= 0) {
+    return `/api/media/files/${url.slice(idx + marker.length)}`;
+  }
+  return url;
+}
+
+function toAgentVisionImageUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  if (url.startsWith("/api/media/files/")) {
+    return `/v1/media/files/${url.slice("/api/media/files/".length)}`;
+  }
+  return url;
 }
 
 async function fileToBase64(file: File): Promise<string> {

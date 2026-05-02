@@ -1,0 +1,19 @@
+{
+  "name": "@nova/skill-perplexica-websearch",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "echo \"No linter configured yet for @nova/skill-perplexica-websearch\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "echo \"No tests yet for @nova/skill-perplexica-websearch\""
+  },
+  "dependencies": {
+    "@nova/skills": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  }
+}
