@@ -538,8 +538,8 @@ export default function HomePage() {
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+    <div className="flex h-full min-h-0 flex-1 flex-col gap-4">
+      <Card className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
         <div className="mb-2 flex shrink-0 items-center justify-between">
           <h1 className="text-2xl font-semibold">Nova Chat</h1>
           <div className="flex items-center gap-1.5">

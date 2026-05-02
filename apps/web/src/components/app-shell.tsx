@@ -76,7 +76,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const activeLink = links.find((link) => link.href === pathname) ?? links[0];
 
   return (
-    <div className="flex min-h-screen flex-col bg-gradient-to-br from-surface via-surface to-surface2">
+    <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-gradient-to-br from-surface via-surface to-surface2">
       <aside
         className={cn(
           "fixed left-0 top-0 z-40 h-screen border-r bg-surface/95 p-2 backdrop-blur transition-all",
