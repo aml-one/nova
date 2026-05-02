@@ -135,11 +135,13 @@ export class ModelRouter {
       .map((name) => this.providers.find((provider) => provider.name === name))
       .filter((provider): provider is (typeof this.providers)[number] => Boolean(provider));
     let lastError: Error | undefined;
+    let attempted = false;
     for (const provider of ordered) {
       const providerState = this.state.get(provider.name);
       if (!providerState || providerState.openUntil > Date.now()) {
         continue;
       }
+      attempted = true;
       try {
         const request: ChatRequest = { messages, model };
         const response = await provider.chat(request);
@@ -154,6 +156,31 @@ export class ModelRouter {
         );
         providerState.openUntil = Date.now() + backoff;
         lastError = error instanceof Error ? error : new Error("provider request failed");
+      }
+    }
+    // If every provider was skipped only due circuit backoff, force one probe pass.
+    // This avoids false "no providers" after transient spikes.
+    if (!attempted) {
+      for (const provider of ordered) {
+        const providerState = this.state.get(provider.name);
+        if (!providerState) {
+          continue;
+        }
+        try {
+          const request: ChatRequest = { messages, model };
+          const response = await provider.chat(request);
+          providerState.failures = 0;
+          providerState.openUntil = 0;
+          return response;
+        } catch (error) {
+          providerState.failures += 1;
+          const backoff = Math.min(
+            providerState.maxBackoffMs,
+            providerState.baseBackoffMs * Math.pow(2, Math.max(0, providerState.failures - 1))
+          );
+          providerState.openUntil = Date.now() + backoff;
+          lastError = error instanceof Error ? error : new Error("provider request failed");
+        }
       }
     }
     throw lastError ?? new Error("no model providers are available");
@@ -209,11 +236,13 @@ export class ModelRouter {
       .map((name) => this.providers.find((provider) => provider.name === name))
       .filter((provider): provider is (typeof this.providers)[number] => Boolean(provider));
     let lastError: Error | undefined;
+    let attempted = false;
     for (const provider of ordered) {
       const providerState = this.state.get(provider.name);
       if (!providerState || providerState.openUntil > Date.now()) {
         continue;
       }
+      attempted = true;
       try {
         const response = await provider.streamChat({ messages, model }, onToken);
         providerState.failures = 0;
@@ -227,6 +256,29 @@ export class ModelRouter {
         );
         providerState.openUntil = Date.now() + backoff;
         lastError = error instanceof Error ? error : new Error("provider stream failed");
+      }
+    }
+    // If every provider was skipped only due circuit backoff, force one probe pass.
+    if (!attempted) {
+      for (const provider of ordered) {
+        const providerState = this.state.get(provider.name);
+        if (!providerState) {
+          continue;
+        }
+        try {
+          const response = await provider.streamChat({ messages, model }, onToken);
+          providerState.failures = 0;
+          providerState.openUntil = 0;
+          return response;
+        } catch (error) {
+          providerState.failures += 1;
+          const backoff = Math.min(
+            providerState.maxBackoffMs,
+            providerState.baseBackoffMs * Math.pow(2, Math.max(0, providerState.failures - 1))
+          );
+          providerState.openUntil = Date.now() + backoff;
+          lastError = error instanceof Error ? error : new Error("provider stream failed");
+        }
       }
     }
     throw lastError ?? new Error("no model providers are available for streaming");
