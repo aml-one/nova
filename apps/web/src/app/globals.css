@@ -58,3 +58,33 @@ html[data-text-scale="big"] {
 * {
   @apply border-border;
 }
+
+@keyframes novaThinkingGlow {
+  0% { box-shadow: 0 0 0 rgba(96, 165, 250, 0); }
+  50% { box-shadow: 0 0 16px rgba(96, 165, 250, 0.32); }
+  100% { box-shadow: 0 0 0 rgba(96, 165, 250, 0); }
+}
+
+@keyframes novaThinkingOrb {
+  0% { transform: scale(0.88); opacity: 0.8; }
+  50% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.88); opacity: 0.8; }
+}
+
+@keyframes novaThinkingDot {
+  0%, 100% { opacity: 0.35; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-1px); }
+}
+
+.nova-thinking-row-active {
+  animation: novaThinkingGlow 1.2s ease-in-out infinite;
+}
+
+.nova-thinking-orb {
+  background: radial-gradient(circle at 30% 30%, #bfdbfe 0%, #60a5fa 45%, #1e3a8a 100%);
+  animation: novaThinkingOrb 1.25s ease-in-out infinite;
+}
+
+.nova-thinking-dot-1 { animation: novaThinkingDot 0.95s ease-in-out infinite; }
+.nova-thinking-dot-2 { animation: novaThinkingDot 0.95s ease-in-out infinite 0.16s; }
+.nova-thinking-dot-3 { animation: novaThinkingDot 0.95s ease-in-out infinite 0.32s; }

@@ -135,6 +135,16 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  skills/perplexica-websearch:
+    dependencies:
+      '@nova/skills':
+        specifier: workspace:*
+        version: link:../../packages/skills
+    devDependencies:
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   skills/website-builder:
     dependencies:
       '@nova/skills':
