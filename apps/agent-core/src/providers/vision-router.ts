@@ -23,6 +23,11 @@ export class VisionRouter {
     );
   }
 
+  /** Read-only snapshot for troubleshooting vision routing (no upstream calls). */
+  buildDebugSnapshot(settings: AppSettings): Record<string, unknown> {
+    return buildVisionDebugSnapshot(settings);
+  }
+
   async analyze(request: VisionRequest, settings: AppSettings): Promise<VisionResult> {
     const order = normalizeVisionOrder(settings.visionProviderPriority);
     for (const lane of order) {
@@ -83,6 +88,42 @@ export class VisionRouter {
     }
     return { used: false };
   }
+}
+
+export function buildVisionDebugSnapshot(settings: AppSettings): Record<string, unknown> {
+  const mask = (s: string) => {
+    const t = s.trim();
+    if (t.length <= 12) return t ? "[set]" : "";
+    return `${t.slice(0, 8)}…${t.slice(-4)}`;
+  };
+  return {
+    visionProviderPriority: settings.visionProviderPriority,
+    hasConfiguredProvider:
+      lmstudioVisionConfigured(settings) || ollamaVisionConfigured(settings) || cloudVisionConfigured(settings),
+    activeChatProvider: settings.activeProvider,
+    ollamaChatDisabled: settings.ollama.disabled === true,
+    lmstudioChatDisabled: settings.lmstudio.disabled === true,
+    copilotChatDisabled: settings.copilot.disabled === true,
+    lanes: {
+      lmstudio: {
+        configured: lmstudioVisionConfigured(settings),
+        baseUrl: mask(resolveLmstudioVisionBase(settings)),
+        model: resolveLmstudioVisionModel(settings)
+      },
+      ollama: {
+        configured: ollamaVisionConfigured(settings),
+        baseUrl: mask(resolveOllamaVisionBase(settings)),
+        model: resolveOllamaVisionModel(settings)
+      },
+      cloud: {
+        configured: cloudVisionConfigured(settings),
+        baseUrl: mask(resolveCloudVisionBase(settings)),
+        model: resolveCloudVisionModel(settings),
+        hasApiKey: Boolean(resolveCloudVisionApiKey(settings))
+      }
+    },
+    swapLocalModelsForVision: settings.vision?.swapLocalModelsForVision === true
+  };
 }
 
 function normalizeVisionOrder(

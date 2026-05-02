@@ -35,6 +35,12 @@ export const networkDefenseSkill: RuntimeSkill = {
     description:
       "Monitor host network traffic, detect anomalies, propose mitigations, and (with explicit confirmation) apply firewall blocks/hardening.",
     permissions: ["network", "shell"],
+    settingsTab: {
+      id: "network-defense",
+      label: "Network Defense",
+      tone: "orange",
+      description: "Enable the skill and use the Security area for analyze / harden actions."
+    },
     inputSchema: {
       type: "object",
       additionalProperties: false

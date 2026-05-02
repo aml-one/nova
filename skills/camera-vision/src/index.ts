@@ -1,6 +1,6 @@
 import type { RuntimeSkill } from "@nova/skills";
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { extname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import YAML from "yaml";
@@ -13,6 +13,8 @@ import { detectSceneObjects } from "./detector.js";
 type CameraVisionInput = {
   cameraName: string;
   mode: "snapshot" | "clip5s";
+  /** When set (e.g. by agent-core from Settings RTSP list), YAML/env config is not required. */
+  rtspUrl?: string;
 };
 
 type CameraConfig = {
@@ -49,40 +51,59 @@ export const cameraVisionSkill: RuntimeSkill = {
     inputSchema: {
       type: "object",
       required: ["cameraName", "mode"],
-      additionalProperties: false
+      additionalProperties: true,
+      properties: {
+        cameraName: { type: "string" },
+        mode: { type: "string", enum: ["snapshot", "clip5s"] },
+        rtspUrl: { type: "string" }
+      }
     },
     version: "0.1.0"
   },
   async run(input: unknown): Promise<unknown> {
     const parsed = input as CameraVisionInput;
-    const cameras = loadCameraConfig();
-    const camera = resolveCamera(parsed.cameraName, cameras);
-    if (!camera) {
-      throw new Error(`unknown camera: ${parsed.cameraName}`);
+    let cameraId: string;
+    let rtspUrl: string;
+    let plateRecognitionEnabled = false;
+
+    if (parsed.rtspUrl?.trim()) {
+      cameraId = parsed.cameraName.trim();
+      rtspUrl = parsed.rtspUrl.trim();
+    } else {
+      const cameras = loadCameraConfig();
+      const camera = resolveCamera(parsed.cameraName, cameras);
+      if (!camera) {
+        throw new Error(`unknown camera: ${parsed.cameraName}`);
+      }
+      const fromEnv = process.env[camera.rtspUrlEnv];
+      if (!fromEnv) {
+        throw new Error(`missing RTSP URL env var: ${camera.rtspUrlEnv}`);
+      }
+      cameraId = camera.id;
+      rtspUrl = fromEnv;
+      plateRecognitionEnabled = camera.plateRecognitionEnabled;
     }
-    const rtspUrl = process.env[camera.rtspUrlEnv];
-    if (!rtspUrl) {
-      throw new Error(`missing RTSP URL env var: ${camera.rtspUrlEnv}`);
-    }
+
     const capture = await captureFromRtsp({
-      cameraName: camera.id,
+      cameraName: cameraId,
       rtspUrl,
       mode: parsed.mode
     });
+    const webPath = publishCaptureForWeb(capture.filePath, cameraId);
     const detections = await detectSceneObjects(capture.filePath);
     const enriched = enrichDetections(detections, {
-      plateRecognitionEnabled: camera.plateRecognitionEnabled
+      plateRecognitionEnabled
     }).map((detection) => {
       if (detection.label === "cat") {
-        const identity = identifyCat(camera.id, detection.color, catState);
+        const identity = identifyCat(cameraId, detection.color, catState);
         return { ...detection, catIdentityHint: identity.displayName };
       }
       return detection;
     });
-    persistCameraEvents(camera.id, capture.filePath, enriched);
+    persistCameraEvents(cameraId, webPath, enriched);
     return {
-      camera: camera.id,
-      capture,
+      camera: cameraId,
+      capture: { ...capture, webPath },
       detections: enriched
     };
   }
@@ -110,6 +131,16 @@ function resolveCamera(name: string, cameras: CameraConfig[]): CameraConfig | un
 }
 
 export default cameraVisionSkill;
+
+function publishCaptureForWeb(sourcePath: string, cameraId: string): string {
+  const uploads = resolve(process.cwd(), "data", "uploads");
+  mkdirSync(uploads, { recursive: true });
+  const ext = extname(sourcePath) || ".jpg";
+  const safe = `camera-${cameraId.replace(/[^a-zA-Z0-9._-]/g, "_")}-${Date.now()}${ext}`;
+  const dest = resolve(uploads, safe);
+  copyFileSync(sourcePath, dest);
+  return `/v1/media/files/${encodeURIComponent(safe)}`;
+}
 
 function persistCameraEvents(
   cameraId: string,

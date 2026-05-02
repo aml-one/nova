@@ -30,6 +30,7 @@ import type { AppSettings } from "../storage/repositories/settings-repository.js
 import { ModelRouter } from "../providers/router.js";
 import { SelfImprovementLoop } from "../improvement/self-improvement-loop.js";
 import { InMemorySkillRegistry } from "../skills/skill-registry.js";
+import { parseConfiguredCameras } from "../skills/camera-config.js";
 import { isSkillRuntimeEnabled } from "../skills/skill-enabled.js";
 import { resolveChannelAccess } from "../security/phone-access.js";
 import { ApprovalService } from "../execution/approval-service.js";
@@ -695,14 +696,23 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         return sendJson(response, 200, { ok: true, correlationId });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/skills/manifests") {
-        const items = options.skillRegistry.list().map((item) => ({
-          id: item.id,
-          name: item.name,
-          description: item.description,
-          permissions: item.permissions,
-          settingsTab: item.settingsTab
-        }));
+        const items = options.skillRegistry
+          .list()
+          .filter((item) => item.id !== "example-shell-skill")
+          .map((item) => ({
+            id: item.id,
+            name: item.name,
+            description: item.description,
+            permissions: item.permissions,
+            settingsTab: item.settingsTab
+          }));
         return sendJson(response, 200, { items, correlationId });
+      }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/debug/vision") {
+        return sendJson(response, 200, {
+          debug: options.orchestrator.getVisionDebugSnapshot(),
+          correlationId
+        });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/emotion/state") {
         const userId = parsedUrl.searchParams.get("userId") ?? "nova-system";
@@ -2123,32 +2133,6 @@ function countMostRepeated(values: string[]): { value: string; count: number } {
     }
   }
   return { value: best, count };
-}
-
-function parseConfiguredCameras(
-  skillSettings: Record<string, Record<string, unknown>>
-): Array<{ name: string; rtspUrl: string; enabled: boolean; index: number }> {
-  const config = (skillSettings["camera-vision"] ?? skillSettings["cameraVision"] ?? {}) as Record<string, unknown>;
-  const rtspRaw = String(config.rtspUrls ?? config.rtsp_urls ?? "");
-  const disabled = new Set(
-    Array.isArray(config.disabledCameraNames) ? (config.disabledCameraNames as unknown[]).map((item) => String(item)) : []
-  );
-  return rtspRaw
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, index) => {
-      const pipeIndex = line.indexOf("|");
-      const named = pipeIndex > 0;
-      const name = named ? line.slice(0, pipeIndex).trim() : `camera-${index + 1}`;
-      const rtspUrl = named ? line.slice(pipeIndex + 1).trim() : line;
-      return {
-        name,
-        rtspUrl,
-        enabled: !disabled.has(name),
-        index
-      };
-    });
 }
 
 async function readRawBody(request: IncomingMessage): Promise<string> {

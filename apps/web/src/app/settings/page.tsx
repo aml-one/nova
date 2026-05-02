@@ -17,6 +17,12 @@ import {
   type TimelineFilterKey
 } from "../../components/identity-evolution-graph";
 import { isSkillRuntimeEnabled } from "../../lib/skill-enabled";
+import {
+  buildSkillBadgeMap,
+  badgeClassForSkillBadgeState,
+  labelForSkillBadgeState,
+  type SkillBadgeState
+} from "../../lib/skill-badge";
 
 type HealthCheck = { id: string; name: string; level: "green" | "orange" | "red"; detail: string; lastSuccessfulAt?: string };
 type FullHealth = { level: "green" | "orange" | "red"; checks: HealthCheck[] };
@@ -834,9 +840,16 @@ export default function SettingsPage() {
         tone: item.settingsTab?.tone ?? ("purple" as const)
       }))
   );
-  const skillStatusById = buildSkillStatusMap(skillManifests, health?.checks ?? []);
+  const skillBadgeById = buildSkillBadgeMap(skillManifests, health?.checks ?? [], settings.skillSettings);
   const cameraSkillManifest = skillManifests.find((item) => item.id === "camera-vision" || item.id === "cameraVision");
-  const cameraSkillStatus = skillStatusById["camera-vision"] ?? skillStatusById["cameraVision"] ?? "inactive";
+  const cameraSkillStatus: SkillBadgeState =
+    skillBadgeById["camera-vision"] ?? skillBadgeById["cameraVision"] ?? "ready";
+  const skillBadgeForSettingsTab = (tabItemId: string): SkillBadgeState => {
+    const sid = tabItemId.replace("skill:", "");
+    const manifest = skillManifests.find((m) => (m.settingsTab?.id ?? m.id) === sid);
+    const key = manifest?.id ?? sid;
+    return skillBadgeById[key] ?? "ready";
+  };
   const identityTimeline = buildIdentityTimeline({
     defaultPersona,
     versions: personaVersions,
@@ -878,10 +891,8 @@ export default function SettingsPage() {
                   <span className="flex w-full items-center justify-between gap-2">
                     <span>{item.label}</span>
                     {item.id.startsWith("skill:") ? (
-                      <span
-                        className={badgeClassForSkillStatus(skillStatusById[item.id.replace("skill:", "")] ?? "inactive")}
-                      >
-                        {labelForSkillStatus(skillStatusById[item.id.replace("skill:", "")] ?? "inactive")}
+                      <span className={badgeClassForSkillBadgeState(skillBadgeForSettingsTab(item.id))}>
+                        {labelForSkillBadgeState(skillBadgeForSettingsTab(item.id))}
                       </span>
                     ) : null}
                   </span>
@@ -2011,7 +2022,7 @@ export default function SettingsPage() {
           <Card className="space-y-3">
             <div className="flex items-center justify-between gap-2">
               <h2 className="text-lg font-semibold">Camera Vision Skill</h2>
-              <span className={badgeClassForSkillStatus(cameraSkillStatus)}>{labelForSkillStatus(cameraSkillStatus)}</span>
+              <span className={badgeClassForSkillBadgeState(cameraSkillStatus)}>{labelForSkillBadgeState(cameraSkillStatus)}</span>
             </div>
             <p className="text-xs text-muted">
               Add RTSP camera URLs (one per line). You can name a camera using <code>name|rtsp://...</code>. Example: <code>front-door|rtsp://user:password@192.168.31.10:554/h.264</code>
@@ -2339,7 +2350,37 @@ export default function SettingsPage() {
           </Card>
         ) : null}
 
-        {tab.startsWith("skill:") && tab !== "skill:website-builder" && tab !== "skill:perplexica-websearch" && tab !== "skill:camera-vision" && tab !== "skill:cameraVision" ? (
+        {tab === "skill:network-defense" ? (
+          <Card className="space-y-3">
+            <h2 className="text-lg font-semibold">Network Defense Skill</h2>
+            <p className="text-xs text-muted">
+              Monitor connections, flag anomalies, and (with explicit confirmation) apply firewall-style mitigations. Use the{" "}
+              <strong>Security</strong> area in the app for analyze / harden flows once the skill is enabled.
+            </p>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={isSkillRuntimeEnabled(settings.skillSettings, "network-defense")}
+                onChange={(e) =>
+                  setSettings((p) => ({
+                    ...p,
+                    skillSettings: {
+                      ...p.skillSettings,
+                      ["network-defense"]: { ...(p.skillSettings["network-defense"] ?? {}), enabled: e.target.checked }
+                    }
+                  }))
+                }
+              />
+              Enable network defense skill
+            </label>
+          </Card>
+        ) : null}
+
+        {tab.startsWith("skill:") &&
+        tab !== "skill:website-builder" &&
+        tab !== "skill:perplexica-websearch" &&
+        tab !== "skill:camera-vision" &&
+        tab !== "skill:cameraVision" &&
+        tab !== "skill:network-defense" ? (
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">
               {((): string => {
@@ -2430,38 +2471,6 @@ function healthLabelForCheck(check: HealthCheck): string {
   if (/(token|key|secret|auth|credential)/.test(lowered)) return "Configured";
   if (/(bridge|signal|whatsapp|webhook|socket|http|api|connect)/.test(lowered)) return "Connected";
   return "Healthy";
-}
-
-function buildSkillStatusMap(
-  manifests: SkillManifest[],
-  checks: HealthCheck[]
-): Record<string, "active" | "degraded" | "inactive"> {
-  const byId: Record<string, "active" | "degraded" | "inactive"> = {};
-  for (const item of manifests) {
-    const matched = checks.find((check) => {
-      const raw = `${check.id} ${check.name} ${check.detail}`.toLowerCase();
-      return raw.includes(item.id.toLowerCase()) || raw.includes(item.name.toLowerCase());
-    });
-    if (!matched) {
-      byId[item.settingsTab?.id ?? item.id] = "inactive";
-      continue;
-    }
-    byId[item.settingsTab?.id ?? item.id] =
-      matched.level === "green" ? "active" : matched.level === "orange" ? "degraded" : "inactive";
-  }
-  return byId;
-}
-
-function labelForSkillStatus(status: "active" | "degraded" | "inactive"): string {
-  if (status === "active") return "active";
-  if (status === "degraded") return "degraded";
-  return "inactive";
-}
-
-function badgeClassForSkillStatus(status: "active" | "degraded" | "inactive"): string {
-  if (status === "active") return "rounded-ui border border-emerald-500/40 bg-emerald-500/15 px-1.5 py-0.5 text-[10px] text-emerald-300";
-  if (status === "degraded") return "rounded-ui border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300";
-  return "rounded-ui border border-rose-500/40 bg-rose-500/15 px-1.5 py-0.5 text-[10px] text-rose-300";
 }
 
 function normalizeUpdateError(value?: string): string | undefined {

@@ -85,6 +85,10 @@ export class TaskOrchestrator {
     console.log(`registered skills: ${this.deps.skillRegistry.count()}`);
   }
 
+  getVisionDebugSnapshot(): Record<string, unknown> {
+    return this.deps.visionRouter.buildDebugSnapshot(this.deps.settingsService.get());
+  }
+
   async handleChannelMessage(input: {
     channel: "web" | "whatsapp" | "signal";
     phoneNumber?: string;
@@ -510,11 +514,16 @@ export class TaskOrchestrator {
         ? await this.deps.modelRouter.chatStreamLocalFirst(messages, input.onToken, model)
         : await this.deps.modelRouter.chatLocalFirst(messages, model);
 
+    const hasAttachedImage = Boolean(
+      (input.imageUrl?.trim() ?? "") || resolveImageUrlFromUserText(input.text)?.trim()
+    );
+    const preferLocalFirst = preferLocalForHostTime || hasAttachedImage;
+
     let result: ModelResponse | undefined;
     let lastModelError: unknown;
     try {
       try {
-        if (preferLocalForHostTime) {
+        if (preferLocalFirst) {
           try {
             result = await runLocalFirst(promptMessages, undefined);
           } catch (localPrimaryErr) {
@@ -534,7 +543,7 @@ export class TaskOrchestrator {
         }
       } catch (error) {
         if (truncatedDiag.length > 0 && isLikelyContextLimitError(error)) {
-          result = preferLocalForHostTime
+          result = preferLocalFirst
             ? await runLocalFirst(promptMessagesSlim, undefined)
             : await runChat(promptMessagesSlim, selectedModel);
         } else {
@@ -561,12 +570,13 @@ export class TaskOrchestrator {
       result = undefined;
     }
 
-    // Last-resort retry: minimal prompt without memory/vision/diagnostics.
-    // This avoids false "provider unavailable" failures when context is too heavy.
+    // Last-resort retry: drop memory/diagnostics only — keep vision system context so image flows are not silently demoted to plain chat.
     if (!result) {
       try {
         const emergencyPrompt: ChatMessage[] = [
           { role: "system", content: persona.systemPrompt },
+          ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
+          ...visionExtras,
           { role: "user", content: input.text }
         ];
         result = await runLocalFirst(emergencyPrompt, undefined);
@@ -930,7 +940,17 @@ export class TaskOrchestrator {
   }> {
     const resolvedImageUrl = imageUrl ?? resolveImageUrlFromUserText(userText);
     const needsVision = isVisionIntent(userText, resolvedImageUrl);
-    if (!needsVision || !this.deps.visionRouter.hasConfiguredProvider(runtimeSettings)) {
+    if (!needsVision) {
+      return { extras: [] };
+    }
+    if (!this.deps.visionRouter.hasConfiguredProvider(runtimeSettings)) {
+      if (resolvedImageUrl?.trim()) {
+        return {
+          extras: [],
+          blockedReply:
+            "Nova needs **Vision** configured before she can look at images. Open **Settings → Vision** and set at least one of: LM Studio (URL + vision model), Ollama (URL + vision model), or Cloud (URL + model + API key). Match **Vision provider priority** to try locals first. Use **GET /v1/debug/vision** (or the web debug link) to see what Nova detects."
+        };
+      }
       return { extras: [] };
     }
     const skillVision = await this.tryCameraSkillVision(userText, accessProfile);
@@ -1058,6 +1078,10 @@ function resolveImageUrlFromUserText(text: string): string | undefined {
 }
 
 function extractImageReferenceHint(text: string): string | undefined {
+  const fromAttachedLine = text.match(
+    /(?:^|\n)\s*[-*]\s*image:\s*(\/(?:api|v1)\/media\/files\/[^\s)\]>"']+)/im
+  )?.[1];
+  if (fromAttachedLine) return fromAttachedLine;
   const fromPath = text.match(/(?:\/(?:api|v1)\/media\/files\/[^\s)\]>"']+)/i)?.[0];
   if (fromPath) return fromPath;
   const fromFilename = text.match(

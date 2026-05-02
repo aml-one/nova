@@ -4,6 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Card } from "../../components/ui/card";
 import { Checkbox } from "../../components/ui/checkbox";
 import { isSkillRuntimeEnabled } from "../../lib/skill-enabled";
+import {
+  badgeClassForSkillBadgeState,
+  labelForSkillBadgeState,
+  resolveSkillBadgeState
+} from "../../lib/skill-badge";
 
 type SkillManifest = {
   id: string;
@@ -78,14 +83,14 @@ export default function SkillsPage() {
       </Card>
       <Card className="space-y-2">
         {items.length === 0 ? <p className="text-sm text-muted">No skills loaded yet.</p> : null}
-        {items.map((item) => (
+        {items.map((item) => {
+          const badge = resolveSkillBadgeState(item, health?.checks ?? [], skillSettings);
+          return (
           <article key={item.id} className="rounded-ui border bg-surface p-3">
             <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold">{item.name || item.id}</div>
               <div className="flex items-center gap-2">
-                <span className={badgeClassForSkillStatus(resolveSkillStatus(item, health?.checks ?? []))}>
-                  {resolveSkillStatus(item, health?.checks ?? [])}
-                </span>
+                <span className={badgeClassForSkillBadgeState(badge)}>{labelForSkillBadgeState(badge)}</span>
                 <label className="flex items-center gap-2 text-xs text-muted">
                   <Checkbox
                     checked={isSkillRuntimeEnabled(skillSettings, item.id)}
@@ -107,25 +112,9 @@ export default function SkillsPage() {
               Permissions: {item.permissions && item.permissions.length > 0 ? item.permissions.join(", ") : "none declared"}
             </div>
           </article>
-        ))}
+          );
+        })}
       </Card>
     </div>
   );
-}
-
-function resolveSkillStatus(item: SkillManifest, checks: HealthCheck[]): "active" | "degraded" | "inactive" {
-  const matched = checks.find((check) => {
-    const raw = `${check.id} ${check.name} ${check.detail}`.toLowerCase();
-    return raw.includes(item.id.toLowerCase()) || raw.includes(item.name.toLowerCase());
-  });
-  if (!matched) return "inactive";
-  if (matched.level === "green") return "active";
-  if (matched.level === "orange") return "degraded";
-  return "inactive";
-}
-
-function badgeClassForSkillStatus(status: "active" | "degraded" | "inactive"): string {
-  if (status === "active") return "rounded-ui border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300";
-  if (status === "degraded") return "rounded-ui border border-amber-500/40 bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-300";
-  return "rounded-ui border border-rose-500/40 bg-rose-500/15 px-2 py-0.5 text-[10px] text-rose-300";
 }

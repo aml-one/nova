@@ -4,6 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Card } from "../../components/ui/card";
 import { parseCameraConfig } from "../../lib/camera-config";
+import {
+  badgeClassForSkillBadgeState,
+  labelForSkillBadgeState,
+  resolveSkillBadgeState
+} from "../../lib/skill-badge";
 
 type CameraTimelineItem = {
   camera_id?: string;
@@ -28,6 +33,13 @@ type CameraEntry = {
   enabled: boolean;
 };
 
+function webMediaPreviewUrl(capturePath: string): string {
+  const p = capturePath.trim();
+  if (p.startsWith("/api/media/files/")) return p;
+  if (p.startsWith("/v1/media/files/")) return `/api/media/files/${p.slice("/v1/media/files/".length)}`;
+  return p;
+}
+
 export default function CameraMonitorPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -37,7 +49,7 @@ export default function CameraMonitorPage() {
   const [timeline, setTimeline] = useState<CameraTimelineItem[]>([]);
   const [draftNames, setDraftNames] = useState<Record<string, string>>({});
   const [skillLoaded, setSkillLoaded] = useState(false);
-  const [skillStatus, setSkillStatus] = useState<"active" | "degraded" | "inactive">("inactive");
+  const [healthChecks, setHealthChecks] = useState<HealthCheck[]>([]);
 
   useEffect(() => {
     void refresh();
@@ -58,15 +70,11 @@ export default function CameraMonitorPage() {
     const healthData = (await healthRes.json()) as { health?: FullHealth };
     setSettings(settingsData.settings ?? {});
     setTimeline(Array.isArray(timelineData.items) ? timelineData.items : []);
+    setHealthChecks(healthData.health?.checks ?? []);
 
     const manifests = skillsData.items ?? [];
     const cameraManifest = manifests.find((item) => item.id === "camera-vision" || item.id === "cameraVision");
     setSkillLoaded(Boolean(cameraManifest));
-    const matched = (healthData.health?.checks ?? []).find((check) => {
-      const raw = `${check.id} ${check.name} ${check.detail}`.toLowerCase();
-      return raw.includes("camera-vision") || raw.includes("camera vision");
-    });
-    setSkillStatus(!matched ? "inactive" : matched.level === "green" ? "active" : matched.level === "orange" ? "degraded" : "inactive");
     setLoading(false);
   }
 
@@ -74,6 +82,16 @@ export default function CameraMonitorPage() {
     const cameraConfig = (settings.skillSettings?.["camera-vision"] ?? settings.skillSettings?.["cameraVision"] ?? {}) as Record<string, unknown>;
     return parseCameraConfig(cameraConfig);
   }, [settings]);
+
+  const cameraSkillBadge = useMemo(
+    () =>
+      resolveSkillBadgeState(
+        { id: "camera-vision", name: "Camera Vision" },
+        healthChecks,
+        settings.skillSettings ?? {}
+      ),
+    [healthChecks, settings.skillSettings]
+  );
 
   const latestByCamera = useMemo(() => {
     const map = new Map<string, CameraTimelineItem>();
@@ -194,8 +212,9 @@ export default function CameraMonitorPage() {
             {loading ? "Refreshing..." : "Refresh"}
           </Button>
         </div>
-        <div className="text-xs text-muted">
-          Skill runtime: {skillLoaded ? "loaded" : "not loaded"} · health: {skillStatus}
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+          <span>Skill runtime: {skillLoaded ? "loaded" : "not loaded"}</span>
+          <span className={badgeClassForSkillBadgeState(cameraSkillBadge)}>{labelForSkillBadgeState(cameraSkillBadge)}</span>
         </div>
         {!skillLoaded ? (
           <div className="rounded-ui border border-rose-500/40 bg-rose-500/10 p-2 text-xs text-rose-200">
@@ -218,7 +237,8 @@ export default function CameraMonitorPage() {
             const latest = latestByCamera.get(camera.name);
             const isValidRtsp = /^rtsp:\/\//i.test(camera.rtspUrl);
             const preview = String(latest?.capture_path ?? "");
-            const showImage = /^https?:\/\//i.test(preview) || preview.startsWith("/v1/media/files/") || preview.startsWith("/api/");
+            const imgSrc = preview ? webMediaPreviewUrl(preview) : "";
+            const showImage = /^https?:\/\//i.test(imgSrc) || imgSrc.startsWith("/api/media/files/");
             return (
               <article key={camera.name} className="rounded-ui border bg-surface p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -250,7 +270,7 @@ export default function CameraMonitorPage() {
                 <div className="mt-2 grid gap-2 md:grid-cols-[180px_1fr]">
                   <div className="h-28 overflow-hidden rounded-ui border bg-surface2">
                     {showImage ? (
-                      <img src={preview} alt={`${camera.name} snapshot`} className="h-full w-full object-cover" />
+                      <img src={imgSrc} alt={`${camera.name} snapshot`} className="h-full w-full object-cover" />
                     ) : (
                       <div className="flex h-full items-center justify-center px-2 text-center text-[11px] text-muted">
                         {preview ? "No web preview for this capture path." : "No snapshot yet."}

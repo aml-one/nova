@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
+import { resolveRtspForCameraName } from "./camera-config.js";
 import { isSkillRuntimeEnabled } from "./skill-enabled.js";
 
 export type RegisteredSkill = {
@@ -22,6 +23,21 @@ type SkillRuntimeSettings = {
   timeoutMs: number;
   maxMemoryMb: number;
 };
+
+function mergeCameraVisionInput(
+  skillId: string,
+  input: unknown,
+  skillSettings: Record<string, Record<string, unknown>>
+): unknown {
+  if (skillId !== "camera-vision") return input;
+  const inp = input as { cameraName?: string; rtspUrl?: string };
+  if (inp.rtspUrl?.trim()) return input;
+  const name = inp.cameraName?.trim();
+  if (!name) return input;
+  const resolved = resolveRtspForCameraName(skillSettings, name);
+  if (!resolved) return input;
+  return { ...inp, rtspUrl: resolved.rtspUrl, cameraName: resolved.name };
+}
 
 export class InMemorySkillRegistry {
   private readonly skills = new Map<string, RegisteredSkill>();
