@@ -1,7 +1,7 @@
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import { readUploadedMediaBytes } from "../media/media-storage.js";
 import { lmstudioOpenAiBaseToRestRoot, lmstudioUnloadModel } from "./lmstudio-vision-swap.js";
-import { normalizeOllamaBaseUrl, ollamaUnloadModel } from "./ollama-vision-swap.js";
+import { normalizeOllamaBaseUrl, ollamaPrewarmChatModelAfterVisionSwap, ollamaUnloadModel } from "./ollama-vision-swap.js";
 
 type VisionRequest = {
   userPrompt: string;
@@ -122,7 +122,9 @@ export function buildVisionDebugSnapshot(settings: AppSettings): Record<string, 
         hasApiKey: Boolean(resolveCloudVisionApiKey(settings))
       }
     },
-    swapLocalModelsForVision: settings.vision?.swapLocalModelsForVision === true
+    swapLocalModelsForVision: settings.vision?.swapLocalModelsForVision === true,
+    ollamaPostVisionPrewarm:
+      "When unload-chat-for-vision is on, after vision Nova waits NOVA_OLLAMA_POST_VISION_SETTLE_MS (default 500) then pre-warms the default chat model (NOVA_OLLAMA_POST_VISION_WARM_ATTEMPTS / _GAP_MS) so chat does not fall through to Copilot."
   };
 }
 
@@ -300,6 +302,9 @@ async function runWithOptionalOllamaSwap(
     return await runVision();
   } finally {
     await ollamaUnloadModel(vBase, visionModel);
+    // Without this, the following chat request often hits Ollama before the default model is resident again
+    // and local-first chat falls through to Copilot even though Ollama is the primary provider.
+    await ollamaPrewarmChatModelAfterVisionSwap(cBase, chatModel);
   }
 }
 
