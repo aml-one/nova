@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, existsSync, readFileSync, appendFileSync, rmSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, appendFileSync, rmSync, readdirSync } from "node:fs";
 import { resolve, extname, basename } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -77,6 +77,41 @@ export function completeChunkedUpload(uploadId: string, filename: string): {
     kind,
     posterUrlPath
   };
+}
+
+/** Resolve an uploaded media URL by filename hint (e.g. "photo.jpg"). */
+export function resolveUploadedMediaUrl(hint: string): string | undefined {
+  const trimmed = hint.trim();
+  if (!trimmed) return undefined;
+  // Accept direct media URLs from web/api style paths.
+  if (trimmed.startsWith("/v1/media/files/")) return trimmed;
+  if (trimmed.startsWith("/api/media/files/")) {
+    return `/v1/media/files/${trimmed.slice("/api/media/files/".length)}`;
+  }
+  const marker = "/v1/media/files/";
+  const idx = trimmed.indexOf(marker);
+  if (idx >= 0) return trimmed.slice(idx);
+  const apiMarker = "/api/media/files/";
+  const apiIdx = trimmed.indexOf(apiMarker);
+  if (apiIdx >= 0) return `/v1/media/files/${trimmed.slice(apiIdx + apiMarker.length)}`;
+
+  const safeName = sanitizeFilename(trimmed);
+  const directPath = resolve(uploadsDir, safeName);
+  if (existsSync(directPath)) {
+    return `/v1/media/files/${encodeURIComponent(safeName)}`;
+  }
+  // Fallback: loose match in uploads folder (exact suffix/prefix).
+  try {
+    const lowered = safeName.toLowerCase();
+    const items = readdirSync(uploadsDir);
+    const match = items.find((item) => {
+      const n = item.toLowerCase();
+      return n === lowered || n.endsWith(lowered) || lowered.endsWith(n);
+    });
+    return match ? `/v1/media/files/${encodeURIComponent(match)}` : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function sanitizeFilename(name: string): string {

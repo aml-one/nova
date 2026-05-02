@@ -27,6 +27,7 @@ import { RunHistoryRepository } from "../storage/repositories/run-history-reposi
 import { ApprovalService } from "../execution/approval-service.js";
 import { VisionRouter } from "../providers/vision-router.js";
 import { MediaGenerationRouter } from "../media/media-generation-router.js";
+import { resolveUploadedMediaUrl } from "../media/media-storage.js";
 import { SettingsService } from "../settings/settings-service.js";
 import type { ChannelAccessProfile } from "../security/phone-access.js";
 import { EmotionService } from "../emotion/emotion-service.js";
@@ -367,6 +368,31 @@ export class TaskOrchestrator {
       truncatedDiag.length > 0
         ? `${input.text}\n\n---\nHost diagnostics (read-only, collected automatically by Nova):\n${truncatedDiag}`
         : input.text;
+    const unresolvedVisionRef = this.resolveUnresolvedVisionReference(input.text, input.imageUrl, runtimeSettings);
+    if (unresolvedVisionRef) {
+      this.deps.memoryService.appendTurn(userId, input.text, unresolvedVisionRef);
+      this.recordRunHistory({
+        runId,
+        userId,
+        channel: input.channel,
+        inputText: input.text,
+        outputText: unresolvedVisionRef,
+        success: false,
+        correlationId,
+        latencyMs: Date.now() - startedAt,
+        provider: "vision-guard",
+        tokenInCount: estimateTokens(input.text),
+        tokenOutCount: estimateTokens(unresolvedVisionRef),
+        toolTimingsMs: hostDiagnosticsMs > 0 ? { hostDiagnosticsMs } : {}
+      });
+      this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: false });
+      this.thoughtLog.append({
+        category: "chat",
+        title: "Vision image unresolved",
+        content: unresolvedVisionRef.slice(0, 220)
+      });
+      return unresolvedVisionRef;
+    }
     const visionExtras = await this.buildVisionContextIfNeeded(
       input.text,
       input.imageUrl,
@@ -795,7 +821,8 @@ export class TaskOrchestrator {
     accessProfile: ChannelAccessProfile | undefined,
     runtimeSettings: AppSettings
   ): Promise<Array<{ role: "system"; content: string }>> {
-    const needsVision = isVisionIntent(userText, imageUrl);
+    const resolvedImageUrl = imageUrl ?? resolveImageUrlFromUserText(userText);
+    const needsVision = isVisionIntent(userText, resolvedImageUrl);
     if (!needsVision || !this.deps.visionRouter.hasConfiguredProvider(runtimeSettings)) {
       return [];
     }
@@ -804,7 +831,7 @@ export class TaskOrchestrator {
     const vision = await this.deps.visionRouter.analyze(
       {
         userPrompt: effectivePrompt,
-        imageUrl
+        imageUrl: resolvedImageUrl
       },
       runtimeSettings
     );
@@ -872,6 +899,45 @@ export class TaskOrchestrator {
     }
     return `Generated ${generated.kind} automatically via ${generated.provider}: ${generated.url}`;
   }
+
+  private resolveUnresolvedVisionReference(
+    userText: string,
+    imageUrl: string | undefined,
+    runtimeSettings: AppSettings
+  ): string | undefined {
+    if (!this.deps.visionRouter.hasConfiguredProvider(runtimeSettings)) {
+      return undefined;
+    }
+    if (imageUrl) {
+      return undefined;
+    }
+    const refHint = extractImageReferenceHint(userText);
+    if (!refHint) {
+      return undefined;
+    }
+    const resolved = resolveUploadedMediaUrl(refHint);
+    if (resolved) {
+      return undefined;
+    }
+    return `I couldn't find image \`${refHint}\` in uploaded files. Please upload it again (or paste the exact /api/media/files/... URL), then I will analyze that exact image.`;
+  }
+}
+
+function resolveImageUrlFromUserText(text: string): string | undefined {
+  const hint = extractImageReferenceHint(text);
+  if (hint) {
+    return resolveUploadedMediaUrl(hint);
+  }
+  return undefined;
+}
+
+function extractImageReferenceHint(text: string): string | undefined {
+  const fromPath = text.match(/(?:\/(?:api|v1)\/media\/files\/[^\s)\]>"']+)/i)?.[0];
+  if (fromPath) return fromPath;
+  const fromFilename = text.match(
+    /\b([A-Za-z0-9._-]+\.(?:png|jpe?g|webp|gif|bmp|heic|heif|mp4|mov|webm))\b/i
+  )?.[1];
+  return fromFilename;
 }
 
 function estimateTokens(text: string): number {
