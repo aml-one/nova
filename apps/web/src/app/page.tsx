@@ -793,15 +793,13 @@ export default function HomePage() {
                           <div
                             key={phase}
                             className={cn(
-                              "flex items-center justify-between rounded-full border px-3 py-1.5 transition-all",
+                              "flex items-center gap-2 rounded-full border px-3 py-1.5 transition-all",
                               "nova-thinking-row-active border-blue-400/60 bg-blue-500/15"
                             )}
                           >
-                            <div className="flex items-center gap-2">
-                              <span className="h-3.5 w-3.5 rounded-full border nova-thinking-orb border-blue-300/80" />
-                              <span className="text-xs font-medium">{label}</span>
-                            </div>
-                            <span className="flex items-center gap-1.5">
+                            <span className="h-3.5 w-3.5 shrink-0 rounded-full border nova-thinking-orb border-blue-300/80" />
+                            <span className="text-xs font-medium">{label}</span>
+                            <span className="flex items-center gap-1.5 pl-0.5">
                               <span className="h-1.5 w-1.5 rounded-full nova-thinking-dot-1 bg-blue-300" />
                               <span className="h-1.5 w-1.5 rounded-full nova-thinking-dot-2 bg-blue-300" />
                               <span className="h-1.5 w-1.5 rounded-full nova-thinking-dot-3 bg-blue-300" />
