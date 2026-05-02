@@ -714,6 +714,12 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           correlationId
         });
       }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/debug/chat-routing") {
+        return sendJson(response, 200, {
+          debug: options.orchestrator.getRoutingDebugSnapshot(),
+          correlationId
+        });
+      }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/emotion/state") {
         const userId = parsedUrl.searchParams.get("userId") ?? "nova-system";
         const state = options.orchestrator.getEmotionState(userId);

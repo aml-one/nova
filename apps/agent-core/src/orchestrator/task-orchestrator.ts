@@ -28,6 +28,7 @@ import { UserProfileStore } from "../identity/user-profile-store.js";
 import { RunHistoryRepository } from "../storage/repositories/run-history-repository.js";
 import { ApprovalService } from "../execution/approval-service.js";
 import { VisionRouter } from "../providers/vision-router.js";
+import { buildRoutingDebugSnapshot } from "./routing-debug.js";
 import { MediaGenerationRouter } from "../media/media-generation-router.js";
 import { resolveUploadedMediaUrl } from "../media/media-storage.js";
 import { SettingsService } from "../settings/settings-service.js";
@@ -87,6 +88,11 @@ export class TaskOrchestrator {
 
   getVisionDebugSnapshot(): Record<string, unknown> {
     return this.deps.visionRouter.buildDebugSnapshot(this.deps.settingsService.get());
+  }
+
+  /** Vision + chat routing (read-only); use when run history shows Copilot but you expect local. */
+  getRoutingDebugSnapshot(): Record<string, unknown> {
+    return buildRoutingDebugSnapshot(this.deps.settingsService.get(), this.deps.modelRouter);
   }
 
   async handleChannelMessage(input: {
@@ -948,7 +954,7 @@ export class TaskOrchestrator {
         return {
           extras: [],
           blockedReply:
-            "Nova needs **Vision** configured before she can look at images. Open **Settings → Vision** and set at least one of: LM Studio (URL + vision model), Ollama (URL + vision model), or Cloud (URL + model + API key). Match **Vision provider priority** to try locals first. Use **GET /v1/debug/vision** (or the web debug link) to see what Nova detects."
+            "Nova needs **Vision** configured before she can look at images. Open **Settings → Vision** and set at least one of: LM Studio (URL + vision model), Ollama (URL + vision model), or Cloud (URL + model + API key). Match **Vision provider priority** to try locals first. Use **GET /api/debug/vision** (vision only) or **GET /api/debug/chat-routing** (vision + why chat may still use Copilot) while logged in."
         };
       }
       return { extras: [] };
