@@ -4,7 +4,7 @@
 import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { FaBrain, FaCopy, FaFloppyDisk, FaPenToSquare, FaPlus, FaRotateRight, FaSpinner, FaTrash, FaXmark } from "react-icons/fa6";
+import { FaBrain, FaCheck, FaCopy, FaFloppyDisk, FaPenToSquare, FaPlus, FaRotateRight, FaSpinner, FaTrash, FaXmark } from "react-icons/fa6";
 import { Card } from "../components/ui/card";
 import { Textarea } from "../components/ui/textarea";
 import { Select } from "../components/ui/select";
@@ -102,6 +102,7 @@ export default function HomePage() {
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [lastCopiedTurnId, setLastCopiedTurnId] = useState<string | null>(null);
   const hasLoadedSessionsRef = useRef(false);
+  const hasDoneInitialBottomScrollRef = useRef(false);
   const compactActionClass = "inline-flex h-9 min-w-9 items-center justify-center px-2";
   const bubbleIconActionClass =
     "inline-flex h-7 w-7 items-center justify-center transition-[filter] hover:brightness-110";
@@ -306,6 +307,19 @@ export default function HomePage() {
       behavior: loading ? "auto" : "smooth"
     });
   }, [turns, liveThinking, loading, autoScrollEnabled]);
+
+  useEffect(() => {
+    if (!chatStyleReady) return;
+    if (!hasLoadedSessionsRef.current) return;
+    if (hasDoneInitialBottomScrollRef.current) return;
+    const container = chatScrollRef.current;
+    if (!container) return;
+    hasDoneInitialBottomScrollRef.current = true;
+    setAutoScrollEnabled(true);
+    requestAnimationFrame(() => {
+      container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+    });
+  }, [chatStyleReady, turns.length, activeSessionId]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -706,7 +720,7 @@ export default function HomePage() {
                     onClick={() => void copyTurnText(turn.text, turn.id)}
                     title="Copy message"
                   >
-                    <FaCopy className="h-3.5 w-3.5" />
+                    {lastCopiedTurnId === turn.id ? <FaCheck className="h-3.5 w-3.5 text-emerald-400" /> : <FaCopy className="h-3.5 w-3.5" />}
                   </button>
                   <div className="flex items-center gap-1.5">
                     <button
@@ -778,11 +792,10 @@ export default function HomePage() {
                     onClick={() => void copyTurnText(turn.text, turn.id)}
                     title="Copy message"
                   >
-                    <FaCopy className="h-3.5 w-3.5" />
+                    {lastCopiedTurnId === turn.id ? <FaCheck className="h-3.5 w-3.5 text-emerald-400" /> : <FaCopy className="h-3.5 w-3.5" />}
                   </button>
                 </div>
               ) : null}
-              {lastCopiedTurnId === turn.id ? <div className="mt-1 text-[11px] text-emerald-400">Copied</div> : null}
               {turn.role === "assistant" && showThinkingInChat && turn.thinkingText ? (
                 <div className="mt-2 rounded-ui border border-slate-500/60 bg-slate-200/60 p-1.5 text-xs text-slate-700 dark:bg-slate-700/45 dark:text-slate-200">
                   <button
@@ -956,7 +969,18 @@ export default function HomePage() {
               </Link>
               {uploadedMedia.length > 0 ? <Badge tone="pink">{uploadedMedia.length} media ready</Badge> : null}
             </div>
-            {!loading && message.trim().length > 0 ? <Button type="submit" tone="green" className="h-8 px-3 text-sm">Send</Button> : null}
+            <div className="flex h-8 w-[4.75rem] shrink-0 items-center justify-end">
+              <Button
+                type="submit"
+                tone="green"
+                className={cn(
+                  "h-8 w-[4.5rem] px-3 text-sm transition-opacity",
+                  !loading && message.trim().length > 0 ? "opacity-100" : "pointer-events-none opacity-0 invisible"
+                )}
+              >
+                Send
+              </Button>
+            </div>
           </div>
         </form>
       </Card>
