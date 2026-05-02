@@ -110,8 +110,10 @@ function lmstudioVisionConfigured(settings: AppSettings): boolean {
   return Boolean(
     (v?.lmstudioModel?.trim() ?? "") ||
       (v?.lmstudioBaseUrl?.trim() ?? "") ||
+      (settings.lmstudio.disabled !== true && settings.models.defaultByProvider.lmstudio.trim()) ||
       process.env.LMSTUDIO_VISION_MODEL ||
-      process.env.LMSTUDIO_VISION_BASE_URL
+      process.env.LMSTUDIO_VISION_BASE_URL ||
+      (settings.lmstudio.disabled !== true && process.env.LMSTUDIO_MODEL)
   );
 }
 
@@ -120,8 +122,10 @@ function ollamaVisionConfigured(settings: AppSettings): boolean {
   return Boolean(
     (v?.ollamaModel?.trim() ?? "") ||
       (v?.ollamaBaseUrl?.trim() ?? "") ||
+      (settings.ollama.disabled !== true && settings.models.defaultByProvider.ollama.trim()) ||
       process.env.OLLAMA_VISION_MODEL ||
-      process.env.OLLAMA_VISION_BASE_URL
+      process.env.OLLAMA_VISION_BASE_URL ||
+      (settings.ollama.disabled !== true && process.env.OLLAMA_MODEL)
   );
 }
 
@@ -143,7 +147,9 @@ function resolveLmstudioVisionBase(settings: AppSettings): string {
 function resolveLmstudioVisionModel(settings: AppSettings): string {
   return (
     settings.vision?.lmstudioModel?.trim() ||
+    settings.models.defaultByProvider.lmstudio.trim() ||
     process.env.LMSTUDIO_VISION_MODEL ||
+    process.env.LMSTUDIO_MODEL ||
     "local-vision-model"
   );
 }
@@ -158,7 +164,13 @@ function resolveOllamaVisionBase(settings: AppSettings): string {
 }
 
 function resolveOllamaVisionModel(settings: AppSettings): string {
-  return settings.vision?.ollamaModel?.trim() || process.env.OLLAMA_VISION_MODEL || "llava";
+  return (
+    settings.vision?.ollamaModel?.trim() ||
+    settings.models.defaultByProvider.ollama.trim() ||
+    process.env.OLLAMA_VISION_MODEL ||
+    process.env.OLLAMA_MODEL ||
+    "llava"
+  );
 }
 
 function resolveChatOllamaBase(settings: AppSettings): string {
