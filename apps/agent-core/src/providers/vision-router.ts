@@ -31,6 +31,8 @@ export class VisionRouter {
   async analyze(request: VisionRequest, settings: AppSettings): Promise<VisionResult> {
     const order = normalizeVisionOrder(settings.visionProviderPriority);
     for (const lane of order) {
+      // Exactly one lane per iteration — previously three separate `if`s caused cloud (or LM Studio)
+      // to run in the same pass as Ollama when Ollama returned empty or threw, ignoring priority.
       if (lane === "lmstudio" && lmstudioVisionConfigured(settings)) {
         try {
           const visionBase = resolveLmstudioVisionBase(settings);
@@ -47,10 +49,9 @@ export class VisionRouter {
             return { used: true, provider: "lmstudio", summary: summary.trim() };
           }
         } catch {
-          // try next
+          // try next lane in order
         }
-      }
-      if (lane === "ollama" && ollamaVisionConfigured(settings)) {
+      } else if (lane === "ollama" && ollamaVisionConfigured(settings)) {
         try {
           const baseUrl = resolveOllamaVisionBase(settings);
           const model = resolveOllamaVisionModel(settings);
@@ -66,10 +67,9 @@ export class VisionRouter {
             return { used: true, provider: "ollama", summary: summary.trim() };
           }
         } catch {
-          // try next
+          // try next lane in order
         }
-      }
-      if (lane === "cloud" && cloudVisionConfigured(settings)) {
+      } else if (lane === "cloud" && cloudVisionConfigured(settings)) {
         try {
           const summary = await analyzeViaOpenAICompatible({
             endpoint: `${resolveCloudVisionBase(settings)}/chat/completions`,
@@ -82,7 +82,7 @@ export class VisionRouter {
             return { used: true, provider: "cloud", summary: summary.trim() };
           }
         } catch {
-          // try next
+          // try next lane in order
         }
       }
     }
