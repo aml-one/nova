@@ -303,7 +303,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         return sendJson(response, 200, { settings: updated, correlationId });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/system/health/full") {
-        const full = await buildFullHealth(options.modelRouter, dispatcher, scheduler);
+        const full = await buildFullHealth(options.modelRouter, dispatcher, scheduler, () => options.settings.get());
         return sendJson(response, 200, { health: full, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/models/ping") {
@@ -2154,7 +2154,8 @@ const healthLastSuccessMap = new Map<string, string>();
 async function buildFullHealth(
   modelRouter: ModelRouter,
   dispatcher: OutboundDispatcher,
-  scheduler: SchedulerService
+  scheduler: SchedulerService,
+  getSettings: () => AppSettings
 ): Promise<{
   level: HealthLevel;
   checks: HealthCheckResult[];
@@ -2165,6 +2166,7 @@ async function buildFullHealth(
   checks.push(...(await checkModelProviders(modelRouter)));
   checks.push(...(await checkChannels()));
   checks.push(...checkSecurityConfig());
+  checks.push(await checkPerplexicaWebsearch(getSettings));
   checks.push({
     id: "dispatcher",
     name: "Outbound Dispatcher",
@@ -2201,6 +2203,10 @@ function isAdvisoryHealthCheck(id: string): boolean {
     id === "webhook-whatsapp-secret" ||
     id === "webhook-signal-secret"
   ) {
+    return true;
+  }
+  // Optional web-search skill; absence or downtime should not fail overall health.
+  if (id === "perplexica-websearch") {
     return true;
   }
   // Model providers are grouped as optional alternatives; individual provider failures are advisory.
@@ -2253,6 +2259,20 @@ async function checkModelProviders(modelRouter: ModelRouter): Promise<HealthChec
       }
     ];
   }
+}
+
+async function checkPerplexicaWebsearch(getSettings: () => AppSettings): Promise<HealthCheckResult> {
+  const skill = (getSettings().skillSettings?.["perplexica-websearch"] ?? {}) as Record<string, unknown>;
+  const fromSettings = typeof skill.baseUrl === "string" ? skill.baseUrl.trim() : "";
+  const base =
+    (fromSettings || process.env.NOVA_PERPLEXICA_BASE_URL || "http://127.0.0.1:3008").replace(/\/$/, "") || "http://127.0.0.1:3008";
+  const ping = await pingUrl(base);
+  return {
+    id: "perplexica-websearch",
+    name: "Perplexica Websearch",
+    level: ping.ok ? "green" : "orange",
+    detail: ping.ok ? `reachable at ${base}` : `unreachable at ${base}: ${ping.detail}`
+  };
 }
 
 async function checkChannels(): Promise<HealthCheckResult[]> {

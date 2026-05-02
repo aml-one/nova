@@ -1261,6 +1261,7 @@ function isInsideReasoningStream(full: string): boolean {
   const lower = full.toLowerCase();
   const pairs: Array<[string, string]> = [
     ["<thinking>", "</thinking>"],
+    ["<reasoning>", "</reasoning>"],
     ["<think>", "</think>"]
   ];
   for (const [open, close] of pairs) {
@@ -1292,6 +1293,7 @@ function extractThinking(input: {
   const thinkingParts: string[] = [];
   const patterns = [
     /<thinking>([\s\S]*?)<\/thinking>/gi,
+    /<reasoning>([\s\S]*?)<\/reasoning>/gi,
     /<think>([\s\S]*?)<\/redacted_thinking>/gi
   ];
   let visible = text;
