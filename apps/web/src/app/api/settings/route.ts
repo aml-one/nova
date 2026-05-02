@@ -15,6 +15,7 @@ type AppSettingsPayload = {
     isolationEnabled?: boolean;
     timeoutMs?: number;
     maxMemoryMb?: number;
+    skillAuthoringDisabled?: boolean;
   };
   web?: {
     loginEnabled?: boolean;
@@ -91,6 +92,7 @@ type AppSettingsPayload = {
       lmstudio?: string;
       copilot?: string;
     };
+    ollamaThinkingEnabled?: boolean;
   };
   copilot?: {
     baseUrl?: string;

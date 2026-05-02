@@ -37,6 +37,7 @@ import {
   registerCopilotSettingsSource,
   resolveCopilotRuntime
 } from "../providers/copilot-credentials.js";
+import { registerOllamaSettingsSource } from "../providers/ollama.js";
 import { ProviderCatalogService } from "../providers/provider-catalog.js";
 import { UpdateManager } from "../update/update-manager.js";
 import { ThoughtRepository } from "../storage/repositories/thought-repository.js";
@@ -74,6 +75,7 @@ type CopilotDeviceLoginSession = {
 
 export async function startHttpServer(options: HttpServerOptions): Promise<void> {
   registerCopilotSettingsSource(() => options.settings.get());
+  registerOllamaSettingsSource(() => options.settings.get());
   const port = options.port ?? Number(process.env.NOVA_AGENT_PORT ?? "8787");
   const wa = new WhatsAppChannelAdapter();
   const signal = new SignalChannelAdapter();
@@ -1267,6 +1269,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           const current = options.settings.get();
           options.settings.updatePartial({
             models: {
+              ...current.models,
               defaultByProvider: {
                 ...current.models.defaultByProvider,
                 [winner.provider]: winner.model

@@ -1,4 +1,12 @@
 import type { ChatRequest, ModelProvider, ModelResponse, ProviderHealth } from "@nova/sdk/provider";
+import type { AppSettings } from "../storage/repositories/settings-repository.js";
+
+let appSettingsGetter: (() => AppSettings) | undefined;
+
+/** Call from bootstrap so Ollama can read `models.ollamaThinkingEnabled` (env overrides when set). */
+export function registerOllamaSettingsSource(getter: () => AppSettings): void {
+  appSettingsGetter = getter;
+}
 
 type OllamaChatResponse = {
   message?: {
@@ -19,11 +27,16 @@ function ollamaAssistantText(message: OllamaChatResponse["message"]): string {
   return raw;
 }
 
-function ollamaThinkFlag(): boolean | undefined {
+/** `think` field for Ollama `/api/chat`. Env `NOVA_OLLAMA_THINK` wins when set; otherwise uses Settings → Models. */
+function ollamaThinkForApi(): boolean {
   const raw = process.env.NOVA_OLLAMA_THINK?.trim().toLowerCase();
   if (raw === "true" || raw === "1") return true;
   if (raw === "false" || raw === "0") return false;
-  return false;
+  try {
+    return appSettingsGetter?.().models.ollamaThinkingEnabled === true;
+  } catch {
+    return false;
+  }
 }
 
 export class OllamaProvider implements ModelProvider {
@@ -59,7 +72,7 @@ export class OllamaProvider implements ModelProvider {
         model: request.model ?? this.model,
         messages: request.messages,
         stream: false,
-        think: ollamaThinkFlag(),
+        think: ollamaThinkForApi(),
         keep_alive: this.keepAlive,
         options: {
           temperature: request.temperature ?? 0.2,
@@ -94,7 +107,7 @@ export class OllamaProvider implements ModelProvider {
         model: request.model ?? this.model,
         messages: request.messages,
         stream: true,
-        think: ollamaThinkFlag(),
+        think: ollamaThinkForApi(),
         keep_alive: this.keepAlive,
         options: {
           temperature: request.temperature ?? 0.2,

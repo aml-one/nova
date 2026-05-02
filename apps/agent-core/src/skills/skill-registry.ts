@@ -52,7 +52,11 @@ export class InMemorySkillRegistry {
       throw new Error(`skill not found: ${skillId}`);
     }
     const runtimeSettings = this.getRuntimeSettings?.();
-    const isolationEnabled = runtimeSettings?.isolationEnabled ?? process.env.NOVA_SKILL_ISOLATION === "true";
+    const envIso = process.env.NOVA_SKILL_ISOLATION?.trim().toLowerCase();
+    const isolationFromEnv =
+      envIso === "true" || envIso === "1" ? true : envIso === "false" || envIso === "0" ? false : undefined;
+    const isolationEnabled =
+      isolationFromEnv !== undefined ? isolationFromEnv : runtimeSettings?.isolationEnabled === true;
     if (isolationEnabled && skill.sourcePath) {
       return runInIsolatedProcess(
         skill.id,

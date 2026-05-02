@@ -1,4 +1,5 @@
 import type { ChatMessage, ChatRequest, ModelResponse, ProviderHealth } from "@nova/sdk/provider";
+import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import { CopilotProvider } from "./copilot.js";
 import { isCopilotIntegrationDisabled } from "./copilot-credentials.js";
 import { LMStudioProvider } from "./lmstudio.js";
@@ -238,9 +239,7 @@ export class ModelRouter {
   /**
    * Reachability + one minimal chat per provider using the configured default model id from settings.
    */
-  async pingConfiguredModels(settings: {
-    models: { defaultByProvider: { ollama: string; lmstudio: string; copilot: string } };
-  }): Promise<{
+  async pingConfiguredModels(settings: AppSettings): Promise<{
     results: Array<{
       provider: "ollama" | "lmstudio" | "copilot";
       healthOk: boolean;

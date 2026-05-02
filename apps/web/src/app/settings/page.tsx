@@ -86,8 +86,9 @@ type SettingsState = {
   emotions: { enabled: boolean; expressionStyle: "subtle" | "balanced" | "expressive"; mirrorUserValence: boolean };
   messagingAccess: { novaPhoneNumber: string; denyUnknownNumbers: boolean; systemAdmins: string[]; guests: string[] };
   shell: { timeoutMs: number; maxOutputBytes: number };
+  skills: { isolationEnabled: boolean; timeoutMs: number; maxMemoryMb: number; skillAuthoringDisabled: boolean };
   identityBackup: { enabled: boolean; intervalDays: number; labelPrefix: string };
-  models: { defaultByProvider: { ollama: string; lmstudio: string; copilot: string } };
+  models: { defaultByProvider: { ollama: string; lmstudio: string; copilot: string }; ollamaThinkingEnabled: boolean };
   copilot: { baseUrl: string; apiKey: string; defaultModel: string; disabled: boolean };
   updates: { enabled: boolean; checkIntervalMs: number; repoOwner: string; repoName: string; channel: "stable" | "beta"; autoApply: boolean };
   offlineMode: { enabled: boolean };
@@ -155,8 +156,9 @@ const DEFAULT_SETTINGS: SettingsState = {
   emotions: { enabled: false, expressionStyle: "balanced", mirrorUserValence: true },
   messagingAccess: { novaPhoneNumber: "", denyUnknownNumbers: true, systemAdmins: [], guests: [] },
   shell: { timeoutMs: 30000, maxOutputBytes: 1024 * 1024 },
+  skills: { isolationEnabled: false, timeoutMs: 15000, maxMemoryMb: 256, skillAuthoringDisabled: false },
   identityBackup: { enabled: false, intervalDays: 1, labelPrefix: "nova-core" },
-  models: { defaultByProvider: { ollama: "", lmstudio: "", copilot: "" } },
+  models: { defaultByProvider: { ollama: "", lmstudio: "", copilot: "" }, ollamaThinkingEnabled: false },
   copilot: { baseUrl: "", apiKey: "", defaultModel: "gpt-4o-mini", disabled: false },
   updates: { enabled: false, checkIntervalMs: 1800000, repoOwner: "", repoName: "", channel: "stable", autoApply: false }
   , offlineMode: { enabled: false },
@@ -1007,6 +1009,57 @@ export default function SettingsPage() {
                 <Input type="number" value={settings.shell.maxOutputBytes} onChange={(e) => setSettings((p) => ({ ...p, shell: { ...p.shell, maxOutputBytes: Number(e.target.value || 0) } }))} placeholder="Shell max bytes" />
               </label>
             </div>
+            <div className="space-y-2 rounded-ui border bg-surface2 p-3">
+              <h3 className="text-sm font-semibold">Skills execution</h3>
+              <p className="text-[11px] text-muted leading-snug">
+                Isolation runs untrusted skill code in a subprocess with tighter limits. If <code className="font-mono text-[10px]">NOVA_SKILL_ISOLATION</code> is set to{" "}
+                <code className="font-mono text-[10px]">true</code>/<code className="font-mono text-[10px]">false</code>, it overrides this checkbox.
+              </p>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={settings.skills.isolationEnabled}
+                  onChange={(e) => setSettings((p) => ({ ...p, skills: { ...p.skills, isolationEnabled: e.target.checked } }))}
+                />
+                Skill process isolation (recommended on shared machines)
+              </label>
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={settings.skills.skillAuthoringDisabled}
+                  onChange={(e) =>
+                    setSettings((p) => ({ ...p, skills: { ...p.skills, skillAuthoringDisabled: e.target.checked } }))
+                  }
+                />
+                <span>
+                  <span className="font-medium">Disable skill authoring from chat</span>
+                  <span className="mt-0.5 block text-[11px] text-muted leading-snug">
+                    Blocks Nova from starting the automatic “create a skill” flow from user messages. Same idea as{" "}
+                    <code className="font-mono text-[10px]">NOVA_SKILL_AUTHORING_DISABLED</code> when that env is not set.
+                  </span>
+                </span>
+              </label>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="grid gap-1 text-xs">
+                  Skill timeout (ms)
+                  <Input
+                    type="number"
+                    value={settings.skills.timeoutMs}
+                    onChange={(e) =>
+                      setSettings((p) => ({ ...p, skills: { ...p.skills, timeoutMs: Number(e.target.value || 0) } }))
+                    }
+                  />
+                </label>
+                <label className="grid gap-1 text-xs">
+                  Skill max memory (MB)
+                  <Input
+                    type="number"
+                    value={settings.skills.maxMemoryMb}
+                    onChange={(e) =>
+                      setSettings((p) => ({ ...p, skills: { ...p.skills, maxMemoryMb: Number(e.target.value || 0) } }))
+                    }
+                  />
+                </label>
+              </div>
+            </div>
             <div className="grid gap-2 md:grid-cols-3">
               <label className="grid gap-1 text-xs">
                 Ollama price ($ / 1k tokens)
@@ -1053,10 +1106,27 @@ export default function SettingsPage() {
                 <option value="copilot">Copilot</option>
               </Select>
             </label>
+            <div className="space-y-2 rounded-ui border bg-surface2 p-3">
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={settings.models.ollamaThinkingEnabled}
+                  onChange={(e) =>
+                    setSettings((p) => ({ ...p, models: { ...p.models, ollamaThinkingEnabled: e.target.checked } }))
+                  }
+                />
+                <span>
+                  <span className="font-medium">Ollama native thinking</span>
+                  <span className="mt-0.5 block text-[11px] text-muted leading-snug">
+                    When enabled, Ollama uses <code className="font-mono text-[10px]">think: true</code> so supported models stream reasoning traces (final text may appear in thinking fields). Leave off for reliable plain answers and for Gemma-style models. If{" "}
+                    <code className="font-mono text-[10px]">NOVA_OLLAMA_THINK</code> is set in the environment, it overrides this checkbox.
+                  </span>
+                </span>
+              </label>
+            </div>
             <div className="grid gap-2 md:grid-cols-3">
               <label className="grid gap-1 text-sm">
                 Ollama default model
-                <Select value={settings.models.defaultByProvider.ollama} onChange={(e) => setSettings((p) => ({ ...p, models: { defaultByProvider: { ...p.models.defaultByProvider, ollama: e.target.value } } }))}>
+                <Select value={settings.models.defaultByProvider.ollama} onChange={(e) => setSettings((p) => ({ ...p, models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, ollama: e.target.value } } }))}>
                   <option value="">Auto / env default</option>
                   {dedupeCatalogModelsById(modelOptions.ollama ?? []).map((m) => (
                     <option key={m.id} value={m.id}>
@@ -1067,7 +1137,7 @@ export default function SettingsPage() {
               </label>
               <label className="grid gap-1 text-sm">
                 LM Studio default model
-                <Select value={settings.models.defaultByProvider.lmstudio} onChange={(e) => setSettings((p) => ({ ...p, models: { defaultByProvider: { ...p.models.defaultByProvider, lmstudio: e.target.value } } }))}>
+                <Select value={settings.models.defaultByProvider.lmstudio} onChange={(e) => setSettings((p) => ({ ...p, models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, lmstudio: e.target.value } } }))}>
                   <option value="">Auto / env default</option>
                   {dedupeCatalogModelsById(modelOptions.lmstudio ?? []).map((m) => (
                     <option key={m.id} value={m.id}>
@@ -1087,14 +1157,14 @@ export default function SettingsPage() {
                         return {
                           ...p,
                           copilot: { ...p.copilot, disabled: true, defaultModel: "" },
-                          models: { defaultByProvider: { ...p.models.defaultByProvider, copilot: "" } },
+                          models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, copilot: "" } },
                           activeProvider: p.activeProvider === "copilot" ? "ollama" : p.activeProvider
                         };
                       }
                       return {
                         ...p,
                         copilot: { ...p.copilot, disabled: false, defaultModel: id },
-                        models: { defaultByProvider: { ...p.models.defaultByProvider, copilot: id } }
+                        models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, copilot: id } }
                       };
                     })
                   }
@@ -1223,7 +1293,7 @@ export default function SettingsPage() {
                     onClick={() =>
                       setSettings((p) => ({
                         ...p,
-                        models: { defaultByProvider: { ...p.models.defaultByProvider, copilot: preset.model } },
+                        models: { ...p.models, defaultByProvider: { ...p.models.defaultByProvider, copilot: preset.model } },
                         copilot: {
                           ...p.copilot,
                           disabled: false,
@@ -2024,6 +2094,12 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
       timeoutMs: value?.shell?.timeoutMs ?? DEFAULT_SETTINGS.shell.timeoutMs,
       maxOutputBytes: value?.shell?.maxOutputBytes ?? DEFAULT_SETTINGS.shell.maxOutputBytes
     },
+    skills: {
+      isolationEnabled: value?.skills?.isolationEnabled ?? DEFAULT_SETTINGS.skills.isolationEnabled,
+      timeoutMs: value?.skills?.timeoutMs ?? DEFAULT_SETTINGS.skills.timeoutMs,
+      maxMemoryMb: value?.skills?.maxMemoryMb ?? DEFAULT_SETTINGS.skills.maxMemoryMb,
+      skillAuthoringDisabled: value?.skills?.skillAuthoringDisabled ?? DEFAULT_SETTINGS.skills.skillAuthoringDisabled
+    },
     identityBackup: {
       enabled: value?.identityBackup?.enabled ?? DEFAULT_SETTINGS.identityBackup.enabled,
       intervalDays: value?.identityBackup?.intervalDays ?? DEFAULT_SETTINGS.identityBackup.intervalDays,
@@ -2034,7 +2110,8 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
         ollama: value?.models?.defaultByProvider?.ollama ?? DEFAULT_SETTINGS.models.defaultByProvider.ollama,
         lmstudio: value?.models?.defaultByProvider?.lmstudio ?? DEFAULT_SETTINGS.models.defaultByProvider.lmstudio,
         copilot: value?.models?.defaultByProvider?.copilot ?? DEFAULT_SETTINGS.models.defaultByProvider.copilot
-      }
+      },
+      ollamaThinkingEnabled: value?.models?.ollamaThinkingEnabled ?? DEFAULT_SETTINGS.models.ollamaThinkingEnabled
     },
     copilot: {
       baseUrl: value?.copilot?.baseUrl ?? DEFAULT_SETTINGS.copilot.baseUrl,

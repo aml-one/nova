@@ -15,6 +15,8 @@ export type AppSettings = {
     isolationEnabled: boolean;
     timeoutMs: number;
     maxMemoryMb: number;
+    /** When true, chat cannot trigger automatic skill authoring (same idea as NOVA_SKILL_AUTHORING_DISABLED). */
+    skillAuthoringDisabled: boolean;
   };
   web: {
     loginEnabled: boolean;
@@ -93,6 +95,8 @@ export type AppSettings = {
       lmstudio: string;
       copilot: string;
     };
+    /** When true, Ollama `/api/chat` sends `think: true` (native reasoning traces). Default false avoids empty `content` on Gemma 4 / thinking models. */
+    ollamaThinkingEnabled: boolean;
   };
   copilot: {
     baseUrl: string;
@@ -154,7 +158,8 @@ export class SettingsRepository {
         skills: {
           isolationEnabled: parsed.skills?.isolationEnabled === true,
           timeoutMs: Number(parsed.skills?.timeoutMs ?? 0),
-          maxMemoryMb: Number(parsed.skills?.maxMemoryMb ?? 0)
+          maxMemoryMb: Number(parsed.skills?.maxMemoryMb ?? 0),
+          skillAuthoringDisabled: parsed.skills?.skillAuthoringDisabled === true
         },
         web: {
           loginEnabled: parsed.web?.loginEnabled !== false,
@@ -288,7 +293,8 @@ export class SettingsRepository {
               typeof parsed.models?.defaultByProvider?.lmstudio === "string" ? parsed.models.defaultByProvider.lmstudio : "",
             copilot:
               typeof parsed.models?.defaultByProvider?.copilot === "string" ? parsed.models.defaultByProvider.copilot : ""
-          }
+          },
+          ollamaThinkingEnabled: parsed.models?.ollamaThinkingEnabled === true
         },
         copilot: {
           baseUrl: typeof parsed.copilot?.baseUrl === "string" ? parsed.copilot.baseUrl : "",

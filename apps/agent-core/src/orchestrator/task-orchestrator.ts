@@ -186,7 +186,7 @@ export class TaskOrchestrator {
       return multi;
     }
 
-    if (detectSkillAuthoringIntent(input.text)) {
+    if (detectSkillAuthoringIntent(input.text, { skillAuthoringDisabled: runtimeSettings.skills.skillAuthoringDisabled })) {
       return await this.runSkillAuthoringSession({
         input,
         userId,

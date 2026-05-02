@@ -14,7 +14,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   skills: {
     isolationEnabled: process.env.NOVA_SKILL_ISOLATION === "true",
     timeoutMs: Number(process.env.NOVA_SKILL_TIMEOUT_MS ?? "15000"),
-    maxMemoryMb: Number(process.env.NOVA_SKILL_MAX_MB ?? "256")
+    maxMemoryMb: Number(process.env.NOVA_SKILL_MAX_MB ?? "256"),
+    skillAuthoringDisabled: process.env.NOVA_SKILL_AUTHORING_DISABLED === "true"
   },
   web: {
     loginEnabled: true,
@@ -90,7 +91,9 @@ const DEFAULT_SETTINGS: AppSettings = {
       ollama: process.env.OLLAMA_MODEL ?? "",
       lmstudio: process.env.LMSTUDIO_MODEL ?? "",
       copilot: process.env.COPILOT_MODEL ?? ""
-    }
+    },
+    ollamaThinkingEnabled:
+      process.env.NOVA_OLLAMA_THINK?.trim().toLowerCase() === "true" || process.env.NOVA_OLLAMA_THINK?.trim() === "1"
   },
   copilot: {
     baseUrl: process.env.COPILOT_BASE_URL ?? "",
@@ -144,7 +147,8 @@ export class SettingsService {
       skills: {
         isolationEnabled: update.skills?.isolationEnabled ?? current.skills.isolationEnabled,
         timeoutMs: update.skills?.timeoutMs ?? current.skills.timeoutMs,
-        maxMemoryMb: update.skills?.maxMemoryMb ?? current.skills.maxMemoryMb
+        maxMemoryMb: update.skills?.maxMemoryMb ?? current.skills.maxMemoryMb,
+        skillAuthoringDisabled: update.skills?.skillAuthoringDisabled ?? current.skills.skillAuthoringDisabled
       },
       web: {
         loginEnabled: update.web?.loginEnabled ?? current.web.loginEnabled,
@@ -227,7 +231,8 @@ export class SettingsService {
           ollama: update.models?.defaultByProvider?.ollama ?? current.models.defaultByProvider.ollama,
           lmstudio: update.models?.defaultByProvider?.lmstudio ?? current.models.defaultByProvider.lmstudio,
           copilot: update.models?.defaultByProvider?.copilot ?? current.models.defaultByProvider.copilot
-        }
+        },
+        ollamaThinkingEnabled: update.models?.ollamaThinkingEnabled ?? current.models.ollamaThinkingEnabled
       },
       copilot: {
         baseUrl: update.copilot?.baseUrl ?? current.copilot.baseUrl,
@@ -269,7 +274,8 @@ export class SettingsService {
       skills: {
         isolationEnabled: settings.skills?.isolationEnabled === true,
         timeoutMs: clampInt(settings.skills?.timeoutMs, 1000, 5 * 60 * 1000, DEFAULT_SETTINGS.skills.timeoutMs),
-        maxMemoryMb: clampInt(settings.skills?.maxMemoryMb, 64, 4096, DEFAULT_SETTINGS.skills.maxMemoryMb)
+        maxMemoryMb: clampInt(settings.skills?.maxMemoryMb, 64, 4096, DEFAULT_SETTINGS.skills.maxMemoryMb),
+        skillAuthoringDisabled: settings.skills?.skillAuthoringDisabled === true
       },
       web: {
         loginEnabled: settings.web?.loginEnabled !== false,
@@ -408,7 +414,8 @@ export class SettingsService {
           ollama: String(settings.models?.defaultByProvider?.ollama ?? "").trim(),
           lmstudio: String(settings.models?.defaultByProvider?.lmstudio ?? "").trim(),
           copilot: String(settings.models?.defaultByProvider?.copilot ?? "").trim()
-        }
+        },
+        ollamaThinkingEnabled: settings.models?.ollamaThinkingEnabled === true
       },
       copilot: {
         baseUrl: String(settings.copilot?.baseUrl ?? "").trim(),

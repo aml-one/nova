@@ -24,8 +24,8 @@ const planSchema = z.discriminatedUnion("mode", [
   })
 ]);
 
-export function detectSkillAuthoringIntent(text: string): boolean {
-  if (process.env.NOVA_SKILL_AUTHORING_DISABLED === "true") {
+export function detectSkillAuthoringIntent(text: string, options?: { skillAuthoringDisabled?: boolean }): boolean {
+  if (process.env.NOVA_SKILL_AUTHORING_DISABLED === "true" || options?.skillAuthoringDisabled === true) {
     return false;
   }
   const trimmed = text.trim();
