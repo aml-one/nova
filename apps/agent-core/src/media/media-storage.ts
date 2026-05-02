@@ -114,6 +114,42 @@ export function resolveUploadedMediaUrl(hint: string): string | undefined {
   }
 }
 
+/** Load bytes from disk for an upload referenced by agent/web URL or filename (not data: URLs). */
+export function readUploadedMediaBytes(hint: string): { buffer: Buffer; contentType: string } | undefined {
+  const trimmed = hint.trim();
+  if (!trimmed || trimmed.startsWith("data:")) {
+    return undefined;
+  }
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+    try {
+      const pathname = new URL(trimmed).pathname.split("?")[0] ?? "";
+      return fromV1OrApiMediaPath(pathname);
+    } catch {
+      return undefined;
+    }
+  }
+  const resolved = resolveUploadedMediaUrl(trimmed);
+  if (!resolved) {
+    return undefined;
+  }
+  return fromV1OrApiMediaPath(resolved.split("?")[0] ?? "");
+}
+
+function fromV1OrApiMediaPath(pathOnly: string): { buffer: Buffer; contentType: string } | undefined {
+  if (pathOnly.startsWith("/api/media/files/")) {
+    return fromV1OrApiMediaPath(`/v1/media/files/${pathOnly.slice("/api/media/files/".length)}`);
+  }
+  if (!pathOnly.startsWith("/v1/media/files/")) {
+    return undefined;
+  }
+  const name = pathOnly.slice("/v1/media/files/".length);
+  const file = getUploadFile(name);
+  if (!file) {
+    return undefined;
+  }
+  return { buffer: file.content, contentType: file.contentType };
+}
+
 function sanitizeFilename(name: string): string {
   const base = name.replace(/[^a-zA-Z0-9._-]/g, "_");
   return base.length > 0 ? base : `upload-${Date.now()}`;

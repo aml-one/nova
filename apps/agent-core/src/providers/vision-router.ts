@@ -1,4 +1,5 @@
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
+import { readUploadedMediaBytes } from "../media/media-storage.js";
 import { lmstudioOpenAiBaseToRestRoot, lmstudioUnloadModel } from "./lmstudio-vision-swap.js";
 import { normalizeOllamaBaseUrl, ollamaUnloadModel } from "./ollama-vision-swap.js";
 
@@ -274,8 +275,12 @@ async function analyzeViaOpenAICompatible(input: {
   const content: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string } }> = [
     { type: "text", text: input.userPrompt }
   ];
-  if (input.imageUrl) {
-    content.push({ type: "image_url", image_url: { url: input.imageUrl } });
+  const imageUrlForApi = resolveVisionImageUrlForOpenAi(input.imageUrl);
+  if (input.imageUrl?.trim() && !imageUrlForApi) {
+    throw new Error("could not resolve image for OpenAI-compatible vision");
+  }
+  if (imageUrlForApi) {
+    content.push({ type: "image_url", image_url: { url: imageUrlForApi } });
   }
   const response = await fetch(input.endpoint, {
     method: "POST",
@@ -306,6 +311,9 @@ async function analyzeViaOllama(input: {
 }): Promise<string> {
   const base = normalizeOllamaBaseUrl(input.baseUrl, "http://127.0.0.1:11434");
   const imageBase64 = await resolveOllamaImageBase64(input.imageUrl);
+  if (input.imageUrl?.trim() && !imageBase64) {
+    throw new Error("could not load image bytes for Ollama vision");
+  }
   const response = await fetch(`${base}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -331,9 +339,20 @@ async function analyzeViaOllama(input: {
 async function resolveOllamaImageBase64(imageUrl: string | undefined): Promise<string | undefined> {
   const raw = imageUrl?.trim();
   if (!raw) return undefined;
-  // Already base64 payload (or data URL) from callers that pre-encode.
+  if (raw.startsWith("data:")) {
+    const comma = raw.indexOf(",");
+    if (comma > 0) {
+      const payload = raw.slice(comma + 1).trim();
+      if (payload.length > 0) return payload;
+    }
+  }
+  // Already base64 payload from callers that pre-encode.
   if (/^[A-Za-z0-9+/=]+$/.test(raw) && raw.length > 128) {
     return raw;
+  }
+  const fromDisk = readUploadedMediaBytes(raw);
+  if (fromDisk) {
+    return fromDisk.buffer.toString("base64");
   }
   const local = normalizeLocalMediaPath(raw);
   const target = local.startsWith("http") ? local : `${resolveAgentBaseUrl()}${local}`;
@@ -345,6 +364,27 @@ async function resolveOllamaImageBase64(imageUrl: string | undefined): Promise<s
   } catch {
     return undefined;
   }
+}
+
+/** LM Studio / OpenAI-compatible vision: prefer data URL from disk; else absolute URL only for known media paths. */
+function resolveVisionImageUrlForOpenAi(imageUrl: string | undefined): string | undefined {
+  const raw = imageUrl?.trim();
+  if (!raw) return undefined;
+  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+    return raw;
+  }
+  if (raw.startsWith("data:")) {
+    return raw;
+  }
+  const fromDisk = readUploadedMediaBytes(raw);
+  if (fromDisk) {
+    return `data:${fromDisk.contentType};base64,${fromDisk.buffer.toString("base64")}`;
+  }
+  const local = normalizeLocalMediaPath(raw);
+  if (local.startsWith("/v1/media/files/")) {
+    return `${resolveAgentBaseUrl()}${local}`;
+  }
+  return undefined;
 }
 
 function resolveAgentBaseUrl(): string {

@@ -393,12 +393,37 @@ export class TaskOrchestrator {
       });
       return unresolvedVisionRef;
     }
-    const visionExtras = await this.buildVisionContextIfNeeded(
+    const visionResult = await this.buildVisionContextIfNeeded(
       input.text,
       input.imageUrl,
       input.accessProfile,
       runtimeSettings
     );
+    if (visionResult.blockedReply) {
+      this.deps.memoryService.appendTurn(userId, input.text, visionResult.blockedReply);
+      this.recordRunHistory({
+        runId,
+        userId,
+        channel: input.channel,
+        inputText: input.text,
+        outputText: visionResult.blockedReply,
+        success: false,
+        correlationId,
+        latencyMs: Date.now() - startedAt,
+        provider: "vision-guard",
+        tokenInCount: estimateTokens(input.text),
+        tokenOutCount: estimateTokens(visionResult.blockedReply),
+        toolTimingsMs: hostDiagnosticsMs > 0 ? { hostDiagnosticsMs } : {}
+      });
+      this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: false });
+      this.thoughtLog.append({
+        category: "chat",
+        title: "Vision analysis failed",
+        content: visionResult.blockedReply.slice(0, 220)
+      });
+      return visionResult.blockedReply;
+    }
+    const visionExtras = visionResult.extras;
     const buildPromptMessages = (userContent: string): ChatMessage[] => [
       { role: "system", content: persona.systemPrompt },
       ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
@@ -820,11 +845,14 @@ export class TaskOrchestrator {
     imageUrl: string | undefined,
     accessProfile: ChannelAccessProfile | undefined,
     runtimeSettings: AppSettings
-  ): Promise<Array<{ role: "system"; content: string }>> {
+  ): Promise<{
+    extras: Array<{ role: "system"; content: string }>;
+    blockedReply?: string;
+  }> {
     const resolvedImageUrl = imageUrl ?? resolveImageUrlFromUserText(userText);
     const needsVision = isVisionIntent(userText, resolvedImageUrl);
     if (!needsVision || !this.deps.visionRouter.hasConfiguredProvider(runtimeSettings)) {
-      return [];
+      return { extras: [] };
     }
     const skillVision = await this.tryCameraSkillVision(userText, accessProfile);
     const effectivePrompt = skillVision ? `${userText}\nCamera observations: ${skillVision}` : userText;
@@ -835,15 +863,30 @@ export class TaskOrchestrator {
       },
       runtimeSettings
     );
-    if (!vision.used || !vision.summary) {
-      return skillVision ? [{ role: "system", content: `Vision context (auto): ${skillVision}` }] : [];
+    if (vision.used && vision.summary) {
+      return {
+        extras: [
+          {
+            role: "system",
+            content: `Vision context (auto): ${skillVision ? `${skillVision}\n` : ""}${vision.summary}`
+          }
+        ]
+      };
     }
-    return [
-      {
-        role: "system",
-        content: `Vision context (auto): ${skillVision ? `${skillVision}\n` : ""}${vision.summary}`
-      }
-    ];
+    if (skillVision) {
+      return { extras: [{ role: "system", content: `Vision context (auto): ${skillVision}` }] };
+    }
+    if (resolvedImageUrl?.trim()) {
+      return {
+        extras: [],
+        blockedReply:
+          "Nova could not analyze the uploaded image (the vision step returned no result). " +
+          "Check Settings → Vision (Ollama/LM Studio running, vision-capable model, correct base URL), " +
+          "and that the file still exists under agent-core uploads. " +
+          "Cloud chat models are not used as a substitute for vision here, so you will not get a generic “I can’t see images” answer when an image was attached."
+      };
+    }
+    return { extras: [] };
   }
 
   private async tryCameraSkillVision(userText: string, accessProfile?: ChannelAccessProfile): Promise<string | undefined> {

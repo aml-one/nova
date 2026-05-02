@@ -715,55 +715,6 @@ export default function HomePage() {
         >
           {!chatStyleReady ? <div className="text-sm text-muted">Loading chat style…</div> : null}
           {chatStyleReady && turns.length === 0 ? <div className="text-sm text-muted">Start chatting with Nova.</div> : null}
-          {loading && showThinkingInChat ? (
-            <article className="mr-auto w-full max-w-[460px] space-y-2 rounded-ui border border-blue-500/25 bg-surface2/80 p-2.5 text-slate-700 dark:text-slate-200">
-              <div className="mb-1 flex items-center justify-between">
-                <div className="text-xs font-semibold">Nova is working</div>
-                <button
-                  type="button"
-                  className="rounded-ui border bg-surface px-1.5 py-0.5 text-xs"
-                  onClick={() => setLiveThinkingCollapsed((prev) => !prev)}
-                >
-                  {liveThinkingCollapsed ? "Show log" : "Hide log"}
-                </button>
-              </div>
-              {(["Thinking", "Reasoning", "Searching the web"] as const).map((label, idx) => {
-                const active = idx === thinkingPhase;
-                return (
-                  <div
-                    key={label}
-                    className={cn(
-                      "flex items-center justify-between rounded-full border px-3 py-1.5 transition-all",
-                      active
-                        ? "nova-thinking-row-active border-blue-400/60 bg-blue-500/15"
-                        : "border-slate-400/35 bg-surface"
-                    )}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={cn(
-                          "h-3.5 w-3.5 rounded-full border",
-                          active ? "nova-thinking-orb border-blue-300/80" : "border-slate-400/70 bg-slate-400/40"
-                        )}
-                      />
-                      <span className="text-xs font-medium">{label}</span>
-                    </div>
-                    <span className="flex items-center gap-1.5">
-                      <span className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-1 bg-blue-300" : "bg-slate-400/70")} />
-                      <span className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-2 bg-blue-300" : "bg-slate-400/70")} />
-                      <span className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-3 bg-blue-300" : "bg-slate-400/70")} />
-                    </span>
-                  </div>
-                );
-              })}
-              {!liveThinkingCollapsed ? (
-                <div className="rounded-ui border bg-surface p-2 text-[11px] text-muted">
-                  <div className="mb-0.5 font-semibold">Live log</div>
-                  <div className="whitespace-pre-wrap">{liveThinking}</div>
-                </div>
-              ) : null}
-            </article>
-          ) : null}
           {chatStyleReady && turns.map((turn, index) => (
             <article
               key={turn.id}
@@ -801,7 +752,75 @@ export default function HomePage() {
                 </div>
               ) : (
                 <div className="text-sm">
-                  <ChatMarkdown content={turn.text || (turn.role === "assistant" && loading ? "..." : "")} />
+                  {turn.role === "assistant" &&
+                  showThinkingInChat &&
+                  loading &&
+                  index === turns.length - 1 &&
+                  !turn.text.trim() ? (
+                    <div className="space-y-2">
+                      <div className="text-xs font-semibold text-muted">Nova is working</div>
+                      {(["Thinking", "Reasoning", "Searching the web"] as const).map((label, idx) => {
+                        const active = idx === thinkingPhase;
+                        return (
+                          <div
+                            key={label}
+                            className={cn(
+                              "flex items-center justify-between rounded-full border px-3 py-1.5 transition-all",
+                              active
+                                ? "nova-thinking-row-active border-blue-400/60 bg-blue-500/15"
+                                : "border-slate-400/35 bg-surface"
+                            )}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={cn(
+                                  "h-3.5 w-3.5 rounded-full border",
+                                  active ? "nova-thinking-orb border-blue-300/80" : "border-slate-400/70 bg-slate-400/40"
+                                )}
+                              />
+                              <span className="text-xs font-medium">{label}</span>
+                            </div>
+                            <span className="flex items-center gap-1.5">
+                              <span
+                                className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-1 bg-blue-300" : "bg-slate-400/70")}
+                              />
+                              <span
+                                className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-2 bg-blue-300" : "bg-slate-400/70")}
+                              />
+                              <span
+                                className={cn("h-1.5 w-1.5 rounded-full", active ? "nova-thinking-dot-3 bg-blue-300" : "bg-slate-400/70")}
+                              />
+                            </span>
+                          </div>
+                        );
+                      })}
+                      {!liveThinkingCollapsed ? (
+                        <div className="rounded-ui border bg-surface p-2 text-[11px] text-muted">
+                          <div className="mb-0.5 flex items-center justify-between">
+                            <span className="font-semibold">Live log</span>
+                            <button
+                              type="button"
+                              className="rounded-ui border bg-surface2 px-1.5 py-0.5 text-[10px]"
+                              onClick={() => setLiveThinkingCollapsed((prev) => !prev)}
+                            >
+                              Hide
+                            </button>
+                          </div>
+                          <div className="whitespace-pre-wrap">{liveThinking}</div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-[11px] text-muted underline"
+                          onClick={() => setLiveThinkingCollapsed(false)}
+                        >
+                          Show live log
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <ChatMarkdown content={turn.text || (turn.role === "assistant" && loading ? "..." : "")} />
+                  )}
                 </div>
               )}
               {turn.role === "user" ? (
