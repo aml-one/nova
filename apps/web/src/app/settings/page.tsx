@@ -20,7 +20,12 @@ import {
 type HealthCheck = { id: string; name: string; level: "green" | "orange" | "red"; detail: string; lastSuccessfulAt?: string };
 type FullHealth = { level: "green" | "orange" | "red"; checks: HealthCheck[] };
 type ProviderCatalog = {
-  models?: { ollama?: Array<{ id: string }>; lmstudio?: Array<{ id: string }>; copilot?: Array<{ id: string }> };
+  models?: {
+    ollama?: Array<{ id: string }>;
+    lmstudio?: Array<{ id: string }>;
+    copilot?: Array<{ id: string }>;
+    ollamaVision?: Array<{ id: string }>;
+  };
   setup?: Record<string, { configured: boolean; details: string; steps: string[] }>;
 };
 type ModelPingResult = {
@@ -786,6 +791,7 @@ export default function SettingsPage() {
   }
 
   const modelOptions = catalog?.models ?? {};
+  const ollamaVisionCatalog = modelOptions.ollamaVision ?? [];
   const websiteBuilderSettings = (settings.skillSettings["website-builder"] ?? {}) as Record<string, unknown>;
   const cameraVisionSettings = (settings.skillSettings["camera-vision"] ?? {}) as Record<string, unknown>;
   const websiteBuilderProviderStored = String(websiteBuilderSettings.provider ?? settings.activeProvider);
@@ -1413,11 +1419,37 @@ export default function SettingsPage() {
               <div className="grid gap-2 md:grid-cols-2">
                 <label className="grid gap-1 text-xs">
                   Ollama vision model
-                  <Input
+                  <Select
                     value={settings.vision.ollamaModel}
                     onChange={(e) => setSettings((p) => ({ ...p, vision: { ...p.vision, ollamaModel: e.target.value } }))}
-                    placeholder="e.g. llava (empty = env default)"
-                  />
+                  >
+                    <option value="">Auto / env default (OLLAMA_VISION_MODEL)</option>
+                    {(() => {
+                      const current = settings.vision.ollamaModel.trim();
+                      const listed = dedupeCatalogModelsById(ollamaVisionCatalog);
+                      const inList = current && listed.some((m) => m.id === current);
+                      return (
+                        <>
+                          {listed.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.id}
+                            </option>
+                          ))}
+                          {current && !inList ? (
+                            <option value={current}>
+                              {current} (custom — not in detected vision list)
+                            </option>
+                          ) : null}
+                        </>
+                      );
+                    })()}
+                  </Select>
+                  {settings.ollama.disabled !== true && ollamaVisionCatalog.length === 0 ? (
+                    <span className="text-[10px] text-muted leading-snug">
+                      No vision models detected yet (Ollama unreachable or none report the <code className="font-mono text-[10px]">vision</code> capability). Use Auto / env default, or upgrade Ollama so{" "}
+                      <code className="font-mono text-[10px]">/api/show</code> exposes capabilities.
+                    </span>
+                  ) : null}
                 </label>
                 <label className="grid gap-1 text-xs">
                   Ollama vision base URL (optional remote)

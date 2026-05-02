@@ -14,6 +14,14 @@ export type ProviderModelInfo = {
   provider: ProviderName;
 };
 
+export type ProviderCatalogModels = {
+  ollama: ProviderModelInfo[];
+  lmstudio: ProviderModelInfo[];
+  copilot: ProviderModelInfo[];
+  /** Ollama models that report `vision` in /api/tags or /api/show (best-effort). */
+  ollamaVision: ProviderModelInfo[];
+};
+
 function dedupeProviderModelsById(models: ProviderModelInfo[]): ProviderModelInfo[] {
   const seen = new Set<string>();
   return models.filter((m) => {
@@ -27,13 +35,14 @@ function dedupeProviderModelsById(models: ProviderModelInfo[]): ProviderModelInf
 export class ProviderCatalogService {
   constructor(private readonly getSettings: () => AppSettings) {}
 
-  async listModels(): Promise<Record<ProviderName, ProviderModelInfo[]>> {
-    const [ollama, lmstudio, copilot] = await Promise.all([
+  async listModels(): Promise<ProviderCatalogModels> {
+    const [ollama, lmstudio, copilot, ollamaVision] = await Promise.all([
       isOllamaIntegrationDisabled() ? Promise.resolve([]) : this.listOllamaModels(),
       isLmStudioIntegrationDisabled() ? Promise.resolve([]) : this.listLmstudioModels(),
-      this.listCopilotModels()
+      this.listCopilotModels(),
+      isOllamaIntegrationDisabled() ? Promise.resolve([]) : this.listOllamaVisionModels()
     ]);
-    return { ollama, lmstudio, copilot };
+    return { ollama, lmstudio, copilot, ollamaVision };
   }
 
   buildProviderSetupStatus(): Record<
@@ -127,6 +136,56 @@ export class ProviderCatalogService {
     } catch {
       return [];
     }
+  }
+
+  /** Uses /api/tags `capabilities` when present, otherwise probes /api/show in small batches. */
+  private async listOllamaVisionModels(): Promise<ProviderModelInfo[]> {
+    const baseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
+    type TagModel = { name?: string; capabilities?: string[] };
+    let tagModels: TagModel[] = [];
+    try {
+      const response = await fetch(`${baseUrl}/api/tags`);
+      if (!response.ok) return [];
+      const data = (await response.json()) as { models?: TagModel[] };
+      tagModels = data.models ?? [];
+    } catch {
+      return [];
+    }
+    const visionIds: string[] = [];
+    const probeNames: string[] = [];
+    for (const item of tagModels) {
+      const name = item.name?.trim();
+      if (!name) continue;
+      if (Array.isArray(item.capabilities) && item.capabilities.includes("vision")) {
+        visionIds.push(name);
+      } else if (!Array.isArray(item.capabilities) || item.capabilities.length === 0) {
+        probeNames.push(name);
+      }
+    }
+    const batchSize = 4;
+    for (let i = 0; i < probeNames.length; i += batchSize) {
+      const slice = probeNames.slice(i, i + batchSize);
+      const found = await Promise.all(
+        slice.map(async (model) => {
+          try {
+            const r = await fetch(`${baseUrl}/api/show`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ model })
+            });
+            if (!r.ok) return null;
+            const payload = (await r.json()) as { capabilities?: string[] };
+            return Array.isArray(payload.capabilities) && payload.capabilities.includes("vision") ? model : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+      for (const id of found) {
+        if (id) visionIds.push(id);
+      }
+    }
+    return dedupeProviderModelsById(visionIds.map((id) => ({ id, provider: "ollama" as const })));
   }
 
   private async listLmstudioModels(): Promise<ProviderModelInfo[]> {
