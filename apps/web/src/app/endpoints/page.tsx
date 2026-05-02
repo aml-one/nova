@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { EndpointResultBody } from "./endpoint-result-view";
 
 type EndpointItem = {
   method: "GET" | "POST" | "PUT" | "DELETE";
@@ -46,11 +47,15 @@ export default function EndpointsPage() {
   const [method, setMethod] = useState<EndpointItem["method"]>(ENDPOINTS[0].method);
   const [body, setBody] = useState('{\n  "message": "hello"\n}');
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState("");
+  const [resultHeader, setResultHeader] = useState("");
+  const [resultParsed, setResultParsed] = useState<unknown | null | undefined>(undefined);
+  const [resultPretty, setResultPretty] = useState("");
+  const [resultError, setResultError] = useState<string | null>(null);
   const selected = useMemo(() => ENDPOINTS.find((item) => item.path === path && item.method === method), [method, path]);
 
   async function runRequest(): Promise<void> {
     setLoading(true);
+    setResultError(null);
     const startedAt = Date.now();
     try {
       const init: RequestInit = { method, headers: {} };
@@ -61,15 +66,22 @@ export default function EndpointsPage() {
       const response = await fetch(path, init);
       const text = await response.text();
       const elapsed = Date.now() - startedAt;
+      const header = `[${response.status}] ${method} ${path} (${elapsed}ms)`;
       let pretty = text;
       try {
-        pretty = JSON.stringify(JSON.parse(text), null, 2);
+        const parsed = JSON.parse(text) as unknown;
+        pretty = JSON.stringify(parsed, null, 2);
+        setResultParsed(parsed);
       } catch {
-        // keep raw text
+        setResultParsed(null);
       }
-      setResult(`[${response.status}] ${method} ${path} (${elapsed}ms)\n\n${pretty}`);
+      setResultHeader(header);
+      setResultPretty(pretty);
     } catch (error) {
-      setResult(`Request failed: ${error instanceof Error ? error.message : "Unknown error"}`);
+      setResultHeader("");
+      setResultParsed(undefined);
+      setResultPretty("");
+      setResultError(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setLoading(false);
     }
@@ -146,7 +158,17 @@ export default function EndpointsPage() {
           </div>
           <div className="rounded-ui border bg-surface2 p-2">
             <div className="mb-1 text-xs font-semibold">Result</div>
-            <pre className="max-h-[46vh] overflow-auto whitespace-pre-wrap text-xs">{result || "No response yet."}</pre>
+            {resultError ? (
+              <div className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-2 py-2 text-xs text-rose-100">{resultError}</div>
+            ) : resultHeader ? (
+              <div className="max-h-[52vh] overflow-auto pr-0.5">
+                {resultParsed !== undefined ? (
+                  <EndpointResultBody header={resultHeader} parsed={resultParsed} rawPretty={resultPretty} />
+                ) : null}
+              </div>
+            ) : (
+              <p className="text-xs text-muted">No response yet.</p>
+            )}
           </div>
         </Card>
       </div>
