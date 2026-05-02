@@ -320,6 +320,7 @@ export class TaskOrchestrator {
         : await this.deps.modelRouter.chatLocalFirst(messages, model);
 
     let result: ModelResponse | undefined;
+    let lastModelError: unknown;
     try {
       try {
         result = await runChat(promptMessages, selectedModel);
@@ -332,6 +333,7 @@ export class TaskOrchestrator {
             try {
               result = await runLocalFirst(promptMessages, undefined);
             } catch (localErr) {
+              lastModelError = localErr;
               if (truncatedDiag.length > 0 && isLikelyContextLimitError(localErr)) {
                 result = await runLocalFirst(promptMessagesSlim, undefined);
               } else {
@@ -339,18 +341,36 @@ export class TaskOrchestrator {
               }
             }
           } else {
+            lastModelError = error;
             throw error;
           }
         }
       }
-    } catch {
+    } catch (error) {
+      lastModelError = error;
       result = undefined;
     }
 
+    // Last-resort retry: minimal prompt without memory/vision/diagnostics.
+    // This avoids false "provider unavailable" failures when context is too heavy.
     if (!result) {
+      try {
+        const emergencyPrompt: ChatMessage[] = [
+          { role: "system", content: persona.systemPrompt },
+          { role: "user", content: input.text }
+        ];
+        result = await runLocalFirst(emergencyPrompt, undefined);
+      } catch (error) {
+        lastModelError = error;
+      }
+    }
+
+    if (!result) {
+      const errText = lastModelError instanceof Error ? lastModelError.message : String(lastModelError ?? "");
       const fallback =
         "I can still help without Copilot, but right now I cannot reach a working local model for this task. " +
-        "Please configure Copilot in Settings -> Models -> Copilot quick setup, or enable Ollama/LM Studio and try again.";
+        "Please configure Copilot in Settings -> Models -> Copilot quick setup, or enable Ollama/LM Studio and try again." +
+        (errText.trim() ? ` (last error: ${errText.slice(0, 180)})` : "");
       this.deps.memoryService.appendTurn(userId, input.text, fallback);
       const failedAfterMs = Date.now() - startedAt;
       this.recordRunHistory({
