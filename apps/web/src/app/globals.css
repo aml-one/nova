@@ -88,3 +88,31 @@ html[data-text-scale="big"] {
 .nova-thinking-dot-1 { animation: novaThinkingDot 0.95s ease-in-out infinite; }
 .nova-thinking-dot-2 { animation: novaThinkingDot 0.95s ease-in-out infinite 0.16s; }
 .nova-thinking-dot-3 { animation: novaThinkingDot 0.95s ease-in-out infinite 0.32s; }
+
+/* Assistant chat: seed-based text tones (CSS vars from ChatMarkdown toneSeed). */
+.nova-chat-markdown-tones .nova-chat-tone-muted {
+  color: color-mix(in oklch, var(--nova-chat-text) 62%, var(--nova-chat-bg) 38%);
+}
+
+.nova-chat-markdown-tones[data-nova-tone-variant="light"] .nova-chat-tone-strong {
+  color: color-mix(in oklch, var(--nova-chat-text) 76%, black 24%);
+}
+.nova-chat-markdown-tones[data-nova-tone-variant="dark"] .nova-chat-tone-strong {
+  color: color-mix(in oklch, var(--nova-chat-text) 78%, white 22%);
+}
+
+.nova-chat-markdown-tones[data-nova-tone-variant="light"] .nova-chat-tone-soft {
+  color: color-mix(in oklch, var(--nova-chat-text) 86%, var(--nova-chat-bg) 14%);
+}
+.nova-chat-markdown-tones[data-nova-tone-variant="dark"] .nova-chat-tone-soft {
+  color: color-mix(in oklch, var(--nova-chat-text) 82%, var(--nova-chat-bg) 18%);
+}
+
+.nova-chat-markdown-tones[data-nova-tone-variant="light"] .nova-chat-tone-heading {
+  color: color-mix(in oklch, var(--nova-chat-text) 62%, black 38%);
+  font-weight: 600;
+}
+.nova-chat-markdown-tones[data-nova-tone-variant="dark"] .nova-chat-tone-heading {
+  color: color-mix(in oklch, var(--nova-chat-text) 70%, white 30%);
+  font-weight: 600;
+}

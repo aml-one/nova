@@ -29,6 +29,28 @@ export function detectOllamaInventoryIntent(text: string): boolean {
   return false;
 }
 
+/**
+ * User wants Nova’s routing / default model (not a full installed-model listing from `/api/tags`).
+ */
+export function detectOllamaRoutingOnlyIntent(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (t.length === 0 || t.length > 6000) return false;
+  if (!/\bollama\b/.test(t)) return false;
+  if (/\bollama\s+list\b/.test(t)) return false;
+  if (t.includes("/api/tags")) return false;
+  if (/\bwhat\s+models\b/.test(t) || /\bwhich\s+models\b/.test(t)) return false;
+  if (/\bhow\s+many\s+models?\b/.test(t)) return false;
+  if (/\b(list|show)\b.*\b(models?|tags?)\b/.test(t)) return false;
+  if (/\bollama\b.*\b(list|show)\b.*\b(models?|tags?)\b/.test(t)) return false;
+
+  if (/\bwhat\s+model\b/.test(t)) return true;
+  if (/\bwhich\s+model\b/.test(t)) return true;
+  if (/\bmodel\b.*\b(load|loaded|running|installed)\b/.test(t)) return true;
+  if (/\b(load|loaded|running|installed)\b.*\bmodel\b/.test(t)) return true;
+  if (/\bollama\b.*\b(loaded|running)\b/.test(t) && !/\bmodels\b/.test(t)) return true;
+  return false;
+}
+
 async function fetchJson(url: string, timeoutMs: number): Promise<unknown | null> {
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), timeoutMs);
@@ -93,16 +115,35 @@ export async function buildOllamaInventoryMarkdown(settings: AppSettings): Promi
       })
       .filter((line): line is string => Boolean(line));
     if (lines.length) {
-      runningSection = `\n### Currently loaded in Ollama (\`GET /api/ps\`)\n${lines.join("\n")}\n`;
+      runningSection = `\n### Currently loaded in memory\n${lines.join("\n")}\n`;
     }
   }
 
   const installedBlock =
     installed.length > 0
       ? installed.join("\n")
-      : "_Ollama returned an empty model list from `/api/tags` (no entries)._";
-  const md = `### Installed Ollama models (\`GET /api/tags\`)\n${installedBlock}\n${runningSection}`;
+      : "_Ollama returned an empty model list (no entries)._";
+  const md = `### Installed models\n${installedBlock}\n${runningSection}`;
   return { markdown: md.trimEnd(), baseUrl };
+}
+
+function ollamaApiLocationPhrase(baseUrl: string): string {
+  try {
+    const u = new URL(baseUrl);
+    if (u.hostname === "127.0.0.1" || u.hostname === "localhost") {
+      return "localhost";
+    }
+    return u.host;
+  } catch {
+    return "the configured URL";
+  }
+}
+
+export function formatOllamaRoutingOnlyReply(params: { defaultChatModel: string; activeProvider: string }): string {
+  const defaultLine = params.defaultChatModel.trim()
+    ? `**Default Ollama chat model:** \`${params.defaultChatModel.trim()}\``
+    : "**Default Ollama chat model:** _(not set in Settings → Models)_";
+  return `**Active routing provider:** \`${params.activeProvider}\`\n${defaultLine}`;
 }
 
 export function formatOllamaInventoryReply(params: {
@@ -111,15 +152,12 @@ export function formatOllamaInventoryReply(params: {
   defaultChatModel: string;
   activeProvider: string;
 }): string {
-  const modelLine = params.defaultChatModel.trim()
-    ? `**Nova default Ollama chat model (Settings → Models):** \`${params.defaultChatModel.trim()}\``
-    : "**Nova default Ollama chat model:** _(not set — use Settings → Models or env)_";
-  return (
-    `Nova queried your Ollama HTTP API at **${params.baseUrl}** (live data — not generated terminal output).\n\n` +
-    `${params.markdown}\n\n` +
-    `---\n` +
-    `${modelLine}\n` +
-    `**Active routing provider:** \`${params.activeProvider}\`\n\n` +
-    `_If this list does not match your machine, the base URL above may point at a different host than your terminal._`
-  );
+  const where = ollamaApiLocationPhrase(params.baseUrl);
+  const whereDisplay = where === "localhost" ? "(localhost)" : `(\`${where}\`)`;
+  const intro = `I just queried the Ollama HTTP API ${whereDisplay}.\n\n`;
+  const defaultLine = params.defaultChatModel.trim()
+    ? `**Default Ollama chat model:** \`${params.defaultChatModel.trim()}\``
+    : "**Default Ollama chat model:** _(not set in Settings → Models)_";
+  const routing = `**Active routing provider:** \`${params.activeProvider}\``;
+  return `${intro}${routing}\n${defaultLine}\n\n${params.markdown}`;
 }

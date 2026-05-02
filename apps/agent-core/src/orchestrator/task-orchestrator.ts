@@ -21,7 +21,9 @@ import {
 import {
   buildOllamaInventoryMarkdown,
   detectOllamaInventoryIntent,
-  formatOllamaInventoryReply
+  detectOllamaRoutingOnlyIntent,
+  formatOllamaInventoryReply,
+  formatOllamaRoutingOnlyReply
 } from "../execution/ollama-inventory.js";
 import {
   implicitShellAutoEnabled,
@@ -62,6 +64,16 @@ const INTEGRITY_SYSTEM_GUARD =
   "When Nova appends automatic read-only shell output below, treat it as authoritative host facts from Nova (not your own invention). " +
   "If you need live host or environment facts you do not have: say you do not have them; suggest the user run `/run <allowlisted command>` when shell is enabled for them, " +
   "or use an enabled skill (e.g. web search for public web facts), or ask one short clarifying question—never fill gaps with plausible fiction.";
+
+/** Web chat only: lets Nova use a tiny whitelisted set of span classes; UI derives readable shades from the user’s chat colors. */
+const WEB_CHAT_TONE_MARKDOWN_HINT =
+  "Web Nova chat (this channel): For long replies you may add subtle emphasis using **only** these exact HTML snippets (no other tags, attributes, or inline styles): " +
+  '<span class="nova-chat-tone-muted">secondary detail</span>, ' +
+  '<span class="nova-chat-tone-strong">key phrase</span>, ' +
+  '<span class="nova-chat-tone-soft">gentle aside</span>, ' +
+  '<span class="nova-chat-tone-heading">short in-reply label</span>. ' +
+  "The UI derives tones from the user’s assistant text and bubble colors (same family, lighter/darker)—readable in light and dark mode. " +
+  "Do not invent rainbow or unrelated colors. Use sparingly (a handful of spans per message, plain markdown for structure).";
 
 function mergeToolTimings(hostDiagnosticsMs: number, implicitShellMs: number): Record<string, number> | undefined {
   if (hostDiagnosticsMs <= 0 && implicitShellMs <= 0) return undefined;
@@ -520,6 +532,30 @@ export class TaskOrchestrator {
         this.thoughtLog.append({ category: "chat", title: "Ollama inventory skipped", content: "provider disabled" });
         return blocked;
       }
+      if (detectOllamaRoutingOnlyIntent(input.text)) {
+        const routingReply = formatOllamaRoutingOnlyReply({
+          defaultChatModel: runtimeSettings.models.defaultByProvider.ollama,
+          activeProvider: runtimeSettings.activeProvider
+        });
+        this.deps.memoryService.appendTurn(userId, input.text, routingReply);
+        this.recordRunHistory({
+          runId,
+          userId,
+          channel: input.channel,
+          inputText: input.text,
+          outputText: routingReply,
+          success: true,
+          correlationId,
+          latencyMs: Date.now() - startedAt,
+          provider: "ollama-inventory",
+          tokenInCount: estimateTokens(input.text),
+          tokenOutCount: estimateTokens(routingReply),
+          toolTimingsMs: mergeToolTimings(hostDiagnosticsMs, implicitShellMs) ?? {}
+        });
+        this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+        this.thoughtLog.append({ category: "chat", title: "Ollama routing summary", content: "no tags fetch" });
+        return routingReply;
+      }
       const { markdown, baseUrl } = await buildOllamaInventoryMarkdown(runtimeSettings);
       if (!markdown.trim()) {
         const fail =
@@ -677,6 +713,7 @@ export class TaskOrchestrator {
     const buildPromptMessages = (userContent: string): ChatMessage[] => [
       { role: "system", content: persona.systemPrompt },
       { role: "system", content: INTEGRITY_SYSTEM_GUARD },
+      ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
       ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
       ...(pendingQuestionsForUser.length > 0
         ? [{
@@ -774,6 +811,7 @@ export class TaskOrchestrator {
         const emergencyPrompt: ChatMessage[] = [
           { role: "system", content: persona.systemPrompt },
           { role: "system", content: INTEGRITY_SYSTEM_GUARD },
+          ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
           ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
           ...visionExtras,
           { role: "user", content: emergencyUser }

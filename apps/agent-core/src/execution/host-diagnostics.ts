@@ -371,11 +371,99 @@ export async function runHostDiskSpaceCollection(
   return await runSnippet(executor, "Disk (df -h)", "df -h", timeoutMs, maxBytes);
 }
 
+function stripDiskRunLabel(body: string): string {
+  return body.replace(/^Disk \(df -h\):\s*/i, "").replace(/^Disk \(Win32\):\s*/i, "").trim();
+}
+
+function normalizeDfAvailForProse(avail: string): string {
+  const m = avail.match(/^(\d+(?:\.\d+)?)(Gi|Ti|Mi|Ki|Pi|Ei|G|T|M|K|B)$/i);
+  if (!m) return avail;
+  const n = m[1];
+  const u = m[2];
+  if (/^Gi$/i.test(u)) return `${n} GiB`;
+  if (/^Ti$/i.test(u)) return `${n} TiB`;
+  if (/^Mi$/i.test(u)) return `${n} MiB`;
+  if (/^Ki$/i.test(u)) return `${n} KiB`;
+  if (/^Pi$/i.test(u)) return `${n} PiB`;
+  if (/^Ei$/i.test(u)) return `${n} EiB`;
+  if (/^G$/i.test(u)) return `${n} GB`;
+  if (/^T$/i.test(u)) return `${n} TB`;
+  if (/^M$/i.test(u)) return `${n} MB`;
+  if (/^K$/i.test(u)) return `${n} KB`;
+  if (/^B$/i.test(u)) return `${n} B`;
+  return avail;
+}
+
+function parseDfDataLine(line: string): { mount: string; avail: string } | null {
+  const trimmed = line.trim();
+  if (!trimmed || /^Filesystem\s/i.test(trimmed)) return null;
+  const parts = trimmed.split(/\s+/);
+  if (parts.length < 6) return null;
+  const mount = parts[parts.length - 1];
+  if (!mount.startsWith("/")) return null;
+  const size = parts[1];
+  const avail = parts[3];
+  if (!/^\d/.test(size) || !/^\d/.test(avail)) return null;
+  return { mount, avail };
+}
+
+function summarizeDfHuman(dfText: string): string | null {
+  const rows: { mount: string; avail: string }[] = [];
+  for (const line of dfText.split("\n")) {
+    const p = parseDfDataLine(line);
+    if (p) rows.push(p);
+  }
+  if (rows.length === 0) return null;
+
+  const root = rows.find((r) => r.mount === "/");
+  const data = rows.find((r) => r.mount === "/System/Volumes/Data");
+  const parts: string[] = [];
+
+  if (root && data && root.avail === data.avail) {
+    parts.push(
+      `About **${normalizeDfAvailForProse(root.avail)}** free on \`/\` and \`/System/Volumes/Data\` (shared free space on this APFS volume group).`
+    );
+  } else {
+    if (root) {
+      parts.push(`About **${normalizeDfAvailForProse(root.avail)}** free on \`/\`.`);
+    }
+    if (data && (!root || data.avail !== root.avail)) {
+      parts.push(`About **${normalizeDfAvailForProse(data.avail)}** free on \`/System/Volumes/Data\`.`);
+    }
+  }
+
+  if (parts.length > 0) {
+    return `${parts.join(" ")} Raw \`df -h\` output is in the block below.`;
+  }
+
+  const boring = /^\/(dev|run|proc|sys)(\/|$)/;
+  const interesting = rows.filter((r) => !boring.test(r.mount));
+  const pick = interesting[0] ?? rows[0];
+  return `About **${normalizeDfAvailForProse(pick.avail)}** free on \`${pick.mount}\`. Raw \`df -h\` output is in the block below.`;
+}
+
+function summarizeWin32Disk(text: string): string | null {
+  const drives: { id: string; free: number }[] = [];
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    const m = trimmed.match(/^([A-Z]):\s+(\d+)\s+(\d+)\s*$/i);
+    if (m) {
+      drives.push({ id: `${m[1].toUpperCase()}:`, free: Number(m[2]) });
+    }
+  }
+  if (drives.length === 0) return null;
+  const bits = drives.map((d) => `**${formatBinary(d.free)}** free on **${d.id}**`);
+  return `${bits.join(" ")} Full WMI output is in the block below.`;
+}
+
 export function formatHostDiskSpaceReply(raw: string): string {
   const body = raw.trim();
-  return (
-    `Nova ran **real disk usage** on the machine where agent-core runs (stdout from \`df -h\` or WMI — not invented):\n\n` +
-    `\`\`\`text\n${body}\n\`\`\`\n\n` +
-    `_If you expected your laptop’s disks, this only matches that host if Nova is running there._`
-  );
+  const stripped = stripDiskRunLabel(body);
+  const failed = /^\(exit /m.test(stripped) || /^\(error:/m.test(stripped);
+  let summary: string | null = null;
+  if (!failed && stripped.length > 0) {
+    summary = /^Disk \(Win32\):/i.test(body) ? summarizeWin32Disk(stripped) : summarizeDfHuman(stripped);
+  }
+  const code = `\`\`\`text\n${body}\n\`\`\``;
+  return summary ? `${summary}\n\n${code}` : code;
 }

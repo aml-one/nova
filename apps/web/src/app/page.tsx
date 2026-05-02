@@ -109,6 +109,8 @@ export default function HomePage() {
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [lastCopiedTurnId, setLastCopiedTurnId] = useState<string | null>(null);
+  const [sessionDeleteConfirmOpen, setSessionDeleteConfirmOpen] = useState(false);
+  const sessionDeletePopoverRef = useRef<HTMLDivElement | null>(null);
   const hasLoadedSessionsRef = useRef(false);
   const hasDoneInitialBottomScrollRef = useRef(false);
   const uploadPreviewUrlsRef = useRef<Map<string, string>>(new Map());
@@ -155,6 +157,31 @@ export default function HomePage() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [lightbox]);
+
+  useEffect(() => {
+    setSessionDeleteConfirmOpen(false);
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!sessionDeleteConfirmOpen) return;
+    function onPointerDown(event: MouseEvent): void {
+      const el = sessionDeletePopoverRef.current;
+      if (el && !el.contains(event.target as Node)) {
+        setSessionDeleteConfirmOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setSessionDeleteConfirmOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [sessionDeleteConfirmOpen]);
 
   useEffect(() => {
     if (!loading) return;
@@ -674,6 +701,27 @@ export default function HomePage() {
     }, 1200);
   }
 
+  function deleteActiveSession(): void {
+    if (!activeSessionId) return;
+    const remaining = sessions.filter((item) => item.id !== activeSessionId);
+    setSessionDeleteConfirmOpen(false);
+    if (remaining.length === 0) {
+      const fallback = createEmptySession();
+      setSessions([fallback]);
+      setActiveSessionId(fallback.id);
+      setTurns([]);
+      setMessage("");
+      setUploads([]);
+      return;
+    }
+    const nextActive = remaining[0];
+    setSessions(remaining);
+    setActiveSessionId(nextActive.id);
+    setTurns(nextActive.turns ?? []);
+    setMessage("");
+    setUploads([]);
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col gap-4">
       <Card className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
@@ -702,6 +750,7 @@ export default function HomePage() {
               tone="green"
               className="inline-flex h-8 min-w-8 items-center justify-center px-2"
               onClick={() => {
+                setSessionDeleteConfirmOpen(false);
                 const next = createEmptySession();
                 setSessions((prev) => [next, ...prev]);
                 setActiveSessionId(next.id);
@@ -718,6 +767,7 @@ export default function HomePage() {
               tone="neutral"
               className="inline-flex h-8 min-w-8 items-center justify-center px-2"
               onClick={() => {
+                setSessionDeleteConfirmOpen(false);
                 const active = sessions.find((item) => item.id === activeSessionId);
                 if (!active) return;
                 const next = window.prompt("Rename session", active.title)?.trim();
@@ -728,35 +778,41 @@ export default function HomePage() {
             >
               <FaPenToSquare className="h-5 w-5" />
             </Button>
-            <Button
-              type="button"
-              tone="red"
-              className="inline-flex h-8 min-w-8 items-center justify-center px-2"
-              onClick={() => {
-                if (!activeSessionId) return;
-                const ok = window.confirm("Delete this session?");
-                if (!ok) return;
-                const remaining = sessions.filter((item) => item.id !== activeSessionId);
-                if (remaining.length === 0) {
-                  const fallback = createEmptySession();
-                  setSessions([fallback]);
-                  setActiveSessionId(fallback.id);
-                  setTurns([]);
-                  setMessage("");
-                  setUploads([]);
-                  return;
-                }
-                const nextActive = remaining[0];
-                setSessions(remaining);
-                setActiveSessionId(nextActive.id);
-                setTurns(nextActive.turns ?? []);
-                setMessage("");
-                setUploads([]);
-              }}
-              title="Delete active session"
-            >
-              <FaTrash className="h-5 w-5" />
-            </Button>
+            <div ref={sessionDeletePopoverRef} className="relative">
+              <Button
+                type="button"
+                tone="red"
+                className="inline-flex h-8 min-w-8 items-center justify-center px-2"
+                onClick={() => {
+                  if (!activeSessionId) return;
+                  setSessionDeleteConfirmOpen((open) => !open);
+                }}
+                title="Delete active session"
+                aria-expanded={sessionDeleteConfirmOpen}
+                aria-haspopup="dialog"
+              >
+                <FaTrash className="h-5 w-5" />
+              </Button>
+              {sessionDeleteConfirmOpen ? (
+                <div
+                  className="absolute right-0 top-full z-30 mt-1.5 w-[min(18rem,calc(100vw-2rem))] rounded-ui border border-rose-500/35 bg-surface2 p-3 shadow-lg ring-1 ring-black/10 dark:ring-white/10"
+                  role="dialog"
+                  aria-labelledby="session-delete-confirm-title"
+                >
+                  <p id="session-delete-confirm-title" className="mb-3 text-sm font-medium text-foreground">
+                    Delete this session? This cannot be undone.
+                  </p>
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" tone="neutral" className="text-sm" onClick={() => setSessionDeleteConfirmOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button type="button" tone="red" className="text-sm" onClick={() => deleteActiveSession()}>
+                      Delete session
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
         <div
@@ -866,7 +922,22 @@ export default function HomePage() {
                       )}
                     </div>
                   ) : (
-                    <ChatMarkdown content={turn.text || (turn.role === "assistant" && loading ? "..." : "")} />
+                    <ChatMarkdown
+                      content={turn.text || (turn.role === "assistant" && loading ? "..." : "")}
+                      toneSeed={
+                        turn.role === "assistant"
+                          ? {
+                              textColor: ensureReadableTextColor(assistantTextColorForTheme, isDarkTheme),
+                              bubbleBackground: chatStyle.bubbleBackgroundEnabled
+                                ? withOpacity(assistantBubbleColorForTheme, chatStyle.assistantBackgroundOpacityPct)
+                                : isDarkTheme
+                                  ? "rgb(30, 41, 59)"
+                                  : "rgb(248, 250, 252)",
+                              variant: isDarkTheme ? "dark" : "light"
+                            }
+                          : undefined
+                      }
+                    />
                   )}
                 </div>
               )}
@@ -1148,13 +1219,8 @@ export default function HomePage() {
               </Link>
               {uploadedMedia.length > 0 ? <Badge tone="pink">{uploadedMedia.length} media ready</Badge> : null}
             </div>
-            <div className="flex h-8 min-w-[4.75rem] shrink-0 items-center justify-end">
-              {loading ? (
-                <Button type="button" tone="red" className="h-8 px-3 text-sm" onClick={() => stopGeneration()} title="Stop immediately">
-                  <FaStop className="mr-1.5 inline h-3.5 w-3.5" />
-                  Stop
-                </Button>
-              ) : (
+            {!loading ? (
+              <div className="flex h-8 min-w-[4.75rem] shrink-0 items-center justify-end">
                 <Button
                   type="submit"
                   tone="green"
@@ -1165,8 +1231,8 @@ export default function HomePage() {
                 >
                   Send
                 </Button>
-              )}
-            </div>
+              </div>
+            ) : null}
           </div>
         </form>
       </Card>
