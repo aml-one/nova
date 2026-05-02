@@ -10,6 +10,7 @@ import { CommandExecutor } from "../execution/command-executor.js";
 import { evaluateCommandPolicy } from "../execution/policy.js";
 import {
   detectHostDiagnosticsIntent,
+  type HostDiagnosticsScope,
   implicitHostDiagnosticsShellAllowed,
   runHostDiagnosticsCollection
 } from "../execution/host-diagnostics.js";
@@ -270,6 +271,33 @@ export class TaskOrchestrator {
       } else {
         hostDiagnosticsMs = 0;
       }
+    }
+
+    // For straightforward host resource checks, prefer direct tool output over model prose.
+    if (diagnosticsIntent && hostDiagnosticsAppendix.trim()) {
+      const diagnosticsReply = formatHostDiagnosticsReply(diagnosticsIntent, hostDiagnosticsAppendix);
+      this.deps.memoryService.appendTurn(userId, input.text, diagnosticsReply);
+      this.recordRunHistory({
+        runId,
+        userId,
+        channel: input.channel,
+        inputText: input.text,
+        outputText: diagnosticsReply,
+        success: true,
+        correlationId,
+        latencyMs: Date.now() - startedAt,
+        provider: "host-diagnostics",
+        tokenInCount: estimateTokens(input.text),
+        tokenOutCount: estimateTokens(diagnosticsReply),
+        toolTimingsMs: hostDiagnosticsMs > 0 ? { hostDiagnosticsMs } : {}
+      });
+      this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+      this.thoughtLog.append({
+        category: "chat",
+        title: "Host diagnostics returned",
+        content: diagnosticsReply.slice(0, 320)
+      });
+      return diagnosticsReply;
     }
 
     const activeProvider = runtimeSettings.activeProvider;
@@ -968,4 +996,24 @@ function stableCohortBucket(userId: string): number {
     hash = (hash * 31 + userId.charCodeAt(i)) % 10000;
   }
   return hash % 100;
+}
+
+function formatHostDiagnosticsReply(scope: HostDiagnosticsScope, report: string): string {
+  const label =
+    scope === "cpu"
+      ? "CPU"
+      : scope === "memory"
+        ? "RAM"
+        : scope === "gpu"
+          ? "GPU"
+          : "CPU/RAM/GPU";
+  const hostOs = process.platform === "win32" ? "Windows" : process.platform === "darwin" ? "macOS" : "Linux";
+  return [
+    `I checked this host directly via Nova shell tools. Detected OS: ${hostOs}.`,
+    `Requested scope: ${label}.`,
+    "",
+    "```",
+    report.trim(),
+    "```"
+  ].join("\n");
 }
