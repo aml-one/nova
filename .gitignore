@@ -1,3 +1,6 @@
+# Signal from agent-core update apply: local supervisor wipes Next dev cache on restart
+tmp/.nova-clean-web-next
+
 node_modules/
 .pnpm-store/
 dist/

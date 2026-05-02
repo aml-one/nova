@@ -22,6 +22,13 @@ echo "Starting Nova local stack supervisor..."
 echo "This script now auto-restarts services after update-triggered exits."
 
 while true; do
+  FLAG="${ROOT_DIR}/tmp/.nova-clean-web-next"
+  if [[ -f "${FLAG}" ]]; then
+    rm -f "${FLAG}"
+    rm -rf "${ROOT_DIR}/apps/web/.next"
+    echo "Cleared apps/web/.next after in-app update (avoids stale Next dev chunks)."
+  fi
+
   echo "Launching agent-core and web..."
   (
     cd "${ROOT_DIR}"

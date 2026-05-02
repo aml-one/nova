@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ChatMessage } from "@nova/sdk/provider";
+import type { ChatMessage, ModelResponse } from "@nova/sdk/provider";
 import { ModelRouter } from "../providers/router.js";
 import { MemoryService } from "../memory/memory-service.js";
 import { PersonaLoader } from "../persona/persona-loader.js";
@@ -33,6 +33,8 @@ import { ThoughtRepository } from "../storage/repositories/thought-repository.js
 import { getDatabase } from "../storage/sqlite.js";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 
+const MAX_HOST_DIAG_APPENDIX_CHARS = 12_000;
+
 function shouldTryLocalModelAfterChatError(message: string): boolean {
   if (/copilot provider is not configured/i.test(message)) {
     return true;
@@ -41,6 +43,11 @@ function shouldTryLocalModelAfterChatError(message: string): boolean {
   return /fetch failed|failed to fetch|econnrefused|etimedout|enotfound|socket hang up|network|tls|certificate|und_err|abort/i.test(
     lower
   );
+}
+
+function isLikelyContextLimitError(err: unknown): boolean {
+  const lower = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return /context length|maximum context|token limit|exceeds the context|input is too long/.test(lower);
 }
 
 type TaskOrchestratorDeps = {
@@ -272,11 +279,17 @@ export class TaskOrchestrator {
       title: "Generating assistant response",
       content: `provider=${activeProvider}, model=${selectedModel ?? "default"}`
     });
+    const diagRaw = hostDiagnosticsAppendix.trim();
+    const truncatedDiag =
+      diagRaw.length > MAX_HOST_DIAG_APPENDIX_CHARS
+        ? `${diagRaw.slice(0, MAX_HOST_DIAG_APPENDIX_CHARS)}\n\n[truncated to ${MAX_HOST_DIAG_APPENDIX_CHARS} chars for model context]`
+        : diagRaw;
     const userMessageForModel =
-      hostDiagnosticsAppendix.trim().length > 0
-        ? `${input.text}\n\n---\nHost diagnostics (read-only, collected automatically by Nova):\n${hostDiagnosticsAppendix.trim()}`
+      truncatedDiag.length > 0
+        ? `${input.text}\n\n---\nHost diagnostics (read-only, collected automatically by Nova):\n${truncatedDiag}`
         : input.text;
-    const promptMessages: ChatMessage[] = [
+    const visionExtras = await this.buildVisionContextIfNeeded(input.text, input.imageUrl, input.accessProfile);
+    const buildPromptMessages = (userContent: string): ChatMessage[] => [
       { role: "system", content: persona.systemPrompt },
       ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
       ...(pendingQuestionsForUser.length > 0
@@ -286,31 +299,74 @@ export class TaskOrchestrator {
           }]
         : []),
       ...memoryContext,
-      ...(await this.buildVisionContextIfNeeded(input.text, input.imageUrl, input.accessProfile)),
-      { role: "user", content: userMessageForModel }
+      ...visionExtras,
+      { role: "user", content: userContent }
     ];
-    let result;
+    const promptMessages = buildPromptMessages(userMessageForModel);
+    const promptMessagesSlim = buildPromptMessages(input.text);
+
+    const runChat = async (messages: ChatMessage[], model: string | undefined): Promise<ModelResponse> =>
+      input.onToken
+        ? await this.deps.modelRouter.chatStream(messages, input.onToken, model)
+        : await this.deps.modelRouter.chat(messages, model);
+
+    const runLocalFirst = async (messages: ChatMessage[], model: string | undefined): Promise<ModelResponse> =>
+      input.onToken
+        ? await this.deps.modelRouter.chatStreamLocalFirst(messages, input.onToken, model)
+        : await this.deps.modelRouter.chatLocalFirst(messages, model);
+
+    let result: ModelResponse | undefined;
     try {
-      result = input.onToken
-        ? await this.deps.modelRouter.chatStream(promptMessages, input.onToken, selectedModel)
-        : await this.deps.modelRouter.chat(promptMessages, selectedModel);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "model request failed";
-      if (shouldTryLocalModelAfterChatError(message)) {
-        try {
-          result = input.onToken
-            ? await this.deps.modelRouter.chatStreamLocalFirst(promptMessages, input.onToken, selectedModel)
-            : await this.deps.modelRouter.chatLocalFirst(promptMessages, selectedModel);
-        } catch {
-          const fallback =
-            "I can still help without Copilot, but right now I cannot reach a working local model for this task. " +
-            "Please configure Copilot in Settings -> Models -> Copilot quick setup, or enable Ollama/LM Studio and try again.";
-          this.deps.memoryService.appendTurn(userId, input.text, fallback);
-          return fallback;
+      try {
+        result = await runChat(promptMessages, selectedModel);
+      } catch (error) {
+        if (truncatedDiag.length > 0 && isLikelyContextLimitError(error)) {
+          result = await runChat(promptMessagesSlim, selectedModel);
+        } else {
+          const message = error instanceof Error ? error.message : "model request failed";
+          if (shouldTryLocalModelAfterChatError(message)) {
+            try {
+              result = await runLocalFirst(promptMessages, undefined);
+            } catch (localErr) {
+              if (truncatedDiag.length > 0 && isLikelyContextLimitError(localErr)) {
+                result = await runLocalFirst(promptMessagesSlim, undefined);
+              } else {
+                throw localErr;
+              }
+            }
+          } else {
+            throw error;
+          }
         }
-      } else {
-        throw error;
       }
+    } catch {
+      result = undefined;
+    }
+
+    if (!result) {
+      const fallback =
+        "I can still help without Copilot, but right now I cannot reach a working local model for this task. " +
+        "Please configure Copilot in Settings -> Models -> Copilot quick setup, or enable Ollama/LM Studio and try again.";
+      this.deps.memoryService.appendTurn(userId, input.text, fallback);
+      const failedAfterMs = Date.now() - startedAt;
+      this.recordRunHistory({
+        runId,
+        userId,
+        channel: input.channel,
+        inputText: input.text,
+        outputText: fallback,
+        success: false,
+        correlationId,
+        latencyMs: failedAfterMs,
+        toolTimingsMs: hostDiagnosticsMs > 0 ? { hostDiagnosticsMs } : {}
+      });
+      this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: false });
+      this.thoughtLog.append({
+        category: "chat",
+        title: "Model providers unavailable",
+        content: fallback.slice(0, 200)
+      });
+      return fallback;
     }
 
     this.deps.memoryService.appendTurn(userId, input.text, result.content);

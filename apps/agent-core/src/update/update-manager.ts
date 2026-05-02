@@ -1,6 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { getDatabase } from "../storage/sqlite.js";
+
+function resolveRepoRoot(): string {
+  const cwd = process.cwd();
+  const candidates = [cwd, resolve(cwd, ".."), resolve(cwd, "..", "..")];
+  for (const dir of candidates) {
+    if (existsSync(resolve(dir, "pnpm-workspace.yaml"))) {
+      return dir;
+    }
+  }
+  return cwd;
+}
 
 export type UpdateSettings = {
   enabled: boolean;
@@ -230,18 +243,36 @@ export class UpdateManager {
   }
 
   private runShellUpdate(): { ok: boolean; message: string } {
-    const cmd = process.platform === "win32"
+    const repoRoot = resolveRepoRoot();
+    /**
+     * Do not run `pnpm -r build` by default while `next dev` may still be running: `next build`
+     * writes the same `apps/web/.next` tree and races the dev server (torn manifests / missing chunks).
+     * Set NOVA_UPDATE_INCLUDE_BUILD=true for installs that need a full compile (e.g. prod without dev).
+     */
+    const includeBuild = process.env.NOVA_UPDATE_INCLUDE_BUILD === "true";
+    const cmd = includeBuild
       ? "git pull && corepack pnpm install && corepack pnpm -r build"
-      : "git pull && corepack pnpm install && corepack pnpm -r build";
+      : "git pull && corepack pnpm install";
     const result = spawnSync(cmd, {
-      cwd: process.cwd(),
+      cwd: repoRoot,
       shell: true,
       encoding: "utf8"
     });
     if (result.status !== 0) {
       return { ok: false, message: (result.stderr || result.stdout || "update command failed").slice(0, 2000) };
     }
+    this.touchWebNextCleanFlag(repoRoot);
     return { ok: true, message: (result.stdout || "update applied").slice(0, 2000) };
+  }
+
+  private touchWebNextCleanFlag(repoRoot: string): void {
+    try {
+      const dir = resolve(repoRoot, "tmp");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(resolve(dir, ".nova-clean-web-next"), `${new Date().toISOString()}\n`, "utf8");
+    } catch {
+      // non-fatal; start-local.sh will still restart web without wiping .next
+    }
   }
 
   private record(

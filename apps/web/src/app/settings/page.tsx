@@ -23,6 +23,15 @@ type ProviderCatalog = {
   models?: { ollama?: Array<{ id: string }>; lmstudio?: Array<{ id: string }>; copilot?: Array<{ id: string }> };
   setup?: Record<string, { configured: boolean; details: string; steps: string[] }>;
 };
+type ModelPingResult = {
+  provider: "ollama" | "lmstudio" | "copilot";
+  healthOk: boolean;
+  healthDetail?: string;
+  chatOk?: boolean;
+  chatDetail?: string;
+  chatLatencyMs?: number;
+  modelTried?: string;
+};
 type UpdateStatus = {
   installedAt: string;
   latestPushedAt?: string;
@@ -252,6 +261,9 @@ export default function SettingsPage() {
   const [copilotDeviceLoginCode, setCopilotDeviceLoginCode] = useState<string>("");
   const [copilotDeviceLoginLogs, setCopilotDeviceLoginLogs] = useState<string[]>([]);
   const [copilotDeviceLoginMessage, setCopilotDeviceLoginMessage] = useState<string>("");
+  const [modelPingLoading, setModelPingLoading] = useState(false);
+  const [modelPingResults, setModelPingResults] = useState<ModelPingResult[] | null>(null);
+  const [modelPingError, setModelPingError] = useState<string | null>(null);
   const [channelsSetupMode, setChannelsSetupMode] = useState<"signal" | "whatsapp" | "both">("both");
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
@@ -573,6 +585,29 @@ export default function SettingsPage() {
     const header = `Copilot: ${data.check?.ok ? "OK" : "Needs attention"} - ${data.check?.detail ?? "-"}`;
     setCopilotSetupOutput([header, "", data.suggestedEnv ?? ""].join("\n"));
     setStatus("Copilot setup validated. Review result and save settings.");
+  }
+
+  async function runModelConnectivityTest(): Promise<void> {
+    setError(null);
+    setStatus(null);
+    setModelPingError(null);
+    setModelPingLoading(true);
+    try {
+      const response = await fetch("/api/models/ping", { method: "POST" });
+      const data = (await response.json().catch(() => ({}))) as { results?: ModelPingResult[]; error?: string };
+      if (!response.ok) {
+        setModelPingResults(null);
+        setModelPingError(data.error ?? "Model ping failed");
+        return;
+      }
+      setModelPingResults(Array.isArray(data.results) ? data.results : []);
+      setStatus("Model connectivity checked. Save settings first if you changed defaults since last save.");
+    } catch {
+      setModelPingResults(null);
+      setModelPingError("Could not reach Nova agent for model ping.");
+    } finally {
+      setModelPingLoading(false);
+    }
   }
 
   async function startCopilotDeviceLogin(): Promise<void> {
@@ -1074,6 +1109,43 @@ export default function SettingsPage() {
                 </Select>
               </label>
             </div>
+            <div className="flex flex-wrap items-center gap-2 rounded-ui border bg-surface2 p-2">
+              <Button type="button" tone="purple" disabled={modelPingLoading} onClick={() => void runModelConnectivityTest()}>
+                {modelPingLoading ? "Testing…" : "Test model connections"}
+              </Button>
+              <span className="text-[11px] text-muted">
+                Health check plus a minimal chat on each provider using <strong>saved</strong> default models (save the form below if you just changed them).
+              </span>
+            </div>
+            {modelPingError ? <p className="text-xs text-rose-600">{modelPingError}</p> : null}
+            {modelPingResults && modelPingResults.length > 0 ? (
+              <div className="grid gap-2 md:grid-cols-3">
+                {modelPingResults.map((row) => (
+                  <div key={row.provider} className="rounded-ui border bg-surface p-2 text-xs">
+                    <div className="font-semibold capitalize">{row.provider}</div>
+                    <div className="mt-1">
+                      Health:{" "}
+                      <span className={row.healthOk ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600"}>
+                        {row.healthOk ? "OK" : row.healthDetail ?? "unreachable"}
+                      </span>
+                    </div>
+                    {row.chatOk !== undefined ? (
+                      <div className="mt-0.5">
+                        Chat:{" "}
+                        <span className={row.chatOk ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600"}>
+                          {row.chatOk ? `OK (${row.chatLatencyMs ?? "?"} ms)` : row.chatDetail ?? "failed"}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="mt-0.5 text-muted">Chat: skipped (health failed)</div>
+                    )}
+                    <div className="mt-0.5 font-mono text-[10px] text-muted">
+                      Model tried: {row.modelTried?.trim() ? row.modelTried : "default / env"}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
             <p className="text-[11px] text-muted leading-snug">
               Copilot usage follows your GitHub Copilot plan. Pick <em>Disabled</em> to remove Copilot from routing entirely (local-first only when using Ollama/LM Studio fallbacks). Otherwise choose a mini/smaller model for lighter chat.{" "}
               <em>Auto / env default</em> uses <code className="font-mono text-[10px]">COPILOT_MODEL</code> when set, otherwise Nova uses{" "}

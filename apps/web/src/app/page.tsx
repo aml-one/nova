@@ -1173,6 +1173,8 @@ async function readSseStream(
           if (eventName === "done" && payload.reply) {
             fullText = payload.reply;
             provider = payload.provider ?? provider;
+            model = payload.model ?? model;
+            hideProviderModel = payload.hideProviderModelInStats === true;
             firstTokenMs = payload.firstTokenMs ?? firstTokenMs;
             providerTps = payload.tokensPerSecond ?? providerTps;
             onPartial(fullText);

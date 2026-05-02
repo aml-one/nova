@@ -304,6 +304,10 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const full = await buildFullHealth(options.modelRouter, dispatcher, scheduler);
         return sendJson(response, 200, { health: full, correlationId });
       }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/models/ping") {
+        const ping = await options.modelRouter.pingConfiguredModels(options.settings.get());
+        return sendJson(response, 200, { ...ping, correlationId });
+      }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/system/update/status") {
         return sendJson(response, 200, { status: options.updateManager.getStatus(), correlationId });
       }

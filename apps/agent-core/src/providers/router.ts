@@ -234,4 +234,78 @@ export class ModelRouter {
       return wb - wa;
     });
   }
+
+  /**
+   * Reachability + one minimal chat per provider using the configured default model id from settings.
+   */
+  async pingConfiguredModels(settings: {
+    models: { defaultByProvider: { ollama: string; lmstudio: string; copilot: string } };
+  }): Promise<{
+    results: Array<{
+      provider: "ollama" | "lmstudio" | "copilot";
+      healthOk: boolean;
+      healthDetail?: string;
+      chatOk?: boolean;
+      chatDetail?: string;
+      chatLatencyMs?: number;
+      modelTried?: string;
+    }>;
+  }> {
+    const order = ["ollama", "lmstudio", "copilot"] as const;
+    const results: Array<{
+      provider: "ollama" | "lmstudio" | "copilot";
+      healthOk: boolean;
+      healthDetail?: string;
+      chatOk?: boolean;
+      chatDetail?: string;
+      chatLatencyMs?: number;
+      modelTried?: string;
+    }> = [];
+    for (const name of order) {
+      if (name === "copilot" && isCopilotIntegrationDisabled()) {
+        results.push({
+          provider: name,
+          healthOk: false,
+          healthDetail: "integration disabled in Settings"
+        });
+        continue;
+      }
+      const provider = this.providers.find((p) => p.name === name);
+      if (!provider) {
+        continue;
+      }
+      const health = await provider.health();
+      const modelTried = settings.models.defaultByProvider[name]?.trim() || undefined;
+      let chatOk: boolean | undefined;
+      let chatDetail: string | undefined;
+      let chatLatencyMs: number | undefined;
+      if (health.ok) {
+        const t0 = Date.now();
+        try {
+          await provider.chat({
+            messages: [{ role: "user", content: "Reply with exactly the word PONG and nothing else." }],
+            model: modelTried,
+            maxTokens: 24,
+            temperature: 0
+          });
+          chatOk = true;
+          chatLatencyMs = Date.now() - t0;
+        } catch (error) {
+          chatOk = false;
+          chatDetail = error instanceof Error ? error.message : String(error);
+          chatLatencyMs = Date.now() - t0;
+        }
+      }
+      results.push({
+        provider: name,
+        healthOk: health.ok,
+        healthDetail: health.details,
+        chatOk,
+        chatDetail,
+        chatLatencyMs,
+        modelTried
+      });
+    }
+    return { results };
+  }
 }
