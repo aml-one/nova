@@ -13,6 +13,16 @@ type EndpointItem = {
 
 const ENDPOINTS: EndpointItem[] = [
   { method: "GET", path: "/api/system/health", note: "Overall system health checks." },
+  {
+    method: "GET",
+    path: "/api/debug/vision",
+    note: "Vision routing snapshot (lanes, priority, configured flags) — no upstream calls."
+  },
+  {
+    method: "GET",
+    path: "/api/debug/chat-routing",
+    note: "Vision + chat routing: why run history may show Copilot while vision uses local; integration skips."
+  },
   { method: "GET", path: "/api/thoughts?limit=200", note: "Latest thought events." },
   { method: "GET", path: "/api/emotion/history?limit=200", note: "Emotion timeline history." },
   { method: "GET", path: "/api/improvement/inspect?limit=200", note: "Autonomy/loop diagnostics snapshot." },
