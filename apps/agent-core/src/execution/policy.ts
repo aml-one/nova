@@ -9,7 +9,7 @@ const denyPatterns = [
   /\bchmod\s+-R\s+777\s+\//i
 ];
 
-const allowedPrefixes = ["echo", "dir", "ls", "pwd", "git status", "git log", "node", "python", "ffmpeg"];
+const allowedPrefixes = ["echo", "dir", "ls", "pwd", "date", "git status", "git log", "node", "python", "ffmpeg"];
 
 export type PolicyDecision = {
   allowed: boolean;

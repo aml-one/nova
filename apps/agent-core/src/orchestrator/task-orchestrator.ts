@@ -14,6 +14,7 @@ import {
   implicitHostDiagnosticsShellAllowed,
   runHostDiagnosticsCollection
 } from "../execution/host-diagnostics.js";
+import { detectHostTimeIntent, runHostTimeCollection } from "../execution/host-time.js";
 import {
   detectSkillAuthoringIntent,
   enableAuthoredSkill,
@@ -122,6 +123,7 @@ export class TaskOrchestrator {
     const pendingQuestionsForUser = this.deps.improvement.consumePendingQuestions(userId, 2);
     const runId = randomUUID();
     const correlationId = input.correlationId ?? runId;
+    const preferLocalForHostTime = detectHostTimeIntent(input.text);
     const selectedModel = this.resolveChatModel(input, runtimeSettings);
 
     const enableSkillId = parseEnableSkillCommand(input.text);
@@ -305,6 +307,45 @@ export class TaskOrchestrator {
       }
     }
 
+    let hostTimeMs = 0;
+    if (preferLocalForHostTime && implicitHostDiagnosticsShellAllowed(input.accessProfile)) {
+      const timeStarted = Date.now();
+      const timeRaw = await runHostTimeCollection(this.deps.commandExecutor, runtimeSettings.shell);
+      hostTimeMs = Date.now() - timeStarted;
+      const cleaned = timeRaw.trim();
+      if (cleaned && cleaned !== "(timed out)" && cleaned !== "(empty)") {
+        const timeReply = formatHostTimeReply(cleaned);
+        this.deps.memoryService.appendTurn(userId, input.text, timeReply);
+        this.recordRunHistory({
+          runId,
+          userId,
+          channel: input.channel,
+          inputText: input.text,
+          outputText: timeReply,
+          success: true,
+          correlationId,
+          latencyMs: Date.now() - startedAt,
+          provider: "host-time",
+          tokenInCount: estimateTokens(input.text),
+          tokenOutCount: estimateTokens(timeReply),
+          toolTimingsMs: { hostTimeMs }
+        });
+        this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+        this.thoughtLog.append({
+          category: "chat",
+          title: "Host time (auto)",
+          content: cleaned.slice(0, 200)
+        });
+        this.deps.auditLog.append({
+          runId,
+          actor: userId,
+          action: "host_time_auto",
+          data: { ms: String(hostTimeMs), correlationId }
+        });
+        return timeReply;
+      }
+    }
+
     let hostDiagnosticsAppendix = "";
     let hostDiagnosticsMs = 0;
     const diagnosticsIntent = detectHostDiagnosticsIntent(input.text);
@@ -371,10 +412,14 @@ export class TaskOrchestrator {
       diagRaw.length > MAX_HOST_DIAG_APPENDIX_CHARS
         ? `${diagRaw.slice(0, MAX_HOST_DIAG_APPENDIX_CHARS)}\n\n[truncated to ${MAX_HOST_DIAG_APPENDIX_CHARS} chars for model context]`
         : diagRaw;
+    const timeVoiceHint =
+      preferLocalForHostTime && truncatedDiag.length === 0
+        ? "\n\nNova voice: You are only Nova on this host—never imply a separate user phone, taskbar, or device. If you still cannot state wall time, ask in one short sentence for city, country, or UTC offset only—never suggest checking hardware or assistants the user might own."
+        : "";
     const userMessageForModel =
       truncatedDiag.length > 0
         ? `${input.text}\n\n---\nHost diagnostics (read-only, collected automatically by Nova):\n${truncatedDiag}`
-        : input.text;
+        : `${input.text}${timeVoiceHint}`;
     const unresolvedVisionRef = this.resolveUnresolvedVisionReference(input.text, input.imageUrl, runtimeSettings);
     if (unresolvedVisionRef) {
       this.deps.memoryService.appendTurn(userId, input.text, unresolvedVisionRef);
@@ -445,7 +490,7 @@ export class TaskOrchestrator {
       { role: "user", content: userContent }
     ];
     const promptMessages = buildPromptMessages(userMessageForModel);
-    const promptMessagesSlim = buildPromptMessages(input.text);
+    const promptMessagesSlim = buildPromptMessages(timeVoiceHint ? `${input.text}${timeVoiceHint}` : input.text);
 
     const runChat = async (messages: ChatMessage[], model: string | undefined): Promise<ModelResponse> =>
       input.onToken
@@ -461,10 +506,29 @@ export class TaskOrchestrator {
     let lastModelError: unknown;
     try {
       try {
-        result = await runChat(promptMessages, selectedModel);
+        if (preferLocalForHostTime) {
+          try {
+            result = await runLocalFirst(promptMessages, undefined);
+          } catch (localPrimaryErr) {
+            lastModelError = localPrimaryErr;
+            if (truncatedDiag.length > 0 && isLikelyContextLimitError(localPrimaryErr)) {
+              try {
+                result = await runLocalFirst(promptMessagesSlim, undefined);
+              } catch {
+                result = await runChat(promptMessagesSlim, selectedModel);
+              }
+            } else {
+              result = await runChat(promptMessages, selectedModel);
+            }
+          }
+        } else {
+          result = await runChat(promptMessages, selectedModel);
+        }
       } catch (error) {
         if (truncatedDiag.length > 0 && isLikelyContextLimitError(error)) {
-          result = await runChat(promptMessagesSlim, selectedModel);
+          result = preferLocalForHostTime
+            ? await runLocalFirst(promptMessagesSlim, undefined)
+            : await runChat(promptMessagesSlim, selectedModel);
         } else {
           const message = error instanceof Error ? error.message : "model request failed";
           if (shouldTryLocalModelAfterChatError(message)) {
@@ -1076,6 +1140,11 @@ function detectMediaGenerationIntent(text: string): "image" | "video" | undefine
     return "image";
   }
   return undefined;
+}
+
+function formatHostTimeReply(raw: string): string {
+  const body = raw.trim();
+  return `I read the clock on the machine I run on:\n\n\`\`\`\n${body}\n\`\`\`\n\nIf you want a different zone, say the city, country, or IANA name (for example Europe/Budapest).`;
 }
 
 function detectPerplexicaSearchIntent(text: string): string | undefined {
