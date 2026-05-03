@@ -1123,7 +1123,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           return sendJson(response, 400, { error: "text is required", correlationId });
         }
         try {
-          const body = await voice.synthesizeOrpheusBuffer(trace.preparedForSpeech);
+          const body = await voice.synthesizeOrpheusBufferFromSentInput(trace.sentToOrpheus);
           recordTtsSpeakResult({
             ...trace,
             correlationId,
@@ -1164,7 +1164,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           pipeline: [
             "requestText: raw POST body (assistant markdown allowed)",
             "preparedForSpeech: strips thinking blocks, fences, nova tags, markdown → plain",
-            "sentToOrpheus: mood augmentation (Hmm prefixes; <laugh>/<chuckle>/<sigh>/<gasp>/<groan>/<yawn>/<cough>/<sniffle>) — Orpheus `input`"
+            "sentToOrpheus: mood augmentation (Hmm prefixes; <laugh>/<chuckle>/<sigh>/<gasp>/<groan>/<cough>/<sniffle>) — Orpheus `input`"
           ]
         });
       }
