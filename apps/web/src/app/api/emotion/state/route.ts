@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
+import { WEB_CHAT_EMOTION_USER_ID } from "../../../../lib/emotion-user";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
-  const userId = url.searchParams.get("userId") ?? "nova-system";
+  const userId = url.searchParams.get("userId") ?? WEB_CHAT_EMOTION_USER_ID;
   const response = await fetch(`${getAgentBaseUrl()}/v1/emotion/state?userId=${encodeURIComponent(userId)}`, {
     headers: getAgentHeaders(request)
   });

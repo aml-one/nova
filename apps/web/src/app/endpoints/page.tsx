@@ -25,7 +25,11 @@ const ENDPOINTS: EndpointItem[] = [
     note: "Vision + chat routing: why run history may show Copilot while vision uses local; integration skips."
   },
   { method: "GET", path: "/api/thoughts?limit=200", note: "Latest thought events." },
-  { method: "GET", path: "/api/emotion/history?limit=200", note: "Emotion timeline history." },
+  {
+    method: "GET",
+    path: "/api/emotion/history?limit=200",
+    note: "Unified Nova mood timeline (all channels/users); optional userId query ignored."
+  },
   { method: "GET", path: "/api/improvement/inspect?limit=200", note: "Autonomy/loop diagnostics snapshot." },
   { method: "GET", path: "/api/improvement/history", note: "Learning history grouped by date." },
   { method: "GET", path: "/api/persona/default", note: "Current base persona file." },

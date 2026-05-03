@@ -53,7 +53,7 @@ export class EmotionRepository {
 
   appendEvent(input: {
     userId: string;
-    source: "user_input" | "system_event";
+    source: string;
     trigger: string;
     valence: number;
     arousal: number;

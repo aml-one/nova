@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { NOVA_EMOTION_REFRESH_EVENT, WEB_CHAT_EMOTION_USER_ID } from "../lib/emotion-user";
 
 type EmotionState = {
   valence: number;
@@ -8,31 +9,55 @@ type EmotionState = {
   label: string;
 };
 
-export function EmotionBadge() {
+const POLL_VISIBLE_MS = 900;
+const POLL_HIDDEN_MS = 8000;
+
+export function EmotionBadge({ userId = WEB_CHAT_EMOTION_USER_ID }: { userId?: string }) {
   const [state, setState] = useState<EmotionState | null>(null);
 
+  const fetchState = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/emotion/state?userId=${encodeURIComponent(userId)}`);
+      const data = (await response.json()) as { state?: EmotionState | null };
+      setState(data.state ?? null);
+    } catch {
+      setState(null);
+    }
+  }, [userId]);
+
   useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const response = await fetch("/api/emotion/state?userId=nova-system");
-        const data = (await response.json()) as { state?: EmotionState | null };
-        if (alive) {
-          setState(data.state ?? null);
-        }
-      } catch {
-        if (alive) {
-          setState(null);
-        }
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const schedulePoll = () => {
+      if (timer != null) {
+        clearInterval(timer);
+        timer = null;
+      }
+      const ms = typeof document !== "undefined" && document.visibilityState === "hidden" ? POLL_HIDDEN_MS : POLL_VISIBLE_MS;
+      timer = setInterval(() => void fetchState(), ms);
+    };
+
+    void fetchState();
+    schedulePoll();
+
+    const onVisibility = () => {
+      void fetchState();
+      schedulePoll();
+    };
+
+    const onRefresh = () => void fetchState();
+
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener(NOVA_EMOTION_REFRESH_EVENT, onRefresh);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener(NOVA_EMOTION_REFRESH_EVENT, onRefresh);
+      if (timer != null) {
+        clearInterval(timer);
       }
     };
-    void load();
-    const timer = setInterval(() => void load(), 5000);
-    return () => {
-      alive = false;
-      clearInterval(timer);
-    };
-  }, []);
+  }, [fetchState, userId]);
 
   const color = useMemo(() => {
     const label = state?.label ?? "neutral";
@@ -49,8 +74,8 @@ export function EmotionBadge() {
     <div
       title={
         state
-          ? `Nova is ${state.label} (valence=${state.valence.toFixed(2)}, arousal=${state.arousal.toFixed(2)})`
-          : "Nova emotional state unavailable"
+          ? `Nova is ${state.label} (valence=${state.valence.toFixed(2)}, arousal=${state.arousal.toFixed(2)}) · one mood for all channels & users`
+          : "Nova emotional state unavailable (enable emotion core in Settings)"
       }
       style={{
         display: "flex",

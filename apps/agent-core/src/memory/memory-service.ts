@@ -49,6 +49,18 @@ export class MemoryService {
     return [{ role: "system", content: systemParts.join("\n\n") }, ...recent];
   }
 
+  /**
+   * MemoryBear retrieval only (no local transcript block), clipped for tight prompts — e.g. last-resort model retries.
+   */
+  async buildCompactMemoryBearMessages(userId: string, query: string, maxChars = 3500): Promise<ChatMessage[]> {
+    const mb = await this.fetchMemoryBearContext(userId, query);
+    if (!mb?.trim()) {
+      return [];
+    }
+    const clipped = mb.length > maxChars ? `${mb.slice(0, maxChars)}\n…` : mb;
+    return [{ role: "system", content: `MemoryBear (compact retrieval):\n${clipped}` }];
+  }
+
   private async fetchMemoryBearContext(userId: string, query: string): Promise<string | undefined> {
     const settings = this.getSettings().memoryBear;
     if (!settings.enabled || !settings.apiKey.trim() || !settings.baseUrl.trim()) {

@@ -1,9 +1,10 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 
 let database: DatabaseSync | undefined;
-const LATEST_SCHEMA_VERSION = 17;
+const LATEST_SCHEMA_VERSION = 18;
 
 export function getDatabase(): DatabaseSync {
   if (database) {
@@ -492,6 +493,10 @@ function runMigrations(db: DatabaseSync): void {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);
+    },
+    () => {
+      db.prepare(`DELETE FROM emotion_events WHERE user_id != ?`).run(NOVA_PRIMARY_EMOTION_USER_ID);
+      db.prepare(`DELETE FROM emotion_state WHERE user_id != ?`).run(NOVA_PRIMARY_EMOTION_USER_ID);
     }
   ];
 

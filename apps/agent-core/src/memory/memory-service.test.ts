@@ -25,5 +25,7 @@ describe("MemoryService", () => {
     expect(service.getRecentContext("user-1").length).toBeGreaterThan(0);
     const ctx = await service.buildPromptContext("user-1", "hello");
     expect(ctx.length).toBeGreaterThan(0);
+    const compact = await service.buildCompactMemoryBearMessages("user-1", "hello");
+    expect(compact).toEqual([]);
   });
 });

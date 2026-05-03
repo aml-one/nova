@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { formatLocalDayHeading, groupByLocalCalendarDate } from "../../lib/local-date";
+import { WEB_CHAT_EMOTION_USER_ID } from "../../lib/emotion-user";
 
 type EmotionEvent = {
   id: string;
@@ -22,12 +23,12 @@ type EmotionEvent = {
 export default function EmotionPage() {
   const [itemsByDate, setItemsByDate] = useState<Record<string, EmotionEvent[]>>({});
   const [loading, setLoading] = useState(true);
-  const systemUserId = "nova-system";
+  const moodUserId = WEB_CHAT_EMOTION_USER_ID;
 
   async function load(targetUserId?: string): Promise<void> {
     setLoading(true);
-    const query = targetUserId ? `?userId=${encodeURIComponent(targetUserId)}` : "";
-    const response = await fetch(`/api/emotion/history${query}`);
+    const id = targetUserId ?? moodUserId;
+    const response = await fetch(`/api/emotion/history?userId=${encodeURIComponent(id)}`);
     const data = (await response.json()) as { items?: EmotionEvent[]; itemsByDate?: Record<string, EmotionEvent[]> };
     const flat = Array.isArray(data.items) ? data.items : [];
     setItemsByDate(flat.length > 0 ? groupByLocalCalendarDate(flat) : data.itemsByDate ?? {});
@@ -35,7 +36,7 @@ export default function EmotionPage() {
   }
 
   useEffect(() => {
-    void load(systemUserId);
+    void load(moodUserId);
   }, []);
 
   const dates = Object.keys(itemsByDate).sort((a, b) => (a < b ? 1 : -1));
@@ -45,14 +46,16 @@ export default function EmotionPage() {
       <div>
         <h1 className="text-2xl font-semibold">Emotion Timeline</h1>
         <p className="text-sm text-muted">Track emotional transitions over time and what triggered them.</p>
-        <p className="text-xs text-muted">Showing system emotion stream for <code>{systemUserId}</code>.</p>
+        <p className="text-xs text-muted">
+          One mood for all platforms and contacts — stored as <code>{moodUserId}</code> (includes learning-loop events).
+        </p>
         <p className="text-xs text-muted">
           `v` means valence (how positive/pleasant the feeling is), and `a` means arousal (how energized/active it is).
         </p>
         <p className="text-sm text-muted"><Link href="/learning" className="underline">Back to Learning</Link></p>
       </div>
       <div className="flex gap-2">
-        <Button type="button" tone="purple" onClick={() => void load(systemUserId)}>
+        <Button type="button" tone="purple" onClick={() => void load(moodUserId)}>
           Refresh
         </Button>
       </div>

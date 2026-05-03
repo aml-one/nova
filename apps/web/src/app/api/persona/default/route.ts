@@ -5,11 +5,22 @@ export async function GET(request: Request) {
   const response = await fetch(`${getAgentBaseUrl()}/v1/persona/default`, {
     headers: getAgentHeaders(request)
   });
-  const data = (await response.json()) as { persona?: unknown; source?: string; filePath?: string; error?: string };
+  const data = (await response.json()) as {
+    persona?: unknown;
+    source?: string;
+    filePath?: string;
+    emotion?: { label?: string; valence?: number; arousal?: number };
+    error?: string;
+  };
   if (!response.ok) {
     return NextResponse.json({ error: data.error ?? "persona fetch failed" }, { status: response.status });
   }
-  return NextResponse.json({ persona: data.persona, source: data.source, filePath: data.filePath });
+  return NextResponse.json({
+    persona: data.persona,
+    source: data.source,
+    filePath: data.filePath,
+    emotion: data.emotion
+  });
 }
 
 export async function PUT(request: Request) {

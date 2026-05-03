@@ -6,7 +6,8 @@ import { generateSkillFromTemplate } from "./patch-generator.js";
 import { generateImprovementPrompt, summarizeOutcomes } from "./proposal-generator.js";
 import { isValidationPass, runValidationGate } from "./validation-gate.js";
 import { InMemorySkillRegistry } from "../skills/skill-registry.js";
-import { EmotionService } from "../emotion/emotion-service.js";
+import { EmotionService, formatEmotionSnapshot } from "../emotion/emotion-service.js";
+import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 import { ModelRouter } from "../providers/router.js";
 import type { ChatMessage } from "@nova/sdk/provider";
 import { CuriosityStore } from "./curiosity-store.js";
@@ -68,7 +69,7 @@ export class SelfImprovementLoop {
       mirrorUserValence: true
     };
     this.emotionService?.applySystemEvent(
-      outcome.userId,
+      NOVA_PRIMARY_EMOTION_USER_ID,
       outcome.success ? "task_success" : "task_failure",
       emotionSettings
     );
@@ -79,12 +80,15 @@ export class SelfImprovementLoop {
       this.outcomes.map((item) => item.task),
       this.outcomes.map((item) => item.success)
     );
-    const proposal = generateImprovementPrompt(summary);
+    const moodLine = this.emotionService
+      ? formatEmotionSnapshot(this.emotionService.getState(NOVA_PRIMARY_EMOTION_USER_ID))
+      : undefined;
+    const proposal = generateImprovementPrompt(summary, moodLine);
     this.learningLog.append(proposal, false, "generated", "proposal", {
       registeredSkills: this.registry.count(),
       gitMode: this.gitOps.mode
     });
-    this.emotionService?.applySystemEvent("nova-system", "proposal_created", {
+    this.emotionService?.applySystemEvent(NOVA_PRIMARY_EMOTION_USER_ID, "proposal_created", {
       enabled: true,
       expressionStyle: "balanced",
       mirrorUserValence: true
@@ -118,7 +122,7 @@ export class SelfImprovementLoop {
       path
     });
     if (!accepted) {
-      this.emotionService?.applySystemEvent("nova-system", "improvement_failure", {
+      this.emotionService?.applySystemEvent(NOVA_PRIMARY_EMOTION_USER_ID, "improvement_failure", {
         enabled: true,
         expressionStyle: "balanced",
         mirrorUserValence: true
@@ -139,7 +143,7 @@ export class SelfImprovementLoop {
     this.curiosity.enqueueQuestions("global", [
       { question: `I drafted a new skill '${skillId}'. Can you review and approve it before I activate it?`, topic: taskHint }
     ]);
-    this.emotionService?.applySystemEvent("nova-system", "improvement_success", {
+    this.emotionService?.applySystemEvent(NOVA_PRIMARY_EMOTION_USER_ID, "improvement_success", {
       enabled: true,
       expressionStyle: "balanced",
       mirrorUserValence: true
@@ -198,7 +202,7 @@ export class SelfImprovementLoop {
         queuedQuestions: cognition.questions.length
       });
     }
-    this.emotionService?.applySystemEvent("nova-system", "research_complete", {
+    this.emotionService?.applySystemEvent(NOVA_PRIMARY_EMOTION_USER_ID, "research_complete", {
       enabled: true,
       expressionStyle: "balanced",
       mirrorUserValence: true
@@ -237,17 +241,24 @@ export class SelfImprovementLoop {
     }
     const settings = this.getSettings?.();
     const localModel = settings?.models?.defaultByProvider?.ollama?.trim() || undefined;
+    const moodLine = this.emotionService
+      ? formatEmotionSnapshot(this.emotionService.getState(NOVA_PRIMARY_EMOTION_USER_ID))
+      : null;
     const prompt = [
       "You are Nova's autonomous learning engine.",
       "Think about improvements to Nova's architecture, skills, reliability, and product quality.",
       "Use these internet notes as facts. Keep output concise and actionable.",
+      "Nova has a unified emotional core: let curiosity, stress, or warmth nudge emphasis (never override safety or facts).",
       "Return two sections exactly:",
       "1) SUMMARY: 3 bullet points",
       "2) QUESTIONS_FOR_USER: up to 2 short questions only if truly unresolved after web research.",
       "",
+      moodLine ? `Nova unified mood now: ${moodLine}` : "",
       `Topics: ${topics.join(", ") || "general reliability"}`,
       `Internet notes:\n${researchNotes || "No external notes available."}`
-    ].join("\n");
+    ]
+      .filter((line) => line.length > 0)
+      .join("\n");
     const messages: ChatMessage[] = [
       { role: "system", content: "Be practical, safety-aware, and avoid hallucinations." },
       { role: "user", content: prompt }

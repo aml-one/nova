@@ -48,11 +48,12 @@ import { MediaGenerationRouter } from "../media/media-generation-router.js";
 import { resolveUploadedMediaUrl } from "../media/media-storage.js";
 import { SettingsService } from "../settings/settings-service.js";
 import type { ChannelAccessProfile } from "../security/phone-access.js";
-import { EmotionService } from "../emotion/emotion-service.js";
+import { EmotionService, formatEmotionSnapshot, type EmotionState } from "../emotion/emotion-service.js";
 import { buildUnifiedCognitiveCoreBlock } from "../emotion/cognitive-core-prompt.js";
 import { ThoughtRepository } from "../storage/repositories/thought-repository.js";
 import { getDatabase } from "../storage/sqlite.js";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
+import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 
 const MAX_HOST_DIAG_APPENDIX_CHARS = 12_000;
 
@@ -173,7 +174,11 @@ export class TaskOrchestrator {
 
     const profile = this.deps.userProfiles.get(userId);
     const persona = this.deps.personaLoader.getPersonaForUser(userId, input.channel, profile);
-    const emotionState = this.deps.emotionService.updateFromUserInput(userId, input.text, runtimeSettings.emotions);
+    const emotionState = this.deps.emotionService.updateFromUserInput(
+      NOVA_PRIMARY_EMOTION_USER_ID,
+      input.text,
+      runtimeSettings.emotions
+    );
     const cognitiveCoreBlock = buildUnifiedCognitiveCoreBlock(
       this.deps.emotionService,
       emotionState,
@@ -200,7 +205,7 @@ export class TaskOrchestrator {
         title: "Enable skill",
         content: enableSkillId
       });
-      this.deps.memoryService.appendTurn(userId, input.text, reply);
+      this.rememberAssistantTurn(userId, input.text, reply, runtimeSettings.emotions);
       this.recordRunHistory({
         runId,
         userId,
@@ -247,8 +252,14 @@ export class TaskOrchestrator {
         title: "Multi-agent mode",
         content: userPrompt.slice(0, 220)
       });
-      const multi = await this.runMultiAgent(userPrompt, persona.systemPrompt);
-      this.deps.memoryService.appendTurn(userId, input.text, multi);
+      const multi = await this.runMultiAgent({
+        prompt: userPrompt,
+        channel: input.channel,
+        systemPrompt: persona.systemPrompt,
+        memoryContext,
+        cognitiveCoreBlock
+      });
+      this.rememberAssistantTurn(userId, input.text, multi, runtimeSettings.emotions);
       return multi;
     }
 
@@ -296,7 +307,7 @@ export class TaskOrchestrator {
         title: "Auto media generation",
         content: generation
       });
-      this.deps.memoryService.appendTurn(userId, input.text, generation);
+      this.rememberAssistantTurn(userId, input.text, generation, runtimeSettings.emotions);
       this.recordRunHistory({
         runId,
         userId,
@@ -341,7 +352,7 @@ export class TaskOrchestrator {
             String(result.formatted ?? "").trim() ||
             buildPerplexicaFallbackResult(String(result.answer ?? ""), result.sources ?? []);
           if (reply.trim()) {
-            this.deps.memoryService.appendTurn(userId, input.text, reply);
+            this.rememberAssistantTurn(userId, input.text, reply, runtimeSettings.emotions);
             this.recordRunHistory({
               runId,
               userId,
@@ -383,7 +394,7 @@ export class TaskOrchestrator {
       const cleaned = timeRaw.trim();
       if (cleaned && cleaned !== "(timed out)" && cleaned !== "(empty)") {
         const timeReply = formatNovaLocalTimeSentence(cleaned);
-        this.deps.memoryService.appendTurn(userId, input.text, timeReply);
+        this.rememberAssistantTurn(userId, input.text, timeReply, runtimeSettings.emotions);
         this.recordRunHistory({
           runId,
           userId,
@@ -431,7 +442,7 @@ export class TaskOrchestrator {
         (looksLikeDf || looksLikeWinDisk);
       if (looksUsable) {
         const diskReply = formatHostDiskSpaceReply(cleaned);
-        this.deps.memoryService.appendTurn(userId, input.text, diskReply);
+        this.rememberAssistantTurn(userId, input.text, diskReply, runtimeSettings.emotions);
         this.recordRunHistory({
           runId,
           userId,
@@ -493,7 +504,7 @@ export class TaskOrchestrator {
     // For straightforward host resource checks, prefer direct tool output over model prose.
     if (diagnosticsIntent && hostDiagnosticsAppendix.trim()) {
       const diagnosticsReply = formatHostDiagnosticsReply(diagnosticsIntent, hostDiagnosticsAppendix);
-      this.deps.memoryService.appendTurn(userId, input.text, diagnosticsReply);
+      this.rememberAssistantTurn(userId, input.text, diagnosticsReply, runtimeSettings.emotions);
       this.recordRunHistory({
         runId,
         userId,
@@ -521,7 +532,7 @@ export class TaskOrchestrator {
       if (runtimeSettings.ollama.disabled === true) {
         const blocked =
           "Ollama is disabled in Nova Settings (Models → Ollama default model → **Disabled**). Enable Ollama and pick a default model before I can list tags from the API.";
-        this.deps.memoryService.appendTurn(userId, input.text, blocked);
+        this.rememberAssistantTurn(userId, input.text, blocked, runtimeSettings.emotions);
         this.recordRunHistory({
           runId,
           userId,
@@ -544,7 +555,7 @@ export class TaskOrchestrator {
           defaultChatModel: runtimeSettings.models.defaultByProvider.ollama,
           activeProvider: runtimeSettings.activeProvider
         });
-        this.deps.memoryService.appendTurn(userId, input.text, routingReply);
+        this.rememberAssistantTurn(userId, input.text, routingReply, runtimeSettings.emotions);
         this.recordRunHistory({
           runId,
           userId,
@@ -567,7 +578,7 @@ export class TaskOrchestrator {
       if (!markdown.trim()) {
         const fail =
           `I could not read **GET ${baseUrl}/api/tags** from Ollama. Check that Ollama is running and that **Settings → Vision → Ollama vision base URL** (or **OLLAMA_BASE_URL**) points at the same host your terminal uses. I will not invent a model list.`;
-        this.deps.memoryService.appendTurn(userId, input.text, fail);
+        this.rememberAssistantTurn(userId, input.text, fail, runtimeSettings.emotions);
         this.recordRunHistory({
           runId,
           userId,
@@ -591,7 +602,7 @@ export class TaskOrchestrator {
         defaultChatModel: runtimeSettings.models.defaultByProvider.ollama,
         activeProvider: runtimeSettings.activeProvider
       });
-      this.deps.memoryService.appendTurn(userId, input.text, invReply);
+      this.rememberAssistantTurn(userId, input.text, invReply, runtimeSettings.emotions);
       this.recordRunHistory({
         runId,
         userId,
@@ -663,7 +674,7 @@ export class TaskOrchestrator {
       truncatedDiag.length > 0 || implicitShellAppendix.trim() ? composedUser + timeVoiceHint : `${input.text}${timeVoiceHint}`;
     const unresolvedVisionRef = this.resolveUnresolvedVisionReference(input.text, input.imageUrl, runtimeSettings);
     if (unresolvedVisionRef) {
-      this.deps.memoryService.appendTurn(userId, input.text, unresolvedVisionRef);
+      this.rememberAssistantTurn(userId, input.text, unresolvedVisionRef, runtimeSettings.emotions);
       this.recordRunHistory({
         runId,
         userId,
@@ -693,7 +704,7 @@ export class TaskOrchestrator {
       runtimeSettings
     );
     if (visionResult.blockedReply) {
-      this.deps.memoryService.appendTurn(userId, input.text, visionResult.blockedReply);
+      this.rememberAssistantTurn(userId, input.text, visionResult.blockedReply, runtimeSettings.emotions);
       this.recordRunHistory({
         runId,
         userId,
@@ -810,17 +821,19 @@ export class TaskOrchestrator {
       result = undefined;
     }
 
-    // Last-resort retry: drop memory/diagnostics only — keep vision system context so image flows are not silently demoted to plain chat.
+    // Last-resort retry: drop bulky local transcript block — keep MemoryBear compact slice + cognitive core + vision.
     if (!result) {
       try {
         let emergencyUser = input.text;
         if (implicitShellAppendix.trim()) {
           emergencyUser += `\n\n---\nRead-only shell (Nova ran automatically for this question):\n${implicitShellAppendix.trim()}`;
         }
+        const compactMem = await this.deps.memoryService.buildCompactMemoryBearMessages(userId, input.text);
         const emergencyPrompt: ChatMessage[] = [
           { role: "system", content: persona.systemPrompt },
           { role: "system", content: INTEGRITY_SYSTEM_GUARD },
           ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
+          ...compactMem,
           ...(cognitiveCoreBlock.trim()
             ? ([{ role: "system" as const, content: cognitiveCoreBlock.trim() }] as const)
             : []),
@@ -839,7 +852,7 @@ export class TaskOrchestrator {
         "I can still help without Copilot, but right now I cannot reach a working local model for this task. " +
         "Please configure Copilot in Settings -> Models -> Copilot quick setup, or enable Ollama/LM Studio and try again." +
         (errText.trim() ? ` (last error: ${errText.slice(0, 180)})` : "");
-      this.deps.memoryService.appendTurn(userId, input.text, fallback);
+      this.rememberAssistantTurn(userId, input.text, fallback, runtimeSettings.emotions);
       const failedAfterMs = Date.now() - startedAt;
       this.recordRunHistory({
         runId,
@@ -861,7 +874,7 @@ export class TaskOrchestrator {
       return fallback;
     }
 
-    this.deps.memoryService.appendTurn(userId, input.text, result.content);
+    this.rememberAssistantTurn(userId, input.text, result.content, runtimeSettings.emotions);
     this.recordRunHistory({
       runId,
       userId,
@@ -910,11 +923,12 @@ export class TaskOrchestrator {
     return this.inFlightCount > 0;
   }
 
-  getEmotionState(userId: string): { valence: number; arousal: number; label: string } {
-    return this.deps.emotionService.getState(userId);
+  /** Nova’s single mood bucket — shared across web, WhatsApp, Signal, and all contacts. */
+  getEmotionState(): Pick<EmotionState, "valence" | "arousal" | "label"> {
+    return this.deps.emotionService.getState(NOVA_PRIMARY_EMOTION_USER_ID);
   }
 
-  getEmotionHistory(userId?: string): Array<{
+  getEmotionHistory(): Array<{
     id: string;
     userId: string;
     source: string;
@@ -925,7 +939,7 @@ export class TaskOrchestrator {
     metadata?: unknown;
     createdAt: string;
   }> {
-    return this.deps.emotionService.getHistory(userId);
+    return this.deps.emotionService.getHistory(NOVA_PRIMARY_EMOTION_USER_ID);
   }
 
   private async executeShellTask(
@@ -1104,9 +1118,10 @@ export class TaskOrchestrator {
       skillRegistry: this.deps.skillRegistry,
       settingsService: this.deps.settingsService,
       model: selectedModel,
-      onToken: input.onToken
+      onToken: input.onToken,
+      emotionSnapshot: formatEmotionSnapshot(this.deps.emotionService.getState(NOVA_PRIMARY_EMOTION_USER_ID))
     });
-    this.deps.memoryService.appendTurn(userId, input.text, result.reply);
+    this.rememberAssistantTurn(userId, input.text, result.reply, runtimeSettings.emotions);
     this.deps.auditLog.append({
       runId,
       actor: userId,
@@ -1140,6 +1155,16 @@ export class TaskOrchestrator {
     return result.reply;
   }
 
+  private rememberAssistantTurn(
+    userId: string,
+    userText: string,
+    assistantText: string,
+    emotions: AppSettings["emotions"]
+  ): void {
+    this.deps.memoryService.appendTurn(userId, userText, assistantText);
+    this.deps.emotionService.updateFromAssistantReply(NOVA_PRIMARY_EMOTION_USER_ID, assistantText, emotions);
+  }
+
   private recordRunHistory(input: {
     runId: string;
     userId: string;
@@ -1161,19 +1186,46 @@ export class TaskOrchestrator {
     this.runHistory.save(input);
   }
 
-  private async runMultiAgent(prompt: string, systemPrompt: string): Promise<string> {
-    const planner = await this.deps.modelRouter.chat([
-      { role: "system", content: `${systemPrompt}\nYou are the planner agent.` },
-      { role: "user", content: prompt }
-    ], undefined);
-    const executor = await this.deps.modelRouter.chat([
-      { role: "system", content: `${systemPrompt}\nYou are the executor agent.` },
-      { role: "user", content: planner.content }
-    ], undefined);
-    const reviewer = await this.deps.modelRouter.chat([
-      { role: "system", content: `${systemPrompt}\nYou are the reviewer agent.` },
-      { role: "user", content: executor.content }
-    ], undefined);
+  private async runMultiAgent(opts: {
+    prompt: string;
+    channel: "web" | "whatsapp" | "signal";
+    systemPrompt: string;
+    memoryContext: ChatMessage[];
+    cognitiveCoreBlock: string;
+  }): Promise<string> {
+    const prefix: ChatMessage[] = [
+      { role: "system", content: opts.systemPrompt },
+      { role: "system", content: INTEGRITY_SYSTEM_GUARD },
+      ...(opts.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
+      ...opts.memoryContext,
+      ...(opts.cognitiveCoreBlock.trim()
+        ? ([{ role: "system" as const, content: opts.cognitiveCoreBlock.trim() }] as const)
+        : [])
+    ];
+    const planner = await this.deps.modelRouter.chat(
+      [
+        ...prefix,
+        { role: "system", content: "You are the planner agent. Produce a concise plan for the user's request." },
+        { role: "user", content: opts.prompt }
+      ],
+      undefined
+    );
+    const executor = await this.deps.modelRouter.chat(
+      [
+        ...prefix,
+        { role: "system", content: "You are the executor agent. Execute the plan from the prior message faithfully." },
+        { role: "user", content: planner.content }
+      ],
+      undefined
+    );
+    const reviewer = await this.deps.modelRouter.chat(
+      [
+        ...prefix,
+        { role: "system", content: "You are the reviewer agent. Polish the executor output into one coherent reply." },
+        { role: "user", content: executor.content }
+      ],
+      undefined
+    );
     return reviewer.content;
   }
 

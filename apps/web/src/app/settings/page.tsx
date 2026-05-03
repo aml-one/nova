@@ -1866,6 +1866,36 @@ export default function SettingsPage() {
             <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
               Identity backups include persona files + learning history + DB snapshot, so Nova&apos;s evolving identity is recoverable after machine issues.
             </div>
+            <div className="rounded-ui border bg-surface p-3 space-y-3">
+              <div>
+                <h3 className="text-sm font-semibold">SOUL.md · SentiCore orchestration</h3>
+                <p className="text-xs text-muted">
+                  You do not need a <code className="text-[11px]">SOUL.md</code> unless you use SentiCore-style orchestration text. When present, point to a markdown file{" "}
+                  <strong>on the agent-core host</strong> (often <code className="text-[11px]">SOUL.md</code> inside your SentiCore clone). Nova injects it into the cognitive core after memory blocks.{" "}
+                  <a className="underline" href="https://github.com/chuchuyei/SentiCore" rel="noreferrer" target="_blank">
+                    SentiCore
+                  </a>{" "}
+                  may ship examples; create your own file if you prefer.
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={settings.sentiCore.enabled}
+                  onChange={(e) => setSettings((p) => ({ ...p, sentiCore: { ...p.sentiCore, enabled: e.target.checked } }))}
+                />
+                Enable SOUL / SentiCore orchestration in prompts
+              </label>
+              <label className="grid gap-1 text-xs">
+                Path to markdown (absolute path or <code className="text-[11px]">~/…</code> on the agent host)
+                <Input
+                  value={settings.sentiCore.orchestrationMarkdownPath}
+                  onChange={(e) =>
+                    setSettings((p) => ({ ...p, sentiCore: { ...p.sentiCore, orchestrationMarkdownPath: e.target.value } }))
+                  }
+                  placeholder="~/nova-deps/SentiCore/SOUL.md"
+                />
+              </label>
+            </div>
             <div className="rounded-ui border bg-surface p-3">
               <div className="mb-2">
                 <h3 className="text-sm font-semibold">Identity Evolution Graph</h3>
@@ -2053,33 +2083,9 @@ export default function SettingsPage() {
               />
               Mirror user valence from phrasing
             </label>
-            <div className="mt-4 border-t border-border pt-3 space-y-2">
-              <h3 className="text-sm font-semibold">SentiCore (optional)</h3>
-              <p className="text-xs text-muted">
-                Point Nova at a SentiCore orchestration markdown file on the <strong>agent-core host</strong> (clone{" "}
-                <a className="underline" href="https://github.com/chuchuyei/SentiCore" rel="noreferrer" target="_blank">
-                  SentiCore
-                </a>
-                ). Injected after local/MemoryBear memory so facts stay ahead of tone and orchestration rules.
-              </p>
-              <label className="flex items-center gap-2">
-                <Checkbox
-                  checked={settings.sentiCore.enabled}
-                  onChange={(e) => setSettings((p) => ({ ...p, sentiCore: { ...p.sentiCore, enabled: e.target.checked } }))}
-                />
-                Enable SentiCore orchestration block
-              </label>
-              <label className="grid gap-1 text-xs">
-                Path to orchestration .md (absolute or ~/…)
-                <Input
-                  value={settings.sentiCore.orchestrationMarkdownPath}
-                  onChange={(e) =>
-                    setSettings((p) => ({ ...p, sentiCore: { ...p.sentiCore, orchestrationMarkdownPath: e.target.value } }))
-                  }
-                  placeholder="~/nova-support/SentiCore/…/orchestration.md"
-                />
-              </label>
-            </div>
+            <p className="text-xs text-muted">
+              SOUL / SentiCore orchestration is configured under <strong>Settings → Identity</strong> (same saved fields as before).
+            </p>
             <div className="mt-4 border-t border-border pt-3 space-y-2">
               <h3 className="text-sm font-semibold">Orpheus TTS (optional)</h3>
               <p className="text-xs text-muted">

@@ -27,7 +27,8 @@ export function buildUnifiedCognitiveCoreBlock(
   if (tts.enabled && tts.baseUrl.trim()) {
     talking =
       `Talking core: OpenAI-compatible TTS is configured at ${tts.baseUrl.trim()}. ` +
-      "When the user wants something read aloud, use short, speakable sentences; avoid long code blocks for lines meant to be heard.";
+      "Web chat may auto-read your replies aloud or let the user play any message — prefer clear, speakable sentences for answers they will hear; " +
+      "avoid stacking long code blocks in spoken replies (summarize aloud and keep code short when essential).";
   }
   return [emotion, senti, talking].filter(Boolean).join("\n\n");
 }

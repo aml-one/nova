@@ -230,12 +230,20 @@ export async function runSkillAuthoringFlow(options: {
   settingsService: SettingsService;
   model?: string;
   onToken?: (token: string) => void;
+  /** Unified emotional state line for planner tone (identity/mood-aware skills). */
+  emotionSnapshot?: string;
 }): Promise<SkillAuthoringResult> {
-  const { userText, userId, modelRouter, memoryService, skillRegistry, settingsService, model, onToken } = options;
+  const { userText, userId, modelRouter, memoryService, skillRegistry, settingsService, model, onToken, emotionSnapshot } =
+    options;
 
   const recent = memoryService.getRecentContext(userId).slice(-14);
+  const moodSnap = emotionSnapshot?.trim();
+  const moodBlock: ChatMessage[] = moodSnap
+    ? [{ role: "system", content: `Nova unified mood right now (planner tone only, not functional requirements): ${moodSnap}` }]
+    : [];
   const planMessages: ChatMessage[] = [
     { role: "system", content: PLANNER_SYSTEM },
+    ...moodBlock,
     ...recent,
     { role: "user", content: userText }
   ];

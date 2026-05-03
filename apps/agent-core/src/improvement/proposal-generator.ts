@@ -23,10 +23,11 @@ export function summarizeOutcomes(tasks: string[], successes: boolean[]): Outcom
   };
 }
 
-export function generateImprovementPrompt(summary: OutcomeSummary): string {
+export function generateImprovementPrompt(summary: OutcomeSummary, moodLine?: string): string {
+  const mood = moodLine?.trim() ? ` Nova unified mood (tone emphasis only): ${moodLine.trim()}.` : "";
   if (summary.failures <= 0) {
-    return `No changes needed. Runs observed: ${summary.totalRuns}.`;
+    return `No changes needed. Runs observed: ${summary.totalRuns}.${mood}`;
   }
   const focus = summary.topFailingTasks.length > 0 ? summary.topFailingTasks.join(", ") : "general reliability";
-  return `Detected ${summary.failures}/${summary.totalRuns} failures. Focus improvement on: ${focus}.`;
+  return `Detected ${summary.failures}/${summary.totalRuns} failures. Focus improvement on: ${focus}.${mood}`;
 }

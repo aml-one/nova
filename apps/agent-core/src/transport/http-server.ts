@@ -46,6 +46,7 @@ import { ThoughtRepository } from "../storage/repositories/thought-repository.js
 import { WebSocketServer, WebSocket } from "ws";
 import { MobilePushService } from "../mobile/push-service.js";
 import { LearningDaemon } from "../improvement/learning-daemon.js";
+import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 const execAsync = promisify(execCallback);
 
 type HttpServerOptions = {
@@ -84,7 +85,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   const router = new ChannelRouter();
   const dispatcher = new OutboundDispatcher();
   const logger = new Logger();
-  const voice = new VoiceService(() => options.settings.get());
+  const voice = new VoiceService(() => options.settings.get(), () => options.orchestrator.getEmotionState());
   const rag = new RagService();
   const backup = new BackupService();
   const identityBackup = new IdentityBackupService();
@@ -305,7 +306,13 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         return sendJson(response, 200, { settings: updated, correlationId });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/system/health/full") {
-        const full = await buildFullHealth(options.modelRouter, dispatcher, scheduler, () => options.settings.get());
+        const full = await buildFullHealth(
+          options.modelRouter,
+          dispatcher,
+          scheduler,
+          () => options.settings.get(),
+          () => options.orchestrator.getEmotionState()
+        );
         return sendJson(response, 200, { health: full, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/models/ping") {
@@ -721,13 +728,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/emotion/state") {
-        const userId = parsedUrl.searchParams.get("userId") ?? "nova-system";
-        const state = options.orchestrator.getEmotionState(userId);
-        return sendJson(response, 200, { userId, state, correlationId });
+        const state = options.orchestrator.getEmotionState();
+        return sendJson(response, 200, { userId: NOVA_PRIMARY_EMOTION_USER_ID, state, correlationId });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/emotion/history") {
-        const userId = parsedUrl.searchParams.get("userId") ?? undefined;
-        const items = options.orchestrator.getEmotionHistory(userId);
+        const items = options.orchestrator.getEmotionHistory();
         const itemsByDate = items.reduce<Record<string, typeof items>>((acc, item) => {
           const key = item.createdAt.slice(0, 10);
           const existing = acc[key] ?? [];
@@ -744,7 +749,8 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/persona/default") {
         const { persona, source, filePath } = personaLoader.getDefaultPersona();
-        return sendJson(response, 200, { persona, source, filePath, correlationId });
+        const emotion = options.orchestrator.getEmotionState();
+        return sendJson(response, 200, { persona, source, filePath, emotion, correlationId });
       }
       if (request.method === "PUT" && parsedUrl.pathname === "/v1/persona/default") {
         const payload = (await readJson(request)) as { voice?: string; style?: string[]; systemPrompt?: string };
@@ -764,7 +770,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       if (request.method === "GET" && parsedUrl.pathname === "/v1/improvement/inspect") {
         const limit = Math.max(20, Math.min(1000, Number(parsedUrl.searchParams.get("limit") ?? "300")));
         const thoughts = thoughtLog.list(limit);
-        const emotions = options.orchestrator.getEmotionHistory("nova-system").slice(0, limit);
+        const emotions = options.orchestrator.getEmotionHistory().slice(0, limit);
         const diagnostics = options.improvement.getDiagnostics();
         const loopSignals = detectAutonomyLoopSignals({
           thoughts,
@@ -1123,7 +1129,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         return sendJson(response, 200, { items, correlationId });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/memory/cards") {
-        const userId = parsedUrl.searchParams.get("userId") ?? "nova-system";
+        const userId = parsedUrl.searchParams.get("userId") ?? NOVA_PRIMARY_EMOTION_USER_ID;
         const rows = getDatabase()
           .prepare(
             `
@@ -1165,7 +1171,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
             VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             `
           )
-          .run(id, payload.userId?.trim() || "nova-system", payload.title.trim(), payload.content.trim(), payload.pinned === false ? 0 : 1);
+          .run(id, payload.userId?.trim() || NOVA_PRIMARY_EMOTION_USER_ID, payload.title.trim(), payload.content.trim(), payload.pinned === false ? 0 : 1);
         return sendJson(response, 200, { id, correlationId });
       }
       if (request.method === "PUT" && parsedUrl.pathname === "/v1/memory/cards") {
@@ -2186,7 +2192,8 @@ async function buildFullHealth(
   modelRouter: ModelRouter,
   dispatcher: OutboundDispatcher,
   scheduler: SchedulerService,
-  getSettings: () => AppSettings
+  getSettings: () => AppSettings,
+  getUnifiedMood: () => { label: string; valence: number; arousal: number }
 ): Promise<{
   level: HealthLevel;
   checks: HealthCheckResult[];
@@ -2194,6 +2201,10 @@ async function buildFullHealth(
   const checks: HealthCheckResult[] = [];
 
   checks.push(await checkDatabase());
+  checks.push(checkMemoryLocalTables());
+  checks.push(await checkMemoryBearReachable(getSettings));
+  checks.push(checkEmotionalCore(getSettings, getUnifiedMood));
+  checks.push(await checkVoiceTtsReachable(getSettings));
   checks.push(...(await checkModelProviders(modelRouter)));
   checks.push(...(await checkChannels()));
   checks.push(...checkSecurityConfig());
@@ -2240,6 +2251,14 @@ function isAdvisoryHealthCheck(id: string): boolean {
   if (id === "perplexica-websearch") {
     return true;
   }
+  // Optional long-term memory SaaS.
+  if (id === "memory-bear") {
+    return true;
+  }
+  // Orpheus is optional; unreachable server should not fail overall health.
+  if (id === "voice-orpheus") {
+    return true;
+  }
   // Model providers are grouped as optional alternatives; individual provider failures are advisory.
   if (id.startsWith("provider-")) {
     return true;
@@ -2259,6 +2278,149 @@ async function checkDatabase(): Promise<HealthCheckResult> {
       detail: error instanceof Error ? error.message : "database error"
     };
   }
+}
+
+function checkMemoryLocalTables(): HealthCheckResult {
+  try {
+    const db = getDatabase();
+    const shortRow = db.prepare("SELECT COUNT(*) AS c FROM short_term_turns").get() as { c?: number } | undefined;
+    const longRow = db.prepare("SELECT COUNT(*) AS c FROM long_term_memory").get() as { c?: number } | undefined;
+    const shortN = Number(shortRow?.c ?? 0);
+    const longN = Number(longRow?.c ?? 0);
+    return {
+      id: "memory-local",
+      name: "Memory (local transcript & facts)",
+      level: "green",
+      detail: `SQLite tables OK — short_term_turns=${shortN}, long_term_memory=${longN}`
+    };
+  } catch (error) {
+    return {
+      id: "memory-local",
+      name: "Memory (local transcript & facts)",
+      level: "red",
+      detail: error instanceof Error ? error.message : "memory tables unreachable"
+    };
+  }
+}
+
+async function checkMemoryBearReachable(getSettings: () => AppSettings): Promise<HealthCheckResult> {
+  const mb = getSettings().memoryBear;
+  if (!mb.enabled) {
+    return {
+      id: "memory-bear",
+      name: "MemoryBear",
+      level: "green",
+      detail: "integration disabled (optional)"
+    };
+  }
+  const base = mb.baseUrl.trim().replace(/\/+$/, "");
+  const apiKey = mb.apiKey.trim();
+  if (!base || !apiKey) {
+    return {
+      id: "memory-bear",
+      name: "MemoryBear",
+      level: "orange",
+      detail: "enabled but base URL or API key is empty",
+      fingerprint: fingerprintSecret(mb.apiKey)
+    };
+  }
+  const url = `${base}/v1/memory_config/read_all_config`;
+  const ping = await pingUrl(url, { Authorization: `Bearer ${apiKey}` });
+  return {
+    id: "memory-bear",
+    name: "MemoryBear",
+    level: ping.ok ? "green" : "orange",
+    detail: ping.ok ? `reachable (${base})` : `cannot reach ${url}: ${ping.detail}`,
+    fingerprint: fingerprintSecret(mb.apiKey)
+  };
+}
+
+function checkEmotionalCore(
+  getSettings: () => AppSettings,
+  getUnifiedMood: () => { label: string; valence: number; arousal: number }
+): HealthCheckResult {
+  const emotionCfg = getSettings().emotions;
+  try {
+    const db = getDatabase();
+    db.prepare("SELECT 1 FROM emotion_state LIMIT 1").get();
+    const evRow = db.prepare("SELECT COUNT(*) AS c FROM emotion_events").get() as { c?: number } | undefined;
+    const events = Number(evRow?.c ?? 0);
+    const mood = getUnifiedMood();
+    if (!emotionCfg.enabled) {
+      return {
+        id: "emotional-core",
+        name: "Emotional Core",
+        level: "green",
+        detail: `disabled in settings; SQLite emotion tables OK (${events} timeline rows); snapshot mood=${mood.label} (v=${mood.valence.toFixed(2)}, a=${mood.arousal.toFixed(2)})`
+      };
+    }
+    return {
+      id: "emotional-core",
+      name: "Emotional Core",
+      level: "green",
+      detail: `enabled; SQLite OK (${events} timeline rows); unified mood=${mood.label} (v=${mood.valence.toFixed(2)}, a=${mood.arousal.toFixed(2)}); expression=${emotionCfg.expressionStyle}`
+    };
+  } catch (error) {
+    const moodFail = safeUnifiedMood(getUnifiedMood);
+    const suffix = moodFail ? ` Last mood snapshot: ${moodFail}.` : "";
+    return {
+      id: "emotional-core",
+      name: "Emotional Core",
+      level: "red",
+      detail: `${error instanceof Error ? error.message : "emotion tables unreachable"}.${suffix}`
+    };
+  }
+}
+
+function safeUnifiedMood(getUnifiedMood: () => { label: string; valence: number; arousal: number }): string | null {
+  try {
+    const m = getUnifiedMood();
+    return `${m.label} (v=${m.valence.toFixed(2)}, a=${m.arousal.toFixed(2)})`;
+  } catch {
+    return null;
+  }
+}
+
+async function checkVoiceTtsReachable(getSettings: () => AppSettings): Promise<HealthCheckResult> {
+  const tts = getSettings().orpheusTts;
+  const shellFallback = Boolean(process.env.NOVA_TTS_COMMAND?.trim());
+  if (!tts.enabled || !tts.baseUrl.trim()) {
+    return {
+      id: "voice-tts",
+      name: "Voice / TTS",
+      level: "green",
+      detail: shellFallback
+        ? "Orpheus disabled; shell fallback via NOVA_TTS_COMMAND"
+        : "Orpheus disabled; no NOVA_TTS_COMMAND (spoken output optional)"
+    };
+  }
+  const base = tts.baseUrl.replace(/\/+$/, "");
+  const headers: Record<string, string> = {};
+  if (tts.apiKey.trim()) {
+    headers.authorization = `Bearer ${tts.apiKey.trim()}`;
+  }
+  let lastDetail = "";
+  for (const path of ["", "/v1/models", "/health"]) {
+    const url = path ? `${base}${path}` : base;
+    const ping = await pingUrl(url, headers);
+    if (ping.ok) {
+      return {
+        id: "voice-orpheus",
+        name: "Voice (Orpheus TTS)",
+        level: "green",
+        detail: `${ping.detail} — checked ${url}`,
+        fingerprint: fingerprintSecret(tts.apiKey)
+      };
+    }
+    lastDetail = ping.detail;
+  }
+  return {
+    id: "voice-orpheus",
+    name: "Voice (Orpheus TTS)",
+    level: "orange",
+    detail: `cannot reach Orpheus at ${base} (tried /, /v1/models, /health): ${lastDetail}`,
+    fingerprint: fingerprintSecret(tts.apiKey)
+  };
 }
 
 async function checkModelProviders(modelRouter: ModelRouter): Promise<HealthCheckResult[]> {

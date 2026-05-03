@@ -1,16 +1,29 @@
 /* eslint-disable react/no-unescaped-entities */
 "use client";
 
-import { FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { FaBrain, FaCheck, FaCopy, FaFloppyDisk, FaPenToSquare, FaPlus, FaRotateRight, FaStop, FaTrash, FaXmark } from "react-icons/fa6";
+import {
+  FaBrain,
+  FaCheck,
+  FaCopy,
+  FaFloppyDisk,
+  FaPenToSquare,
+  FaPlus,
+  FaRotateRight,
+  FaStop,
+  FaTrash,
+  FaVolumeHigh,
+  FaXmark
+} from "react-icons/fa6";
 import { Card } from "../components/ui/card";
 import { Textarea } from "../components/ui/textarea";
 import { Select } from "../components/ui/select";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { cn } from "../lib/cn";
+import { dispatchNovaEmotionRefresh } from "../lib/emotion-user";
 import { ChatMarkdown } from "../components/chat-markdown";
 
 type MediaItem = {
@@ -59,6 +72,24 @@ type PendingUpload = {
   error?: string;
 };
 
+function stripMarkdownForTts(raw: string): string {
+  let visible = raw;
+  for (const pattern of [
+    /<thinking>([\s\S]*?)<\/thinking>/gi,
+    /<reasoning>([\s\S]*?)<\/reasoning>/gi,
+    /<think>([\s\S]*?)<\/redacted_thinking>/gi
+  ]) {
+    visible = visible.replace(pattern, () => "");
+  }
+  visible = visible.trim();
+  visible = visible.replace(/```[\s\S]*?```/g, " ");
+  visible = visible.replace(/\[nova:\w+\][\s\S]*?\[\/nova\]/gi, " ");
+  visible = visible.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  visible = visible.replace(/[#*_>`]+/g, " ");
+  visible = visible.replace(/\s+/g, " ").trim();
+  return visible.slice(0, 8000);
+}
+
 export default function HomePage() {
   const { resolvedTheme } = useTheme();
   const [message, setMessage] = useState("");
@@ -102,6 +133,11 @@ export default function HomePage() {
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [sendOnEnter, setSendOnEnter] = useState(false);
+  const [readAloudMessages, setReadAloudMessages] = useState(false);
+  const readAloudRef = useRef(readAloudMessages);
+  const [ttsPlayingTurnId, setTtsPlayingTurnId] = useState<string | null>(null);
+  const chatTtsAudioRef = useRef<HTMLAudioElement | null>(null);
+  const chatTtsObjectUrlRef = useRef<string | null>(null);
   const [streamPhase, setStreamPhase] = useState<StreamPhase>("thinking");
   const webSearchDepthRef = useRef(0);
   const lastStreamRawRef = useRef("");
@@ -399,8 +435,85 @@ export default function HomePage() {
     };
   }, []);
 
+  useEffect(() => {
+    readAloudRef.current = readAloudMessages;
+  }, [readAloudMessages]);
+
+  useEffect(() => {
+    try {
+      const v = window.localStorage.getItem("nova-chat-read-aloud");
+      if (v === "1") {
+        setReadAloudMessages(true);
+      }
+    } catch {
+      // Ignore storage failures.
+    }
+  }, []);
+
+  const stopChatTtsPlayback = useCallback(() => {
+    const el = chatTtsAudioRef.current;
+    if (el) {
+      el.pause();
+      el.removeAttribute("src");
+      void el.load();
+    }
+    if (chatTtsObjectUrlRef.current) {
+      URL.revokeObjectURL(chatTtsObjectUrlRef.current);
+      chatTtsObjectUrlRef.current = null;
+    }
+    setTtsPlayingTurnId(null);
+  }, []);
+
+  useEffect(() => () => stopChatTtsPlayback(), [stopChatTtsPlayback]);
+
+  useEffect(() => {
+    stopChatTtsPlayback();
+  }, [activeSessionId, stopChatTtsPlayback]);
+
+  const playChatTts = useCallback(
+    async (turnId: string, rawText: string): Promise<void> => {
+      const cleaned = stripMarkdownForTts(rawText);
+      if (!cleaned.trim()) {
+        return;
+      }
+      stopChatTtsPlayback();
+      try {
+        const response = await fetch("/api/voice/speak-audio", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: cleaned })
+        });
+        if (!response.ok) {
+          return;
+        }
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        chatTtsObjectUrlRef.current = url;
+        const el = chatTtsAudioRef.current;
+        if (!el) {
+          URL.revokeObjectURL(url);
+          chatTtsObjectUrlRef.current = null;
+          return;
+        }
+        el.src = url;
+        setTtsPlayingTurnId(turnId);
+        el.onended = () => {
+          stopChatTtsPlayback();
+        };
+        el.onerror = () => {
+          stopChatTtsPlayback();
+        };
+        await el.play().catch(() => stopChatTtsPlayback());
+      } catch {
+        stopChatTtsPlayback();
+      }
+    },
+    [stopChatTtsPlayback]
+  );
+
   function stopGeneration(): void {
     streamAbortRef.current?.abort();
+    stopChatTtsPlayback();
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -440,6 +553,7 @@ export default function HomePage() {
     }
     try {
       const startedAt = Date.now();
+      let emotionRefreshedOnFirstToken = false;
       const response = await fetch("/api/chat/stream", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -466,6 +580,10 @@ export default function HomePage() {
         response.body,
         streamAbort.signal,
         (partialText) => {
+          if (!emotionRefreshedOnFirstToken && partialText.trim().length > 0) {
+            emotionRefreshedOnFirstToken = true;
+            dispatchNovaEmotionRefresh();
+          }
           lastStreamRawRef.current = partialText;
           if (webSearchDepthRef.current > 0) {
             setStreamPhase("web-search");
@@ -530,6 +648,15 @@ export default function HomePage() {
       );
       setTurns((prev) => prev.map((turn) => (turn.id === userTurn.id ? { ...turn, isPending: false } : turn)));
       setUploads([]);
+      dispatchNovaEmotionRefresh();
+      if (
+        readAloudRef.current &&
+        visible.trim().length > 0 &&
+        !visible.includes("_Stopped._") &&
+        !/\/Stopped\./i.test(visible)
+      ) {
+        void playChatTts(assistantId, visible);
+      }
     } catch (error) {
       const aborted =
         (error instanceof DOMException && error.name === "AbortError") ||
@@ -1014,7 +1141,7 @@ export default function HomePage() {
                 </div>
               ) : null}
               {turn.role === "assistant" ? (
-                <div className="mt-2">
+                <div className="mt-2 flex items-center gap-1">
                   <button
                     type="button"
                     className={bubbleIconActionClass}
@@ -1023,6 +1150,29 @@ export default function HomePage() {
                     title="Copy message"
                   >
                     {lastCopiedTurnId === turn.id ? <FaCheck className="h-3.5 w-3.5 text-emerald-400" /> : <FaCopy className="h-3.5 w-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    className={bubbleIconActionClass}
+                    style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
+                    disabled={
+                      !turn.text.trim() || Boolean(loading && index === turns.length - 1 && turn.role === "assistant")
+                    }
+                    title={ttsPlayingTurnId === turn.id ? "Stop audio" : "Read aloud"}
+                    aria-pressed={ttsPlayingTurnId === turn.id}
+                    onClick={() => {
+                      if (ttsPlayingTurnId === turn.id) {
+                        stopChatTtsPlayback();
+                      } else {
+                        void playChatTts(turn.id, turn.text);
+                      }
+                    }}
+                  >
+                    {ttsPlayingTurnId === turn.id ? (
+                      <span className="inline-block h-3 w-3 shrink-0 rounded-[2px] bg-current" aria-hidden />
+                    ) : (
+                      <FaVolumeHigh className="h-3.5 w-3.5" />
+                    )}
                   </button>
                 </div>
               ) : null}
@@ -1079,6 +1229,7 @@ export default function HomePage() {
             </article>
           ))}
         </div>
+        <audio ref={chatTtsAudioRef} className="hidden" playsInline preload="none" />
         <form onSubmit={onSubmit} className="mt-3 shrink-0 space-y-2">
           {loading ? (
             <div className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-rose-500/50 bg-pastelRed/40 px-3 py-2 dark:bg-rose-950/35">
@@ -1213,6 +1364,25 @@ export default function HomePage() {
                   onChange={(event) => setShowThinkingInChat(event.target.checked)}
                 />
                 Show thinking
+              </label>
+              <label className="flex items-center gap-1 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  checked={readAloudMessages}
+                  onChange={(event) => {
+                    const next = event.target.checked;
+                    setReadAloudMessages(next);
+                    try {
+                      window.localStorage.setItem("nova-chat-read-aloud", next ? "1" : "0");
+                    } catch {
+                      // Ignore storage failures.
+                    }
+                    if (!next) {
+                      stopChatTtsPlayback();
+                    }
+                  }}
+                />
+                Read aloud messages
               </label>
               <Link href="/thoughts" className="inline-flex items-center text-violet-400 hover:text-violet-300" title="Open Live Thoughts">
                 <FaBrain className="h-3.5 w-3.5" />

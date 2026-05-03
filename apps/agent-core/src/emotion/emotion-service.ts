@@ -12,6 +12,11 @@ export type EmotionState = {
   label: "neutral" | "joyful" | "curious" | "anxious" | "guilty" | "frustrated" | "empathetic";
 };
 
+/** Compact line for prompts (skill authoring, improvement, cognition). */
+export function formatEmotionSnapshot(state: EmotionState): string {
+  return `${state.label} (valence ${state.valence.toFixed(2)}, arousal ${state.arousal.toFixed(2)})`;
+}
+
 const DEFAULT_STATE: EmotionState = {
   valence: 0,
   arousal: 0,
@@ -58,6 +63,56 @@ export class EmotionService {
       label: next.label
     });
     return next;
+  }
+
+  /** Soft adjustment after Nova speaks — keeps affect coherent across turns without overriding user appraisal. */
+  updateFromAssistantReply(userId: string, assistantText: string, settings: EmotionSettings): void {
+    if (!settings.enabled || !assistantText.trim()) {
+      return;
+    }
+    const previous = this.getState(userId);
+    const lower = assistantText.toLowerCase();
+    let dv = 0;
+    let da = 0;
+    let hint: EmotionState["label"] | undefined;
+    if (/\b(i apologize|sorry|my mistake|i was wrong)\b/.test(lower)) {
+      dv -= 0.15;
+      hint = "empathetic";
+    }
+    if (/\b(great question|happy to help|glad (that )?helped)\b/.test(lower)) {
+      dv += 0.12;
+      da += 0.08;
+      hint = hint ?? "joyful";
+    }
+    if (/\b(let me know if|feel free to ask)\b/.test(lower)) {
+      dv += 0.06;
+      hint = hint ?? "empathetic";
+    }
+    if (/\b(step \d|first,|here's how)\b/.test(lower) && assistantText.length > 120) {
+      da += 0.06;
+      hint = hint ?? "curious";
+    }
+    if (dv === 0 && da === 0) {
+      return;
+    }
+    const valence = clamp(previous.valence * 0.85 + dv);
+    const arousal = clamp(previous.arousal * 0.85 + da);
+    const label = deriveLabel(valence, arousal, hint);
+    const next: EmotionState = { valence, arousal, label };
+    this.repository.upsert({
+      userId,
+      valence: next.valence,
+      arousal: next.arousal,
+      label: next.label
+    });
+    this.repository.appendEvent({
+      userId,
+      source: "assistant_reply",
+      trigger: assistantText.slice(0, 160),
+      valence: next.valence,
+      arousal: next.arousal,
+      label: next.label
+    });
   }
 
   applySystemEvent(

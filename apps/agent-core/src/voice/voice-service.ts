@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
+import type { EmotionState } from "../emotion/emotion-service.js";
+import { augmentOrpheusSpeechForMood } from "./emotion-tts.js";
 
 const MIME_BY_FORMAT: Record<AppSettings["orpheusTts"]["responseFormat"], string> = {
   mp3: "audio/mpeg",
@@ -12,7 +14,10 @@ const MIME_BY_FORMAT: Record<AppSettings["orpheusTts"]["responseFormat"], string
 };
 
 export class VoiceService {
-  constructor(private readonly getSettings?: () => AppSettings) {}
+  constructor(
+    private readonly getSettings?: () => AppSettings,
+    private readonly getUnifiedMood?: () => Pick<EmotionState, "label" | "valence" | "arousal">
+  ) {}
 
   async transcribe(audioPath: string): Promise<string> {
     const command = process.env.NOVA_STT_COMMAND;
@@ -37,7 +42,7 @@ export class VoiceService {
       const dir = resolve(process.cwd(), "data", "voice");
       mkdirSync(dir, { recursive: true });
       const target = outputPath ?? resolve(dir, `tts-${Date.now()}.${fmt}`);
-      const buf = await this.synthesizeOrpheusBuffer(text);
+      const buf = await this.synthesizeOrpheusBufferInternal(text);
       writeFileSync(target, buf);
       return target;
     }
@@ -56,6 +61,20 @@ export class VoiceService {
 
   /** Raw audio for streaming endpoints (no shell TTS). */
   async synthesizeOrpheusBuffer(text: string): Promise<Buffer> {
+    return this.synthesizeOrpheusBufferInternal(text);
+  }
+
+  private async synthesizeOrpheusBufferInternal(rawText: string): Promise<Buffer> {
+    let text = rawText;
+    try {
+      const mood = this.getUnifiedMood?.();
+      if (mood) {
+        text = augmentOrpheusSpeechForMood(rawText, mood);
+      }
+    } catch {
+      text = rawText;
+    }
+
     const tts = this.getSettings?.().orpheusTts;
     if (!tts?.enabled || !tts.baseUrl.trim()) {
       throw new Error("Orpheus TTS is not enabled or base URL is empty");
