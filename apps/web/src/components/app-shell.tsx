@@ -133,16 +133,13 @@ export function AppShell({ children }: { children: ReactNode }) {
           navCollapsed ? "w-14" : "w-56"
         )}
       >
-        <div className={cn("mb-2 flex items-center", navCollapsed ? "justify-center" : "justify-between")}>
+        <div className={cn("mb-2 flex min-h-8 items-center gap-2", navCollapsed ? "justify-center" : "justify-between")}>
           {!navCollapsed ? (
-            <div>
-              <h1 className="text-sm font-semibold">Nova</h1>
-              <p className="text-[10px] text-muted">Nova by AmL</p>
-            </div>
+            <h1 className="min-w-0 flex-1 text-3xl font-bold leading-8 tracking-tight text-text">Nova</h1>
           ) : null}
           <button
             type="button"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-ui border bg-surface2 text-[10px]"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-ui border bg-surface2 text-[10px]"
             onClick={() => setNavCollapsed((prev) => !prev)}
             title={navCollapsed ? "Expand menu" : "Collapse menu"}
           >
