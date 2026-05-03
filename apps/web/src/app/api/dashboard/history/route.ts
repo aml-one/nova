@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function GET(request: Request) {
-  const baseUrl = getAgentBaseUrl();
+  const baseUrl = getAgentBaseUrl(request);
   const response = await fetch(`${baseUrl}/v1/history`, {
     headers: getAgentHeaders(request)
   });
@@ -12,3 +12,4 @@ export async function GET(request: Request) {
   }
   return NextResponse.json({ items: data.items ?? [] });
 }
+

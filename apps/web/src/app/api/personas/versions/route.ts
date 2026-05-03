@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function GET(request: Request) {
@@ -6,7 +6,7 @@ export async function GET(request: Request) {
   const personaId = url.searchParams.get("personaId") ?? "default";
   const rewritesOnly = url.searchParams.get("rewritesOnly") === "true";
   const response = await fetch(
-    `${getAgentBaseUrl()}/v1/personas/versions?personaId=${encodeURIComponent(personaId)}&rewritesOnly=${rewritesOnly ? "true" : "false"}`,
+    `${getAgentBaseUrl(request)}/v1/personas/versions?personaId=${encodeURIComponent(personaId)}&rewritesOnly=${rewritesOnly ? "true" : "false"}`,
     {
     headers: getAgentHeaders(request)
     }
@@ -17,4 +17,5 @@ export async function GET(request: Request) {
   }
   return NextResponse.json({ items: data.items ?? [] });
 }
+
 

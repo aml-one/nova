@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function POST(request: Request) {
   const payload = (await request.json()) as { email?: string; password?: string };
-  const response = await fetch(`${getAgentBaseUrl()}/v1/auth/login`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/auth/login`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify(payload)
@@ -28,3 +28,4 @@ export async function POST(request: Request) {
   });
   return out;
 }
+

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function POST(request: Request) {
@@ -6,7 +6,7 @@ export async function POST(request: Request) {
   if (!payload.filename || !payload.base64) {
     return NextResponse.json({ error: "filename and base64 are required" }, { status: 400 });
   }
-  const baseUrl = getAgentBaseUrl();
+  const baseUrl = getAgentBaseUrl(request);
   const response = await fetch(`${baseUrl}/v1/media/upload`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
@@ -48,3 +48,4 @@ function toWebReachableUrl(url: string | undefined, baseUrl: string): string {
   }
   return asRelative;
 }
+

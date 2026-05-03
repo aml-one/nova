@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function POST(request: Request) {
   const payload = (await request.json()) as { cameraName?: string };
-  const response = await fetch(`${getAgentBaseUrl()}/v1/camera/test`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/camera/test`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify(payload)
@@ -15,3 +15,4 @@ export async function POST(request: Request) {
   // camera test can return ok:false with diagnostics while still being a successful API call
   return NextResponse.json(data);
 }
+

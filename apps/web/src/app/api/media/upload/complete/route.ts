@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../../lib/agent-core";
 
 export async function POST(request: Request) {
   const payload = (await request.json()) as { uploadId?: string; filename?: string };
-  const baseUrl = getAgentBaseUrl();
+  const baseUrl = getAgentBaseUrl(request);
   const response = await fetch(`${baseUrl}/v1/media/upload/complete`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
@@ -31,3 +31,4 @@ function toWebReachableUrl(url: string | undefined, baseUrl: string): string {
   if (!url) return "";
   return url.replace(baseUrl, "");
 }
+

@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function GET(request: Request): Promise<Response> {
   try {
-    const upstream = await fetch(`${getAgentBaseUrl()}/v1/voice/stt-status`, {
+    const upstream = await fetch(`${getAgentBaseUrl(request)}/v1/voice/stt-status`, {
       headers: getAgentHeaders(request, false)
     });
     const data = (await upstream.json().catch(() => ({}))) as { configured?: boolean };
@@ -15,3 +15,4 @@ export async function GET(request: Request): Promise<Response> {
     return NextResponse.json({ configured: false }, { status: 200 });
   }
 }
+

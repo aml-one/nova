@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function POST(request: Request): Promise<Response> {
@@ -7,7 +7,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!text) {
     return NextResponse.json({ error: "text is required" }, { status: 400 });
   }
-  const response = await fetch(`${getAgentBaseUrl()}/v1/voice/speak-audio`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/voice/speak-audio`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify({ text })
@@ -25,3 +25,4 @@ export async function POST(request: Request): Promise<Response> {
     }
   });
 }
+

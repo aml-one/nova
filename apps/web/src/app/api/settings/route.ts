@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../lib/agent-core";
 
 type AppSettingsPayload = {
@@ -149,7 +149,7 @@ type AppSettingsPayload = {
 };
 
 export async function GET(request: Request) {
-  const response = await fetch(`${getAgentBaseUrl()}/v1/settings`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/settings`, {
     headers: getAgentHeaders(request)
   });
   const data = (await response.json()) as { settings?: AppSettingsPayload; error?: string };
@@ -161,7 +161,7 @@ export async function GET(request: Request) {
 
 export async function PUT(request: Request) {
   const payload = (await request.json()) as AppSettingsPayload;
-  const response = await fetch(`${getAgentBaseUrl()}/v1/settings`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/settings`, {
     method: "PUT",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify(payload)
@@ -172,3 +172,4 @@ export async function PUT(request: Request) {
   }
   return NextResponse.json({ settings: data.settings ?? {} });
 }
+

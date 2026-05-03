@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function POST(request: Request) {
-  const response = await fetch(`${getAgentBaseUrl()}/v1/improvement/cycle`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/improvement/cycle`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
     body: "{}"
@@ -13,3 +13,4 @@ export async function POST(request: Request) {
   }
   return NextResponse.json({ ok: data.ok === true, result: data.result ?? "" });
 }
+

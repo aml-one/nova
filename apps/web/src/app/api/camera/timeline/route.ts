@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function GET(request: Request) {
@@ -8,7 +8,7 @@ export async function GET(request: Request) {
   const params = new URLSearchParams();
   if (color) params.set("color", color);
   if (label) params.set("label", label);
-  const response = await fetch(`${getAgentBaseUrl()}/v1/camera/timeline?${params.toString()}`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/camera/timeline?${params.toString()}`, {
     headers: getAgentHeaders(request)
   });
   const data = (await response.json()) as { items?: unknown[]; error?: string };
@@ -17,3 +17,4 @@ export async function GET(request: Request) {
   }
   return NextResponse.json({ items: data.items ?? [] });
 }
+

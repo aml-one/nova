@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../lib/agent-core";
 
 export async function GET(request: Request) {
-  const response = await fetch(`${getAgentBaseUrl()}/v1/workflows`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/workflows`, {
     headers: getAgentHeaders(request)
   });
   const data = (await response.json()) as { items?: unknown[]; error?: string };
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const payload = await request.json();
-  const response = await fetch(`${getAgentBaseUrl()}/v1/workflows`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/workflows`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify(payload)
@@ -25,3 +25,4 @@ export async function POST(request: Request) {
   }
   return NextResponse.json({ id: data.id });
 }
+

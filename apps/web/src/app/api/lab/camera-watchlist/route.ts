@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function GET(request: Request) {
-  const response = await fetch(`${getAgentBaseUrl()}/v1/lab/camera-watchlist`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/lab/camera-watchlist`, {
     headers: getAgentHeaders(request)
   });
   const data = await response.json();
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const payload = await request.json();
-  const response = await fetch(`${getAgentBaseUrl()}/v1/lab/camera-watchlist`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/lab/camera-watchlist`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify(payload)
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   const payload = await request.json();
-  const response = await fetch(`${getAgentBaseUrl()}/v1/lab/camera-watchlist`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/lab/camera-watchlist`, {
     method: "DELETE",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify(payload)
@@ -39,3 +39,4 @@ export async function DELETE(request: Request) {
   }
   return NextResponse.json(data);
 }
+

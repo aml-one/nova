@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../../../lib/agent-core";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const sessionId = url.searchParams.get("sessionId") ?? "";
   const response = await fetch(
-    `${getAgentBaseUrl()}/v1/setup/copilot/device-login/status?sessionId=${encodeURIComponent(sessionId)}`,
+    `${getAgentBaseUrl(request)}/v1/setup/copilot/device-login/status?sessionId=${encodeURIComponent(sessionId)}`,
     { headers: getAgentHeaders(request) }
   );
   const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & { error?: string };
@@ -14,3 +14,4 @@ export async function GET(request: Request) {
   }
   return NextResponse.json(data);
 }
+

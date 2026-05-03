@@ -1,4 +1,4 @@
-import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
+﻿import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export const maxDuration = 300;
 
@@ -11,7 +11,7 @@ export async function POST(request: Request) {
       headers: { "content-type": "application/json" }
     });
   }
-  const baseUrl = getAgentBaseUrl();
+  const baseUrl = getAgentBaseUrl(request);
   let response: Response;
   try {
     response = await fetch(`${baseUrl}/v1/chat/stream`, {
@@ -49,3 +49,4 @@ export async function POST(request: Request) {
     }
   });
 }
+

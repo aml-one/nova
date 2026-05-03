@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../../../lib/agent-core";
 
 export async function POST(request: Request) {
   const payload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  const response = await fetch(`${getAgentBaseUrl()}/v1/setup/copilot/device-login/cancel`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/setup/copilot/device-login/cancel`, {
     method: "POST",
     headers: { "content-type": "application/json", ...getAgentHeaders(request) },
     body: JSON.stringify(payload)
@@ -14,3 +14,4 @@ export async function POST(request: Request) {
   }
   return NextResponse.json(data);
 }
+

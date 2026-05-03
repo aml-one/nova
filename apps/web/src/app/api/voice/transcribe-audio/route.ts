@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function POST(request: Request): Promise<Response> {
@@ -12,7 +12,7 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: "audio payload is empty" }, { status: 400 });
   }
   const audioBase64 = Buffer.from(bytes).toString("base64");
-  const upstream = await fetch(`${getAgentBaseUrl()}/v1/voice/transcribe-audio`, {
+  const upstream = await fetch(`${getAgentBaseUrl(request)}/v1/voice/transcribe-audio`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify({
@@ -26,3 +26,4 @@ export async function POST(request: Request): Promise<Response> {
   }
   return NextResponse.json({ text: data.text ?? "" }, { status: 200 });
 }
+

@@ -8,7 +8,7 @@ export async function GET(request: Request, context: RouteContext) {
   if (!name) {
     return new Response("missing media name", { status: 400 });
   }
-  const upstream = `${getAgentBaseUrl()}/v1/media/files/${name}`;
+  const upstream = `${getAgentBaseUrl(request)}/v1/media/files/${name}`;
   const response = await fetch(upstream, {
     method: "GET",
     headers: getAgentHeaders(request),

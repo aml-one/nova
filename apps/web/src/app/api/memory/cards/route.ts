@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 import { WEB_CHAT_EMOTION_USER_ID } from "../../../../lib/emotion-user";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const userId = url.searchParams.get("userId") ?? WEB_CHAT_EMOTION_USER_ID;
-  const response = await fetch(`${getAgentBaseUrl()}/v1/memory/cards?userId=${encodeURIComponent(userId)}`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/memory/cards?userId=${encodeURIComponent(userId)}`, {
     headers: getAgentHeaders(request)
   });
   const data = (await response.json()) as { items?: unknown[]; error?: string };
@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const payload = await request.json();
-  const response = await fetch(`${getAgentBaseUrl()}/v1/memory/cards`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/memory/cards`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify(payload)
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
 
 export async function PUT(request: Request) {
   const payload = await request.json();
-  const response = await fetch(`${getAgentBaseUrl()}/v1/memory/cards`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/memory/cards`, {
     method: "PUT",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify(payload)
@@ -45,7 +45,7 @@ export async function PUT(request: Request) {
 
 export async function DELETE(request: Request) {
   const payload = await request.json();
-  const response = await fetch(`${getAgentBaseUrl()}/v1/memory/cards`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/memory/cards`, {
     method: "DELETE",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify(payload)
@@ -56,3 +56,4 @@ export async function DELETE(request: Request) {
   }
   return NextResponse.json({ ok: data.ok === true });
 }
+

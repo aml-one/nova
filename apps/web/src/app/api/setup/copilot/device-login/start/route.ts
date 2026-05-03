@@ -1,8 +1,8 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../../../lib/agent-core";
 
 export async function POST(request: Request) {
-  const response = await fetch(`${getAgentBaseUrl()}/v1/setup/copilot/device-login/start`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/setup/copilot/device-login/start`, {
     method: "POST",
     headers: getAgentHeaders(request)
   });
@@ -12,3 +12,4 @@ export async function POST(request: Request) {
   }
   return NextResponse.json(data);
 }
+

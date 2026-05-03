@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function POST(request: Request) {
@@ -9,7 +9,7 @@ export async function POST(request: Request) {
     apply?: boolean;
     approvalId?: string;
   };
-  const response = await fetch(`${getAgentBaseUrl()}/v1/security/action`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/security/action`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify(payload)
@@ -29,3 +29,4 @@ export async function POST(request: Request) {
     approvalId: data.approvalId
   });
 }
+

@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../../lib/agent-core";
 
 export async function POST(request: Request) {
   const payload = (await request.json().catch(() => ({}))) as { uploadId?: string };
-  const response = await fetch(`${getAgentBaseUrl()}/v1/media/upload/init`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/media/upload/init`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify(payload)
@@ -14,3 +14,4 @@ export async function POST(request: Request) {
   }
   return NextResponse.json({ uploadId: data.uploadId });
 }
+

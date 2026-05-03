@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function POST(request: Request) {
   const payload = (await request.json().catch(() => ({}))) as { personaId?: string; version?: number };
-  const response = await fetch(`${getAgentBaseUrl()}/v1/personas/rollback`, {
+  const response = await fetch(`${getAgentBaseUrl(request)}/v1/personas/rollback`, {
     method: "POST",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify({
@@ -17,4 +17,5 @@ export async function POST(request: Request) {
   }
   return NextResponse.json({ ok: true });
 }
+
 
