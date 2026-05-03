@@ -2340,6 +2340,12 @@ export default function SettingsPage() {
                 </Select>
               </label>
             </div>
+            <p className="text-[11px] text-muted">
+              If spoken audio sounds wrong, call{" "}
+              <code className="rounded bg-black/15 px-1 py-0.5 text-[10px]">POST /api/voice/tts-trace</code> with{" "}
+              <code className="text-[10px]">{`{ "text": "…same assistant markdown…" }`}</code> — JSON shows{" "}
+              <strong>sentToOrpheus</strong> (exact string passed to Orpheus after stripping markdown and mood tags).
+            </p>
             <OrpheusTtsPreviewCard />
           </Card>
         ) : null}

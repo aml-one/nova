@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { EndpointResultBody } from "./endpoint-result-view";
+import { triggerBlobDownload } from "../../lib/audio-download";
 
 type EndpointItem = {
   method: "GET" | "POST" | "PUT" | "DELETE";
@@ -48,8 +49,26 @@ const ENDPOINTS: EndpointItem[] = [
   },
   { method: "GET", path: "/api/providers/catalog", note: "Provider models and setup status." },
   { method: "GET", path: "/api/skills/manifests", note: "Loaded skill manifests." },
-  { method: "POST", path: "/api/camera/test", note: "Test one configured camera." }
+  { method: "POST", path: "/api/camera/test", note: "Test one configured camera." },
+  {
+    method: "POST",
+    path: "/api/voice/speak-audio",
+    note: 'Body JSON { "text": "…" } — returns binary audio (wav/mp3/… per Settings → Voice). Runner shows preview + download.'
+  },
+  {
+    method: "POST",
+    path: "/api/voice/tts-trace",
+    note: 'JSON { "text": "…" } — shows request → preparedForSpeech → sentToOrpheus + mood; no Orpheus call.'
+  }
 ];
+
+/** When picking an endpoint from the list, pre-fill the POST body for common routes (easy copy/run). */
+const POST_BODY_PRESETS: Partial<Record<string, string>> = {
+  "/api/voice/speak-audio": '{\n  "text": "Hello from Nova."\n}',
+  "/api/voice/tts-trace": '{\n  "text": "Hello from Nova."\n}',
+  "/api/chat": '{\n  "message": "hello"\n}',
+  "/api/chat/stream": '{\n  "message": "hello"\n}'
+};
 
 export default function EndpointsPage() {
   const [path, setPath] = useState(ENDPOINTS[0].path);
@@ -60,11 +79,22 @@ export default function EndpointsPage() {
   const [resultParsed, setResultParsed] = useState<unknown | null | undefined>(undefined);
   const [resultPretty, setResultPretty] = useState("");
   const [resultError, setResultError] = useState<string | null>(null);
+  const [audioResult, setAudioResult] = useState<{ url: string; blob: Blob; mime: string } | null>(null);
   const selected = useMemo(() => ENDPOINTS.find((item) => item.path === path && item.method === method), [method, path]);
+
+  useEffect(() => {
+    return () => {
+      if (audioResult?.url) URL.revokeObjectURL(audioResult.url);
+    };
+  }, [audioResult?.url]);
 
   async function runRequest(): Promise<void> {
     setLoading(true);
     setResultError(null);
+    setAudioResult((prev) => {
+      if (prev?.url) URL.revokeObjectURL(prev.url);
+      return null;
+    });
     const startedAt = Date.now();
     try {
       const init: RequestInit = { method, headers: {} };
@@ -73,9 +103,21 @@ export default function EndpointsPage() {
         init.body = body.trim() ? body : "{}";
       }
       const response = await fetch(path, init);
-      const text = await response.text();
       const elapsed = Date.now() - startedAt;
       const header = `[${response.status}] ${method} ${path} (${elapsed}ms)`;
+      const ct = response.headers.get("content-type") ?? "";
+
+      if (ct.startsWith("audio/")) {
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        setAudioResult({ url, blob, mime: ct });
+        setResultHeader(header);
+        setResultParsed(undefined);
+        setResultPretty("");
+        return;
+      }
+
+      const text = await response.text();
       let pretty = text;
       try {
         const parsed = JSON.parse(text) as unknown;
@@ -118,6 +160,8 @@ export default function EndpointsPage() {
                   onClick={() => {
                     setPath(item.path);
                     setMethod(item.method);
+                    const preset = POST_BODY_PRESETS[item.path];
+                    if (item.method !== "GET" && preset) setBody(preset);
                   }}
                 >
                   <div className="font-semibold">{item.method} {item.path}</div>
@@ -169,11 +213,31 @@ export default function EndpointsPage() {
             <div className="mb-1 text-xs font-semibold">Result</div>
             {resultError ? (
               <div className="rounded-lg border border-rose-400/30 bg-rose-500/10 px-2 py-2 text-xs text-rose-100">{resultError}</div>
+            ) : audioResult ? (
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-foreground/90">{resultHeader}</div>
+                <p className="text-[11px] text-muted">
+                  Binary audio ({audioResult.mime}), {audioResult.blob.size.toLocaleString()} bytes — same format as chat read-aloud.
+                </p>
+                <audio controls src={audioResult.url} className="w-full max-w-md rounded-lg border border-border bg-black/20 p-1" />
+                <Button
+                  type="button"
+                  tone="purple"
+                  className="text-xs"
+                  onClick={() =>
+                    triggerBlobDownload(audioResult.blob, audioResult.mime, `nova-endpoint-tts-${Date.now().toString(36)}`)
+                  }
+                >
+                  Download audio file
+                </Button>
+              </div>
             ) : resultHeader ? (
               <div className="max-h-[52vh] overflow-auto pr-0.5">
                 {resultParsed !== undefined ? (
                   <EndpointResultBody header={resultHeader} parsed={resultParsed} rawPretty={resultPretty} />
-                ) : null}
+                ) : (
+                  <div className="text-xs text-muted">Empty or non-JSON body.</div>
+                )}
               </div>
             ) : (
               <p className="text-xs text-muted">No response yet.</p>

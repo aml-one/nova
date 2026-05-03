@@ -1125,6 +1125,23 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         }
         return;
       }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/voice/tts-trace") {
+        const payload = (await readJson(request)) as { text?: string };
+        const raw = typeof payload.text === "string" ? payload.text : "";
+        const trace = voice.getTtsPipelineTrace(raw);
+        if (!trace.preparedForSpeech) {
+          return sendJson(response, 400, { error: "text is required", correlationId });
+        }
+        return sendJson(response, 200, {
+          correlationId,
+          ...trace,
+          pipeline: [
+            "requestText: raw POST body (assistant markdown allowed)",
+            "preparedForSpeech: strips thinking blocks, fences, nova tags, markdown → plain",
+            "sentToOrpheus: mood augmentation (Hmm prefixes, <chuckle>/<laugh>/<sigh>, etc.) — this string is Orpheus `input`"
+          ]
+        });
+      }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/rag/index") {
         const payload = (await readJson(request)) as { path: string; content: string };
         await rag.indexDocument(payload.path, payload.content);

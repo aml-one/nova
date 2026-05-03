@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
+import { triggerBlobDownload } from "../lib/audio-download";
 
 /** Wake-word bridge status and tests (Settings → Voice). */
 export function VoiceWakeWordPanel() {
@@ -77,6 +78,7 @@ export function OrpheusTtsPreviewCard() {
   const [ttsLine, setTtsLine] = useState("Hello from Nova.");
   const [ttsError, setTtsError] = useState<string | null>(null);
   const [ttsBusy, setTtsBusy] = useState(false);
+  const [lastClip, setLastClip] = useState<{ blob: Blob; mime: string } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   return (
@@ -85,40 +87,56 @@ export function OrpheusTtsPreviewCard() {
       <p className="text-xs text-muted">Uses the Orpheus settings above. Save Settings first if you changed the server URL.</p>
       <Input value={ttsLine} onChange={(e) => setTtsLine(e.target.value)} placeholder="Text to speak" />
       {ttsError ? <p className="text-xs text-red-600">{ttsError}</p> : null}
-      <Button
-        type="button"
-        tone="purple"
-        disabled={ttsBusy}
-        onClick={async () => {
-          setTtsError(null);
-          setTtsBusy(true);
-          try {
-            const response = await fetch("/api/voice/speak-audio", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ text: ttsLine })
-            });
-            if (!response.ok) {
-              const data = (await response.json().catch(() => ({}))) as { error?: string };
-              setTtsError(data.error ?? `HTTP ${response.status}`);
-              return;
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          tone="purple"
+          disabled={ttsBusy}
+          onClick={async () => {
+            setTtsError(null);
+            setTtsBusy(true);
+            try {
+              const response = await fetch("/api/voice/speak-audio", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ text: ttsLine })
+              });
+              if (!response.ok) {
+                const data = (await response.json().catch(() => ({}))) as { error?: string };
+                setTtsError(data.error ?? `HTTP ${response.status}`);
+                return;
+              }
+              const blob = await response.blob();
+              const mime = response.headers.get("content-type") ?? "audio/wav";
+              setLastClip({ blob: blob.slice(), mime });
+              const url = URL.createObjectURL(blob);
+              const el = audioRef.current;
+              if (el) {
+                el.src = url;
+                await el.play().catch(() => setTtsError("Playback blocked or unsupported in this browser."));
+              }
+            } catch {
+              setTtsError("Request failed");
+            } finally {
+              setTtsBusy(false);
             }
-            const blob = await response.blob();
-            const url = URL.createObjectURL(blob);
-            const el = audioRef.current;
-            if (el) {
-              el.src = url;
-              await el.play().catch(() => setTtsError("Playback blocked or unsupported in this browser."));
-            }
-          } catch {
-            setTtsError("Request failed");
-          } finally {
-            setTtsBusy(false);
-          }
-        }}
-      >
-        {ttsBusy ? "Synthesizing…" : "Play TTS"}
-      </Button>
+          }}
+        >
+          {ttsBusy ? "Synthesizing…" : "Play TTS"}
+        </Button>
+        <Button
+          type="button"
+          tone="neutral"
+          disabled={ttsBusy || !lastClip}
+          title="Save the last synthesized clip"
+          onClick={() => {
+            if (!lastClip) return;
+            triggerBlobDownload(lastClip.blob, lastClip.mime, `nova-voice-preview-${Date.now().toString(36)}`);
+          }}
+        >
+          Download
+        </Button>
+      </div>
       <audio ref={audioRef} className="mt-2 w-full" controls />
     </Card>
   );

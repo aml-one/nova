@@ -14,6 +14,7 @@ import {
   FaRotateRight,
   FaStop,
   FaTrash,
+  FaDownload,
   FaVolumeHigh,
   FaXmark
 } from "react-icons/fa6";
@@ -25,6 +26,7 @@ import { Badge } from "../components/ui/badge";
 import { cn } from "../lib/cn";
 import { dispatchNovaEmotionRefresh } from "../lib/emotion-user";
 import { ChatMarkdown } from "../components/chat-markdown";
+import { triggerBlobDownload } from "../lib/audio-download";
 
 type MediaItem = {
   url: string;
@@ -144,6 +146,8 @@ export default function HomePage() {
   const chatTtsAudioRef = useRef<HTMLAudioElement | null>(null);
   const chatTtsObjectUrlRef = useRef<string | null>(null);
   const chatTtsFetchAbortRef = useRef<AbortController | null>(null);
+  /** Last synthesized clip per turn (same payload as speak-audio) for download without re-fetch when possible. */
+  const chatTtsBlobCacheRef = useRef<Map<string, { blob: Blob; mime: string }>>(new Map());
   const [streamPhase, setStreamPhase] = useState<StreamPhase>("thinking");
   const webSearchDepthRef = useRef(0);
   const lastStreamRawRef = useRef("");
@@ -477,6 +481,7 @@ export default function HomePage() {
 
   useEffect(() => {
     stopChatTtsPlayback();
+    chatTtsBlobCacheRef.current.clear();
   }, [activeSessionId, stopChatTtsPlayback]);
 
   const playChatTts = useCallback(
@@ -501,6 +506,8 @@ export default function HomePage() {
           return;
         }
         const blob = await response.blob();
+        const mime = response.headers.get("content-type") ?? "audio/wav";
+        chatTtsBlobCacheRef.current.set(turnId, { blob: blob.slice(), mime });
         const url = URL.createObjectURL(blob);
         chatTtsObjectUrlRef.current = url;
         const el = chatTtsAudioRef.current;
@@ -535,6 +542,29 @@ export default function HomePage() {
     },
     [stopChatTtsPlayback]
   );
+
+  const downloadChatTtsForTurn = useCallback(async (turnId: string, rawText: string): Promise<void> => {
+    const cleaned = stripMarkdownForTts(rawText);
+    if (!cleaned.trim()) return;
+    const cached = chatTtsBlobCacheRef.current.get(turnId);
+    let blob: Blob;
+    let mime: string;
+    if (cached) {
+      blob = cached.blob;
+      mime = cached.mime;
+    } else {
+      const response = await fetch("/api/voice/speak-audio", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: cleaned })
+      });
+      if (!response.ok) return;
+      blob = await response.blob();
+      mime = response.headers.get("content-type") ?? "audio/wav";
+      chatTtsBlobCacheRef.current.set(turnId, { blob: blob.slice(), mime });
+    }
+    triggerBlobDownload(blob, mime, `nova-chat-${turnId.slice(0, 12)}`);
+  }, []);
 
   function stopGeneration(): void {
     streamAbortRef.current?.abort();
@@ -1239,6 +1269,20 @@ export default function HomePage() {
                     ) : (
                       <FaVolumeHigh className="h-3.5 w-3.5" />
                     )}
+                  </button>
+                  <button
+                    type="button"
+                    className={bubbleIconActionClass}
+                    style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
+                    disabled={
+                      !turn.text.trim() ||
+                      Boolean(loading && index === turns.length - 1 && turn.role === "assistant") ||
+                      ttsGeneratingTurnId === turn.id
+                    }
+                    title="Download synthesized audio for this message"
+                    onClick={() => void downloadChatTtsForTurn(turn.id, turn.text)}
+                  >
+                    <FaDownload className="h-3.5 w-3.5" />
                   </button>
                 </div>
               ) : null}
