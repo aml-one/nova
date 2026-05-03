@@ -1298,60 +1298,71 @@ export default function HomePage() {
                 </div>
               ) : null}
               {turn.role === "assistant" ? (
-                <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    className={bubbleIconActionClass}
-                    style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
-                    onClick={() => void copyTurnText(turn.text, turn.id)}
-                    title="Copy message"
-                  >
-                    {lastCopiedTurnId === turn.id ? <FaCheck className="h-3.5 w-3.5 text-emerald-400" /> : <FaCopy className="h-3.5 w-3.5" />}
-                  </button>
-                  <Button
-                    type="button"
-                    tone="neutral"
-                    className="h-8 shrink-0 gap-1.5 px-3 text-xs font-medium"
-                    disabled={
-                      !turn.text.trim() ||
-                      Boolean(loading && index === turns.length - 1 && turn.role === "assistant")
-                    }
-                    title={
-                      ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id
-                        ? "Stop audio / cancel generation"
-                        : "Read this message aloud (Orpheus)"
-                    }
-                    aria-pressed={ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id}
-                    onClick={() => {
-                      if (ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id) {
-                        stopChatTtsPlayback();
-                      } else {
-                        void playChatTts(turn.id, turn.text);
-                      }
-                    }}
-                  >
-                    {ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id ? (
-                      <span className="inline-block h-3 w-3 shrink-0 rounded-[2px] bg-current" aria-hidden />
-                    ) : (
-                      <FaVolumeHigh className="h-3.5 w-3.5 shrink-0" />
-                    )}
-                    {ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id ? "Stop audio" : "Read aloud"}
-                  </Button>
-                  <Button
-                    type="button"
-                    tone="purple"
-                    className="h-8 shrink-0 gap-1.5 px-3 text-xs font-medium"
-                    disabled={
-                      !turn.text.trim() ||
-                      Boolean(loading && index === turns.length - 1 && turn.role === "assistant") ||
-                      ttsGeneratingTurnId === turn.id
-                    }
-                    title="Download synthesized WAV/MP3 for this message"
-                    onClick={() => void downloadChatTtsForTurn(turn.id, turn.text)}
-                  >
-                    <FaDownload className="h-3.5 w-3.5 shrink-0" />
-                    Download audio
-                  </Button>
+                <div className="mt-2 space-y-1.5">
+                  <div className="-mx-0.5 overflow-x-auto overflow-y-visible pb-0.5 [scrollbar-width:thin]">
+                    <div className="flex min-w-min flex-nowrap items-center gap-2 px-0.5">
+                      <button
+                        type="button"
+                        className={bubbleIconActionClass}
+                        style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
+                        onClick={() => void copyTurnText(turn.text, turn.id)}
+                        title="Copy message"
+                      >
+                        {lastCopiedTurnId === turn.id ? (
+                          <FaCheck className="h-3.5 w-3.5 text-emerald-400" />
+                        ) : (
+                          <FaCopy className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className={bubbleIconActionClass}
+                        style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
+                        disabled={
+                          !turn.text.trim() ||
+                          Boolean(loading && index === turns.length - 1 && turn.role === "assistant")
+                        }
+                        title={
+                          ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id
+                            ? "Stop audio"
+                            : "Read aloud (Orpheus)"
+                        }
+                        aria-pressed={ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id}
+                        onClick={() => {
+                          if (ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id) {
+                            stopChatTtsPlayback();
+                          } else {
+                            void playChatTts(turn.id, turn.text);
+                          }
+                        }}
+                      >
+                        {ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id ? (
+                          <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-[2px] bg-current" aria-hidden />
+                        ) : (
+                          <FaVolumeHigh className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={
+                          !turn.text.trim() ||
+                          Boolean(loading && index === turns.length - 1 && turn.role === "assistant") ||
+                          ttsGeneratingTurnId === turn.id
+                        }
+                        title="Download synthesized audio (same as Read aloud)"
+                        aria-label="Download synthesized audio"
+                        onClick={() => void downloadChatTtsForTurn(turn.id, turn.text)}
+                        className={cn(
+                          "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold shadow-sm transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-45",
+                          "border-purple-400/55 bg-purple-500/20 text-purple-50 hover:bg-purple-500/30",
+                          "dark:border-purple-400/45 dark:bg-purple-950/55 dark:text-purple-100 dark:hover:bg-purple-900/65"
+                        )}
+                      >
+                        <FaDownload className="h-3.5 w-3.5 shrink-0" />
+                        Save audio
+                      </button>
+                    </div>
+                  </div>
                 </div>
               ) : null}
               {turn.role === "assistant" && showThinkingInChat && turn.thinkingText ? (
