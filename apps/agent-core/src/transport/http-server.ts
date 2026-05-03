@@ -150,7 +150,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         parsedUrl.pathname === "/health" ||
         parsedUrl.pathname === "/v1/auth/state" ||
         parsedUrl.pathname === "/v1/auth/login" ||
-        parsedUrl.pathname === "/v1/auth/setup";
+        parsedUrl.pathname === "/v1/auth/setup" ||
+        /** Boolean only; used by web to gate mic upload without exposing secrets. */
+        parsedUrl.pathname === "/v1/voice/stt-status";
       const sessionToken = request.headers["x-session-token"]?.toString();
       const sessionUser = options.auth.verifySession(sessionToken);
       const hasInternalAuth = verifyInternalAuthHeader(request.headers.authorization?.toString());
