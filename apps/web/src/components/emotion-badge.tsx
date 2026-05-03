@@ -145,10 +145,12 @@ export function EmotionBadge({ userId = WEB_CHAT_EMOTION_USER_ID }: { userId?: s
         )}
         aria-hidden
       />
-      <span className="max-w-[11rem] truncate text-[11px] font-medium leading-tight text-slate-800 dark:text-slate-100/95">
+      <span className="max-w-[11rem] truncate text-[11px] font-medium leading-tight text-slate-800 dark:text-slate-100">
         {state ? (
           <>
-            Nova&apos;s <span className="capitalize text-slate-600 dark:text-slate-300/95">{state.label}</span>
+            Nova&apos;s{" "}
+            {state.label.charAt(0).toUpperCase()}
+            {state.label.slice(1)}
           </>
         ) : (
           <span className="text-muted">Mood unavailable</span>

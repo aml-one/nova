@@ -190,6 +190,17 @@ function describeMicStartError(error: unknown): string {
   return "Microphone permission denied or unavailable.";
 }
 
+type SpeechRecognitionCtor = new () => SpeechRecognition;
+
+function getBrowserSpeechRecognitionCtor(): SpeechRecognitionCtor | null {
+  if (typeof window === "undefined") return null;
+  const w = window as unknown as {
+    SpeechRecognition?: SpeechRecognitionCtor;
+    webkitSpeechRecognition?: SpeechRecognitionCtor;
+  };
+  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
+}
+
 function IosSwitch({
   checked,
   onChange,
@@ -442,6 +453,8 @@ export default function HomePage() {
   const chatTtsFetchAbortRef = useRef<AbortController | null>(null);
   const chatSttRecorderRef = useRef<MediaRecorder | null>(null);
   const chatSttChunksRef = useRef<BlobPart[]>([]);
+  const chatSttWebRecognitionRef = useRef<SpeechRecognition | null>(null);
+  const sttWebSpeechPrefixRef = useRef("");
   /** Session-scoped clips: key = turnId + normalized TTS text (evicted after MAX_SESSION_TTS_AUDIO_CACHE). */
   const chatTtsBlobCacheRef = useRef<Map<string, { blob: Blob; mime: string }>>(new Map());
   const chatTtsCacheOrderRef = useRef<string[]>([]);
@@ -866,6 +879,12 @@ export default function HomePage() {
       } catch {
         // Ignore stop failures.
       }
+      try {
+        chatSttWebRecognitionRef.current?.abort();
+      } catch {
+        // Ignore abort failures.
+      }
+      chatSttWebRecognitionRef.current = null;
     },
     []
   );
@@ -1025,10 +1044,6 @@ export default function HomePage() {
         setSttError(capabilityError);
         return;
       }
-      if (typeof MediaRecorder === "undefined") {
-        setSttError("This browser does not support MediaRecorder microphone capture.");
-        return;
-      }
       try {
         if (navigator.permissions?.query) {
           const status = await navigator.permissions.query({ name: "microphone" as PermissionName });
@@ -1039,6 +1054,67 @@ export default function HomePage() {
         }
       } catch {
         // Permission API can fail on some browsers; continue to getUserMedia.
+      }
+
+      const SpeechRecCtor = getBrowserSpeechRecognitionCtor();
+      if (SpeechRecCtor) {
+        try {
+          try {
+            chatSttWebRecognitionRef.current?.abort();
+          } catch {
+            /* ignore */
+          }
+          chatSttWebRecognitionRef.current = null;
+          sttWebSpeechPrefixRef.current = message.trimEnd();
+          const rec = new SpeechRecCtor();
+          rec.continuous = true;
+          rec.interimResults = true;
+          rec.lang = navigator.language || "en-US";
+          rec.onresult = (event: SpeechRecognitionEvent) => {
+            let line = "";
+            for (let i = 0; i < event.results.length; i++) {
+              line += event.results[i]![0]!.transcript;
+            }
+            const prefix = sttWebSpeechPrefixRef.current;
+            const spoken = line.trim();
+            const next = spoken ? (prefix ? `${prefix} ${spoken}` : spoken) : prefix;
+            setMessage(next);
+          };
+          rec.onerror = (event: SpeechRecognitionErrorEvent) => {
+            if (event.error === "aborted") return;
+            if (chatSttWebRecognitionRef.current === rec) {
+              chatSttWebRecognitionRef.current = null;
+            }
+            setSttRecording(false);
+            if (event.error === "not-allowed") {
+              setSttError("Microphone permission denied. Allow mic access for this site.");
+            } else if (event.error !== "no-speech") {
+              setSttError(`Voice recognition: ${event.error}`);
+            }
+          };
+          rec.onend = () => {
+            if (chatSttWebRecognitionRef.current === rec) {
+              chatSttWebRecognitionRef.current = null;
+            }
+            setSttRecording(false);
+          };
+          chatSttWebRecognitionRef.current = rec;
+          rec.start();
+          setSttRecording(true);
+          return;
+        } catch {
+          try {
+            chatSttWebRecognitionRef.current?.abort();
+          } catch {
+            /* ignore */
+          }
+          chatSttWebRecognitionRef.current = null;
+        }
+      }
+
+      if (typeof MediaRecorder === "undefined") {
+        setSttError("This browser does not support MediaRecorder microphone capture.");
+        return;
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
@@ -1067,6 +1143,15 @@ export default function HomePage() {
   }
 
   function stopMicTranscription(): void {
+    const web = chatSttWebRecognitionRef.current;
+    if (web) {
+      try {
+        web.stop();
+      } catch {
+        setSttRecording(false);
+      }
+      return;
+    }
     const recorder = chatSttRecorderRef.current;
     if (!recorder) return;
     try {
@@ -1601,7 +1686,12 @@ export default function HomePage() {
           setAutoScrollEnabled(nearBottom);
         }}
       >
-        <div className="space-y-2 px-6 pb-6 pt-2 sm:px-7">
+        <div
+          className={cn(
+            "space-y-2 px-6 pb-6 sm:px-7",
+            chatStyleReady && turns.length > 0 ? "pt-[30px]" : "pt-2"
+          )}
+        >
           {!chatStyleReady ? <div className="text-sm text-muted">Loading chat style…</div> : null}
           {chatStyleReady && turns.length === 0 ? (
             <div className="flex min-h-[min(48vh,26rem)] flex-col items-center justify-center py-10 text-center">
@@ -1882,13 +1972,12 @@ export default function HomePage() {
                         aria-label="Download synthesized audio"
                         onClick={() => void downloadChatTtsForTurn(turn.id, turn.text)}
                         className={cn(
-                          "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold shadow-sm transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-45",
-                          "border-purple-400/55 bg-purple-500/20 text-purple-50 hover:bg-purple-500/30",
-                          "dark:border-purple-400/45 dark:bg-purple-950/55 dark:text-purple-100 dark:hover:bg-purple-900/65"
+                          bubbleIconActionClass,
+                          "disabled:cursor-not-allowed disabled:opacity-45"
                         )}
+                        style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
                       >
                         <FaDownload className="h-3.5 w-3.5 shrink-0" />
-                        Save audio
                       </button>
                     </div>
                   </div>
@@ -1952,18 +2041,17 @@ export default function HomePage() {
       <div className="relative z-10 -mt-8 mb-[55px] shrink-0 bg-gradient-to-t from-surface from-15% via-surface/90 to-transparent pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-10">
         <form onSubmit={onSubmit} className="flex w-full flex-col gap-2">
           {loading ? (
-            <div className="flex w-full min-h-9 items-center justify-between gap-3 border-t border-rose-500/50 bg-pastelRed/40 py-2 pl-6 pr-4 dark:bg-rose-950/35">
-              <span className="min-w-0 text-sm font-medium text-slate-900 dark:text-slate-100">Nova is generating a reply…</span>
-              <Button
+            <div className="flex w-full min-h-9 items-center justify-between gap-3 border-t border-border/70 bg-surface2/50 py-2 pl-6 pr-4 backdrop-blur-sm dark:border-white/[0.06] dark:bg-white/[0.03]">
+              <span className="min-w-0 text-xs text-muted sm:text-sm">Nova is generating a reply…</span>
+              <button
                 type="button"
-                tone="red"
-                className="h-8 shrink-0 px-3 text-sm font-semibold"
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-border/90 bg-surface/80 px-2.5 text-xs font-medium text-text shadow-none transition hover:bg-surface2 dark:border-white/10 dark:bg-white/[0.06] dark:hover:bg-white/[0.1]"
                 onClick={() => stopGeneration()}
-                title="Stop immediately"
+                title="Stop generation"
               >
-                <FaStop className="mr-2 inline h-3.5 w-3.5" />
+                <FaStop className="h-2.5 w-2.5 opacity-80" aria-hidden />
                 Stop
-              </Button>
+              </button>
             </div>
           ) : null}
           {uploads.length ? (
@@ -2072,8 +2160,8 @@ export default function HomePage() {
                   sttCapabilityError
                     ? sttCapabilityError
                     : sttRecording
-                      ? "Stop recording and transcribe"
-                      : "Record voice and transcribe into message"
+                      ? "Stop voice input (live text while speaking in supported browsers)"
+                      : "Voice: live text in Chrome/Edge, or record and transcribe on the server"
                 }
               >
                 <FaMicrophone className={cn("h-3.5 w-3.5 shrink-0", sttRecording && "animate-pulse")} />

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import type { EmotionState } from "../emotion/emotion-service.js";
@@ -30,15 +30,21 @@ export class VoiceService {
   ) {}
 
   async transcribe(audioPath: string): Promise<string> {
-    const command = process.env.NOVA_STT_COMMAND;
-    if (!command) {
-      return `STT placeholder transcript for: ${audioPath}`;
+    const command = process.env.NOVA_STT_COMMAND?.trim();
+    if (command) {
+      const result = spawnSync(command, [audioPath], { shell: true, encoding: "utf8" });
+      if (result.status !== 0) {
+        throw new Error(result.stderr || "stt command failed");
+      }
+      return result.stdout.trim();
     }
-    const result = spawnSync(command, [audioPath], { shell: true, encoding: "utf8" });
-    if (result.status !== 0) {
-      throw new Error(result.stderr || "stt command failed");
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+    if (apiKey) {
+      return await transcribeOpenAIWhisper(audioPath, apiKey);
     }
-    return result.stdout.trim();
+    throw new Error(
+      "Speech-to-text is not configured. Set OPENAI_API_KEY for Whisper API transcription, or set NOVA_STT_COMMAND to a shell command that receives the audio file path as argv[1] and prints the transcript to stdout. Optional: OPENAI_BASE_URL, NOVA_WHISPER_MODEL."
+    );
   }
 
   /** Decode uploaded browser audio bytes into text (normalizes to 16k mono WAV via ffmpeg when available). */
@@ -215,6 +221,46 @@ export class VoiceService {
 function isWavMime(mimeType: string | undefined): boolean {
   const mime = (mimeType ?? "").toLowerCase();
   return mime.includes("audio/wav") || mime.includes("audio/x-wav") || mime.includes("audio/wave");
+}
+
+async function transcribeOpenAIWhisper(audioPath: string, apiKey: string): Promise<string> {
+  const baseUrl = (process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com").replace(/\/+$/, "");
+  const model = process.env.NOVA_WHISPER_MODEL?.trim() || "whisper-1";
+  const buf = readFileSync(audioPath);
+  const name = basename(audioPath);
+  const blob = new Blob([buf], { type: mimeForSttFilename(name) });
+  const form = new FormData();
+  form.append("file", blob, name);
+  form.append("model", model);
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 120_000);
+  try {
+    const res = await fetch(`${baseUrl}/v1/audio/transcriptions`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${apiKey}` },
+      body: form,
+      signal: ac.signal
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      throw new Error(`Whisper HTTP ${res.status}: ${errText.slice(0, 400)}`);
+    }
+    const json = (await res.json()) as { text?: string };
+    return (json.text ?? "").trim();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function mimeForSttFilename(name: string): string {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".wav")) return "audio/wav";
+  if (lower.endsWith(".webm")) return "audio/webm";
+  if (lower.endsWith(".mp3")) return "audio/mpeg";
+  if (lower.endsWith(".m4a") || lower.endsWith(".mp4")) return "audio/mp4";
+  if (lower.endsWith(".ogg") || lower.endsWith(".oga")) return "audio/ogg";
+  if (lower.endsWith(".flac")) return "audio/flac";
+  return "application/octet-stream";
 }
 
 function extensionFromMime(mimeType: string | undefined): string {
