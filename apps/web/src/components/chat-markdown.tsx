@@ -32,6 +32,17 @@ type RenderUnit =
   | { kind: "fence"; text: string }
   | { kind: "tone"; tone: NovaChatTone; text: string };
 
+/**
+ * Hide Orpheus stage cues in chat text while preserving them in the raw turn text
+ * (raw text is still used by read-aloud synthesis, traces, and debugging views).
+ */
+function stripOrpheusCueTagsForDisplay(source: string): string {
+  return source
+    .replace(/<(?:laugh|sigh|chuckle|cough|sniffle|groan|gasp)\b[^>]*>/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 /** Legacy HTML from earlier prompts → bracket syntax (only whitelisted classes). */
 function normalizeLegacyNovaSpans(source: string): string {
   return source.replace(
@@ -138,15 +149,17 @@ const markdownComponents: Components = {
 };
 
 export function ChatMarkdown({ content, toneSeed }: ChatMarkdownProps) {
+  const displayContent = useMemo(() => stripOrpheusCueTagsForDisplay(content), [content]);
+
   if (!toneSeed) {
     return (
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-        {content}
+        {displayContent}
       </ReactMarkdown>
     );
   }
 
-  const units = useMemo(() => buildRenderUnits(content), [content]);
+  const units = useMemo(() => buildRenderUnits(displayContent), [displayContent]);
 
   const body = (
     <>

@@ -5,7 +5,7 @@ import type { EmotionState } from "../emotion/emotion-service.js";
  * @see augmentOrpheusSpeechForMood
  */
 const ORPHEUS_NONVERB_TAG_NAMES =
-  "laugh|sigh|chuckle|cough|sniffle|groan|yawn|gasp" as const;
+  "laugh|sigh|chuckle|cough|sniffle|groan|gasp" as const;
 
 const NONVERB_TAG_RE = new RegExp(`<(?:${ORPHEUS_NONVERB_TAG_NAMES})\\b[^>]*>`, "gi");
 
@@ -44,7 +44,7 @@ function alreadyHmmPrefixed(text: string): boolean {
 
 /** True when synthesis already starts with a non-speech tag (avoid stacking prefixes). */
 function hasLeadingNonverbPrefix(text: string): boolean {
-  return /^\s*<(?:groan|sigh|sniffle|gasp|cough|yawn)\b[^>]*>/i.test(text);
+  return /^\s*<(?:groan|sigh|sniffle|gasp|cough)\b[^>]*>/i.test(text);
 }
 
 /**
@@ -52,7 +52,7 @@ function hasLeadingNonverbPrefix(text: string): boolean {
  * Conservative: avoids stacking tags when input already contains several.
  *
  * Tags understood end-to-end when sent as Orpheus `input`: &lt;laugh&gt;, &lt;sigh&gt;, &lt;chuckle&gt;,
- * &lt;cough&gt;, &lt;sniffle&gt;, &lt;groan&gt;, &lt;yawn&gt;, &lt;gasp&gt; (plus model-authored copies in chat text).
+ * &lt;cough&gt;, &lt;sniffle&gt;, &lt;groan&gt;, &lt;gasp&gt; (plus model-authored copies in chat text).
  */
 export function augmentOrpheusSpeechForMood(
   text: string,
@@ -126,19 +126,6 @@ export function augmentOrpheusSpeechForMood(
     }
   }
 
-  // Low-energy neutral — occasional yawn lead-in (very rare)
-  if (
-    mood.label === "neutral" &&
-    mood.arousal < 0.14 &&
-    mood.valence > -0.08 &&
-    result.length > 88 &&
-    stableRoll(trimmed, 91) < 0.065 &&
-    !/<yawn>/i.test(result) &&
-    !hasLeadingNonverbPrefix(result)
-  ) {
-    result = `<yawn> ${result}`;
-  }
-
   const negRoll = stableRoll(trimmed, 23);
 
   // Frustration — groan (exclusive with sigh/sniffle cluster)
@@ -168,7 +155,7 @@ export function augmentOrpheusSpeechForMood(
     }
   }
 
-  // Inline cough — avoids stacking another leading prefix after groan/sigh/yawn/gasp
+  // Inline cough — avoids stacking another leading prefix after groan/sigh/gasp
   if (
     (mood.label === "guilty" || mood.label === "frustrated") &&
     result.length > 52 &&

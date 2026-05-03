@@ -1281,7 +1281,7 @@ export default function HomePage() {
                             </span>
                           </div>
                           <p className="text-[11px] text-muted">
-                            Orpheus is synthesizing speech. WAV is the default for quickest playback in the browser; switch format under Settings → Voice if needed.
+                            Nova is synthetizing speech.. Please hold on..
                           </p>
                         </div>
                       ) : null}

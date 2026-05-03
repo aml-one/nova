@@ -5,7 +5,7 @@ describe("countOrpheusNonverbTags", () => {
   it("detects standard Lex-au tags", () => {
     expect(countOrpheusNonverbTags("<laugh><sigh>")).toBe(2);
     expect(countOrpheusNonverbTags("<sniffle> ok <gasp>")).toBe(2);
-    expect(countOrpheusNonverbTags("<groan><yawn><cough><chuckle>")).toBe(4);
+    expect(countOrpheusNonverbTags("<groan><cough><chuckle>")).toBe(3);
   });
 });
 
