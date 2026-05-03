@@ -70,8 +70,15 @@ pip install -q -r requirements.txt
 
 echo "==> Starting Orpheus-FastAPI on :$API_PORT"
 nohup uvicorn app:app --host 0.0.0.0 --port "$API_PORT" >/tmp/orpheus-fastapi.log 2>&1 &
-sleep 10
-if curl -fsS -m 10 "http://127.0.0.1:${API_PORT}/docs" >/dev/null; then
+ok=0
+for ((i = 1; i <= 45; i++)); do
+  if curl -fsS -m 5 "http://127.0.0.1:${API_PORT}/docs" >/dev/null 2>&1; then
+    ok=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$ok" -eq 1 ]]; then
   echo "OK Orpheus docs http://127.0.0.1:${API_PORT}/docs"
 else
   echo "WARN Orpheus failed to expose /docs — tail /tmp/orpheus-fastapi.log"

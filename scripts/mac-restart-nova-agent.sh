@@ -20,5 +20,17 @@ curl -fsS -X POST "${AGENT_URL}/v1/system/restart" \
   -H "Content-Type: application/json" \
   -d '{"service":"agent-core"}'
 echo
-sleep 4
-curl -fsS -m 10 "${AGENT_URL}/health" && echo "OK agent health"
+ok=0
+for ((i = 1; i <= 30; i++)); do
+  if curl -fsS -m 5 "${AGENT_URL}/health" >/dev/null 2>&1; then
+    ok=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$ok" -eq 1 ]]; then
+  curl -fsS -m 5 "${AGENT_URL}/health" && echo "OK agent health"
+else
+  echo "WARN: agent health not ready after restart; check agent logs / supervisor"
+  exit 1
+fi
