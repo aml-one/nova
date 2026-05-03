@@ -40,6 +40,9 @@ export class SelfImprovementLoop {
   private readonly learningLog = new LearningLog();
   private readonly curiosity = new CuriosityStore();
   private readonly policy: ImprovementPolicy;
+  /** Avoid flooding the learning timeline when idle cycles repeat the same benign skip. */
+  private lastIdleResearchSkipLogMs = 0;
+  private static readonly IDLE_RESEARCH_SKIP_LOG_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
   constructor(
     private readonly gitOps: GitOpsManager,
@@ -172,12 +175,16 @@ export class SelfImprovementLoop {
     if (summary.failures === 0) {
       const hoursSinceResearch = this.hoursSinceLastAcceptedResearch();
       if (hoursSinceResearch !== null && hoursSinceResearch < 6) {
-        this.learningLog.append(
-          "Skipped idle research to avoid repetitive loop",
-          true,
-          `No failures detected and last accepted research was ${hoursSinceResearch.toFixed(1)}h ago.`,
-          "proposal"
-        );
+        const now = Date.now();
+        if (now - this.lastIdleResearchSkipLogMs >= SelfImprovementLoop.IDLE_RESEARCH_SKIP_LOG_COOLDOWN_MS) {
+          this.learningLog.append(
+            "Skipped idle research to avoid repetitive loop",
+            true,
+            `No failures detected and last accepted research was ${hoursSinceResearch.toFixed(1)}h ago. (Similar skips are logged at most once per 24h.)`,
+            "proposal"
+          );
+          this.lastIdleResearchSkipLogMs = now;
+        }
         return "idle cycle skipped: no failures and research still fresh";
       }
     }

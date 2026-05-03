@@ -14,7 +14,6 @@ import {
   FaListCheck,
   FaLock,
   FaMessage,
-  FaMicrophone,
   FaRepeat,
   FaRobot,
   FaRoute,
@@ -58,7 +57,6 @@ const links: NavLink[] = [
   { href: "/sandbox", label: "Sandbox", icon: FaShieldHalved, subtitle: "Simulate risky commands before execution." },
   { href: "/rollout", label: "Rollout", icon: FaTimeline, subtitle: "Stage, checkpoint, and rollback settings changes." },
   { href: "/security", label: "Security", icon: FaLock, subtitle: "Security center actions, anomalies, and audit history." },
-  { href: "/voice", label: "Voice", icon: FaMicrophone, subtitle: "Wake-word bridge and voice integration checks." },
   { href: "/ocr", label: "OCR", icon: FaTableList, subtitle: "Extract text and tables from local documents." },
   { href: "/skills", label: "Skills", icon: FaWandMagicSparkles, subtitle: "Browse loaded skills and their capabilities." },
   { href: "/lab", label: "Lab", icon: FaFlask, subtitle: "Advanced experiments, policy tests, and diagnostics." }
@@ -68,13 +66,14 @@ const settingsLink: NavLink = {
   href: "/settings",
   label: "Settings",
   icon: FaSliders,
-  subtitle: "Configure providers, channels, safety, and UI."
+  subtitle: "Configure providers, channels, safety, voice (tab), and UI."
 };
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [navCollapsed, setNavCollapsed] = useState(false);
-  const activeLink = links.find((link) => link.href === pathname) ?? links[0];
+  const activeLink =
+    pathname === "/settings" ? settingsLink : (links.find((link) => link.href === pathname) ?? links[0]);
 
   return (
     <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-gradient-to-br from-surface via-surface to-surface2">
@@ -127,7 +126,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               className={cn(
                 "flex items-center gap-2 rounded-ui border text-xs",
                 navCollapsed ? "mx-auto h-8 w-8 justify-center" : "px-2 py-1.5",
-                pathname === settingsLink.href ? "bg-pastelBlue border-blue-500/70 text-slate-900" : "bg-surface2"
+                pathname === "/settings" ? "bg-pastelBlue border-blue-500/70 text-slate-900" : "bg-surface2"
               )}
               title={settingsLink.label}
             >

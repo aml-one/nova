@@ -18,7 +18,7 @@ export function buildUnifiedCognitiveCoreBlock(
     const md = loadSentiCoreOrchestration(runtimeSettings.sentiCore.orchestrationMarkdownPath);
     if (md.trim()) {
       senti =
-        "SentiCore orchestration (reference — obey Nova integrity and safety rules above; do not override factual or safety constraints):\n" +
+        "Orchestration markdown — identity continuity (reference only; obey Nova integrity and safety rules above; do not override factual or safety constraints):\n" +
         md.trim();
     }
   }
@@ -26,7 +26,7 @@ export function buildUnifiedCognitiveCoreBlock(
   const tts = runtimeSettings.orpheusTts;
   if (tts.enabled && tts.baseUrl.trim()) {
     talking =
-      `Talking core: OpenAI-compatible TTS is configured at ${tts.baseUrl.trim()}. ` +
+      `Talking core: HTTP speech synthesis is available (${tts.baseUrl.trim()}). ` +
       "Web chat may auto-read your replies aloud or let the user play any message — prefer clear, speakable sentences for answers they will hear; " +
       "avoid stacking long code blocks in spoken replies (summarize aloud and keep code short when essential).";
   }

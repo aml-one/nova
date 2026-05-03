@@ -65,11 +65,11 @@ export default function ThoughtsPage() {
   }, [items]);
 
   return (
-    <div className="space-y-4">
-      <Card className="flex flex-wrap items-center justify-between gap-2">
+    <div className="space-y-5">
+      <Card className="flex flex-wrap items-center justify-between gap-3 border-indigo-500/25 bg-gradient-to-br from-indigo-950/35 via-surface to-purple-950/25 p-5 shadow-lg shadow-indigo-900/15">
         <div>
-          <h1 className="text-2xl font-semibold">Live Thoughts</h1>
-          <p className="text-sm text-muted">Always-on feed of Nova's internal reasoning, including idle cycles.</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Live thoughts</h1>
+          <p className="mt-1 max-w-xl text-sm text-muted">Internal narration — chat traces, idle learning, and system pulses.</p>
         </div>
         <div className="flex items-center gap-2">
           <HealthPill level={loading ? "orange" : "green"} label={loading ? "Syncing" : "Live"} />
@@ -78,22 +78,34 @@ export default function ThoughtsPage() {
           </Button>
         </div>
       </Card>
-      <Card className="grid gap-2 md:grid-cols-3">
-        <article className="rounded-ui border bg-surface p-3 text-sm">Chat thoughts: {stats.chat}</article>
-        <article className="rounded-ui border bg-surface p-3 text-sm">Learning thoughts: {stats.learning}</article>
-        <article className="rounded-ui border bg-surface p-3 text-sm">System thoughts: {stats.system}</article>
-      </Card>
-      <Card className="space-y-2">
-        <div className="max-h-[68vh] space-y-2 overflow-y-auto pr-1">
+      <div className="grid gap-3 md:grid-cols-3">
+        <article className="rounded-2xl border border-sky-500/30 bg-gradient-to-br from-sky-950/50 to-surface p-4 shadow-md">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-200/90">Chat</div>
+          <div className="mt-1 text-3xl font-bold tabular-nums text-text">{stats.chat}</div>
+          <p className="mt-1 text-xs text-muted">Turn-linked reasoning</p>
+        </article>
+        <article className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-950/45 to-surface p-4 shadow-md">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-purple-200/90">Learning</div>
+          <div className="mt-1 text-3xl font-bold tabular-nums text-text">{stats.learning}</div>
+          <p className="mt-1 text-xs text-muted">Idle cycles & proposals</p>
+        </article>
+        <article className="rounded-2xl border border-slate-500/30 bg-gradient-to-br from-slate-900/60 to-surface p-4 shadow-md">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-200/90">System</div>
+          <div className="mt-1 text-3xl font-bold tabular-nums text-text">{stats.system}</div>
+          <p className="mt-1 text-xs text-muted">Daemon & bridges</p>
+        </article>
+      </div>
+      <Card className="border-white/10 bg-surface/80 p-3 backdrop-blur-sm">
+        <div className="max-h-[68vh] space-y-3 overflow-y-auto pr-1">
           {items.length === 0 ? <p className="text-sm text-muted">No thoughts yet.</p> : null}
           {items.map((item) => (
             <article
               key={item.id}
               className={cn(
-                "rounded-ui border bg-surface p-3 shadow-sm",
-                item.category === "chat" && "border-l-4 border-l-blue-500/70",
-                item.category === "learning" && "border-l-4 border-l-purple-500/70",
-                item.category === "system" && "border-l-4 border-l-slate-500/70"
+                "overflow-hidden rounded-2xl border bg-gradient-to-br to-surface p-4 shadow-md transition hover:brightness-[1.03]",
+                item.category === "chat" && "border-sky-500/35 from-sky-950/30 ring-1 ring-sky-500/10",
+                item.category === "learning" && "border-purple-500/35 from-purple-950/30 ring-1 ring-purple-500/10",
+                item.category === "system" && "border-slate-500/35 from-slate-900/40 ring-1 ring-slate-500/10"
               )}
             >
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -106,14 +118,20 @@ export default function ThoughtsPage() {
                 </time>
               </div>
               <h3 className="text-[15px] font-semibold leading-snug text-text">{item.title}</h3>
-              <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-text">{item.content}</p>
-              {item.metadata !== undefined && item.metadata !== null ? <ThoughtMetadataDetails metadata={item.metadata} /> : null}
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted">{item.content}</p>
+              {hasThoughtMetadata(item.metadata) ? <ThoughtMetadataDetails metadata={item.metadata} /> : null}
             </article>
           ))}
         </div>
       </Card>
     </div>
   );
+}
+
+function hasThoughtMetadata(metadata: unknown): boolean {
+  if (metadata === undefined || metadata === null) return false;
+  if (typeof metadata === "object" && !Array.isArray(metadata) && Object.keys(metadata as object).length === 0) return false;
+  return true;
 }
 
 function dedupeById(items: ThoughtItem[]): ThoughtItem[] {

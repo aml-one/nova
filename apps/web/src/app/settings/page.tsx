@@ -24,6 +24,7 @@ import {
   labelForSkillBadgeState,
   type SkillBadgeState
 } from "../../lib/skill-badge";
+import { VoiceWakeWordPanel, OrpheusTtsPreviewCard } from "../../components/voice-settings-panel";
 
 type HealthCheck = { id: string; name: string; level: "green" | "orange" | "red"; detail: string; lastSuccessfulAt?: string };
 type FullHealth = { level: "green" | "orange" | "red"; checks: HealthCheck[] };
@@ -448,6 +449,23 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (loading) return;
+    const raw = typeof window !== "undefined" ? window.location.search : "";
+    const q = new URLSearchParams(raw).get("tab");
+    if (!q) return;
+    const staticTabs = ["general", "models", "identity", "channels", "learning", "voice", "backup", "updates"];
+    if (staticTabs.includes(q)) {
+      setTab(q);
+      return;
+    }
+    if (q.startsWith("skill:")) {
+      const sid = q.slice("skill:".length);
+      const ok = skillManifests.some((item) => (item.settingsTab?.id ?? item.id) === sid);
+      if (ok) setTab(q);
+    }
+  }, [loading, skillManifests]);
+
+  useEffect(() => {
+    if (loading) return;
     const serialized = JSON.stringify(settings.web.chatStyle);
     if (!lastSavedChatStyleRef.current) {
       lastSavedChatStyleRef.current = serialized;
@@ -620,7 +638,7 @@ export default function SettingsPage() {
         return;
       }
       setSentiCoreMissingFile(false);
-      setStatus("SentiCore orchestration file saved.");
+      setStatus("Orchestration markdown saved.");
       setSentiCoreModalOpen(false);
     } catch {
       setSentiCoreModalError("Could not save file (network error).");
@@ -919,6 +937,7 @@ export default function SettingsPage() {
     { id: "identity", label: "Identity", tone: "pink" as const },
     { id: "channels", label: "Channels", tone: "orange" as const },
     { id: "learning", label: "Memory & cores", tone: "green" as const },
+    { id: "voice", label: "Voice", tone: "purple" as const },
     { id: "backup", label: "Backup", tone: "pink" as const },
     { id: "updates", label: "Updates", tone: "yellow" as const }
   ].concat(
@@ -1924,13 +1943,18 @@ export default function SettingsPage() {
             </div>
             <div className="rounded-ui border bg-surface p-3 space-y-3">
               <div>
-                <h3 className="text-sm font-semibold">SOUL.md · SentiCore orchestration</h3>
+                <h3 className="text-sm font-semibold">Orchestration markdown (SOUL-style identity)</h3>
                 <p className="text-xs text-muted">
-                  Markdown lives <strong>on the agent-core host</strong> (often <code className="text-[11px]">SOUL.md</code> beside your{" "}
+                  Point this to a <strong>markdown file on the agent-core host</strong> that describes who Nova chooses to be — your continuity document, not a third-party setup guide.
+                  Inspiration:{" "}
+                  <a className="underline" href="https://soul.md/" rel="noreferrer" target="_blank">
+                    soul.md
+                  </a>
+                  . Technically Nova appends this file after base persona/memory; it pairs well with{" "}
                   <a className="underline" href="https://github.com/chuchuyei/SentiCore" rel="noreferrer" target="_blank">
                     SentiCore
                   </a>{" "}
-                  checkout). When enabled, Nova injects it into the cognitive core after memory blocks. Edit it here without leaving Settings.
+                  prompts when that content lives in your own <code className="text-[11px]">SOUL.md</code>.
                 </p>
               </div>
               <label className="flex items-center gap-2 text-sm">
@@ -1938,23 +1962,23 @@ export default function SettingsPage() {
                   checked={settings.sentiCore.enabled}
                   onChange={(e) => setSettings((p) => ({ ...p, sentiCore: { ...p.sentiCore, enabled: e.target.checked } }))}
                 />
-                Enable SOUL / SentiCore orchestration in prompts
+                Inject orchestration markdown into cognitive prompts
               </label>
               <label className="grid gap-1 text-xs">
-                Path on agent host (absolute or <code className="text-[11px]">~/…</code>)
+                Absolute path on agent host (your authored SOUL-style file)
                 <Input
                   value={settings.sentiCore.orchestrationMarkdownPath}
                   onChange={(e) =>
                     setSettings((p) => ({ ...p, sentiCore: { ...p.sentiCore, orchestrationMarkdownPath: e.target.value } }))
                   }
-                  placeholder="~/nova-deps/SentiCore/SOUL.md"
+                  placeholder="/Users/you/nova/config/SOUL.md"
                 />
               </label>
               <p className="text-[11px] text-muted">
-                After changing the path, click <strong>Save Settings</strong> at the top before opening the editor (the agent reads the saved path).
+                After changing the path, click <strong>Save Settings</strong> at the top before opening the editor (the agent reads the saved path). Avoid aiming this at unrelated docs (e.g. upstream READMEs).
               </p>
               <Button type="button" tone="orange" className="text-sm font-semibold" onClick={() => void openSentiCoreEditor()}>
-                Edit orchestration markdown…
+                Edit SOUL-style markdown…
               </Button>
             </div>
             <div className="rounded-ui border bg-surface p-3">
@@ -2132,11 +2156,21 @@ export default function SettingsPage() {
             </div>
             <p className="text-xs text-muted">Lower values run learning more often. Auto-improvement triggers only when recent failure count reaches the threshold.</p>
             <label className="flex items-center gap-2"><Checkbox checked={settings.emotions.enabled} onChange={(e) => setSettings((p) => ({ ...p, emotions: { ...p.emotions, enabled: e.target.checked } }))} /> Enable emotion core</label>
-            <Select value={settings.emotions.expressionStyle} onChange={(e) => setSettings((p) => ({ ...p, emotions: { ...p.emotions, expressionStyle: e.target.value as SettingsState["emotions"]["expressionStyle"] } }))}>
-              <option value="subtle">Subtle</option>
-              <option value="balanced">Balanced</option>
-              <option value="expressive">Expressive</option>
-            </Select>
+            {settings.emotions.enabled ? (
+              <label className="grid gap-1 text-xs">
+                Emotional expression intensity
+                <Select value={settings.emotions.expressionStyle} onChange={(e) => setSettings((p) => ({ ...p, emotions: { ...p.emotions, expressionStyle: e.target.value as SettingsState["emotions"]["expressionStyle"] } }))}>
+                  <option value="subtle">Subtle</option>
+                  <option value="balanced">Balanced</option>
+                  <option value="expressive">Expressive</option>
+                </Select>
+                <span className="text-[11px] text-muted">
+                  Applied by agent-core in mood overlays (how strongly tone cues surface in prompts). Subtle is quieter; expressive is more vivid.
+                </span>
+              </label>
+            ) : (
+              <p className="text-[11px] text-muted">Turn on emotion core to adjust expression intensity.</p>
+            )}
             <label className="flex items-center gap-2">
               <Checkbox
                 checked={settings.emotions.mirrorUserValence}
@@ -2145,78 +2179,8 @@ export default function SettingsPage() {
               Mirror user valence from phrasing
             </label>
             <p className="text-xs text-muted">
-              SOUL / SentiCore orchestration: configure path under <strong>Settings → Identity</strong>, then use <strong>Edit orchestration markdown…</strong> to edit the file on the agent host.
+              Orchestration markdown / SOUL-style identity: configure under <strong>Settings → Identity</strong>, then <strong>Edit SOUL-style markdown…</strong> on the agent host file you chose (your narrative manifesto, not an unrelated install guide).
             </p>
-            <div className="mt-4 border-t border-border pt-3 space-y-2">
-              <h3 className="text-sm font-semibold">Orpheus TTS (optional)</h3>
-              <p className="text-xs text-muted">
-                <a className="underline" href="https://github.com/Lex-au/Orpheus-FastAPI" rel="noreferrer" target="_blank">
-                  Orpheus-FastAPI
-                </a>{" "}
-                exposes OpenAI-compatible <code className="text-xs">POST /v1/audio/speech</code>. Enables speakable phrasing in chat and audio preview on the Voice page.
-              </p>
-              <label className="flex items-center gap-2">
-                <Checkbox
-                  checked={settings.orpheusTts.enabled}
-                  onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, enabled: e.target.checked } }))}
-                />
-                Enable Orpheus HTTP TTS
-              </label>
-              <label className="grid gap-1 text-xs">
-                Base URL (e.g. http://127.0.0.1:5005)
-                <Input
-                  value={settings.orpheusTts.baseUrl}
-                  onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, baseUrl: e.target.value } }))}
-                  placeholder="http://127.0.0.1:5005"
-                />
-              </label>
-              <label className="grid gap-1 text-xs">
-                API key (optional)
-                <Input
-                  type="password"
-                  autoComplete="off"
-                  value={settings.orpheusTts.apiKey}
-                  onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, apiKey: e.target.value } }))}
-                  placeholder="Bearer if required"
-                />
-              </label>
-              <div className="grid gap-2 md:grid-cols-2">
-                <label className="grid gap-1 text-xs">
-                  Voice id
-                  <Input
-                    value={settings.orpheusTts.voice}
-                    onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, voice: e.target.value } }))}
-                    placeholder="upstream default / speaker id"
-                  />
-                </label>
-                <label className="grid gap-1 text-xs">
-                  Model (optional)
-                  <Input
-                    value={settings.orpheusTts.model}
-                    onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, model: e.target.value } }))}
-                    placeholder="tts-1 or omit"
-                  />
-                </label>
-              </div>
-              <label className="grid gap-1 text-xs">
-                Response format
-                <Select
-                  value={settings.orpheusTts.responseFormat}
-                  onChange={(e) =>
-                    setSettings((p) => ({
-                      ...p,
-                      orpheusTts: { ...p.orpheusTts, responseFormat: e.target.value as SettingsState["orpheusTts"]["responseFormat"] }
-                    }))
-                  }
-                >
-                  <option value="wav">wav (fastest start in browser)</option>
-                  <option value="opus">opus</option>
-                  <option value="pcm">pcm</option>
-                  <option value="mp3">mp3</option>
-                  <option value="flac">flac</option>
-                </Select>
-              </label>
-            </div>
             <div className="mt-4 border-t border-border pt-3 space-y-2">
               <h3 className="text-sm font-semibold">MemoryBear (optional)</h3>
               <p className="text-xs text-muted">
@@ -2292,6 +2256,91 @@ export default function SettingsPage() {
                 Sync each chat turn to MemoryBear after reply (write/sync)
               </label>
             </div>
+          </Card>
+        ) : null}
+
+        {tab === "voice" ? (
+          <Card className="space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold">Voice & speech</h2>
+              <p className="text-xs text-muted">
+                Wake-word tooling and Orpheus HTTP TTS for chat read-aloud. Previously opened from the sidebar; everything lives here now (
+                <code className="text-[11px]">/settings?tab=voice</code>
+                ).
+              </p>
+            </div>
+            <VoiceWakeWordPanel />
+            <div className="rounded-ui border border-border bg-surface/80 p-3 space-y-3">
+              <h3 className="text-sm font-semibold">Orpheus TTS (optional)</h3>
+              <p className="text-xs text-muted">
+                <a className="underline" href="https://github.com/Lex-au/Orpheus-FastAPI" rel="noreferrer" target="_blank">
+                  Orpheus-FastAPI
+                </a>{" "}
+                exposes <code className="text-xs">POST /v1/audio/speech</code>. Agent-core proxies synthesis for the web UI.
+              </p>
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={settings.orpheusTts.enabled}
+                  onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, enabled: e.target.checked } }))}
+                />
+                Enable Orpheus HTTP TTS
+              </label>
+              <label className="grid gap-1 text-xs">
+                Base URL (e.g. http://127.0.0.1:5005)
+                <Input
+                  value={settings.orpheusTts.baseUrl}
+                  onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, baseUrl: e.target.value } }))}
+                  placeholder="http://127.0.0.1:5005"
+                />
+              </label>
+              <label className="grid gap-1 text-xs">
+                API key (optional)
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  value={settings.orpheusTts.apiKey}
+                  onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, apiKey: e.target.value } }))}
+                  placeholder="Bearer if required"
+                />
+              </label>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="grid gap-1 text-xs">
+                  Voice id
+                  <Input
+                    value={settings.orpheusTts.voice}
+                    onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, voice: e.target.value } }))}
+                    placeholder="upstream default / speaker id"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs">
+                  Model (optional)
+                  <Input
+                    value={settings.orpheusTts.model}
+                    onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, model: e.target.value } }))}
+                    placeholder="tts-1 or omit"
+                  />
+                </label>
+              </div>
+              <label className="grid gap-1 text-xs">
+                Response format
+                <Select
+                  value={settings.orpheusTts.responseFormat}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      orpheusTts: { ...p.orpheusTts, responseFormat: e.target.value as SettingsState["orpheusTts"]["responseFormat"] }
+                    }))
+                  }
+                >
+                  <option value="wav">wav (fastest start in browser)</option>
+                  <option value="opus">opus</option>
+                  <option value="pcm">pcm</option>
+                  <option value="mp3">mp3</option>
+                  <option value="flac">flac</option>
+                </Select>
+              </label>
+            </div>
+            <OrpheusTtsPreviewCard />
           </Card>
         ) : null}
 
@@ -2783,7 +2832,7 @@ export default function SettingsPage() {
             <Card className="flex max-h-[90vh] w-full flex-col gap-3 overflow-hidden p-4 shadow-xl">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 id="senti-core-editor-title" className="text-base font-semibold">
-                Edit SentiCore orchestration
+                Edit orchestration markdown (SOUL-style)
               </h3>
               <div className="flex flex-wrap gap-2">
                 <Button type="button" tone="neutral" onClick={() => setSentiCoreModalOpen(false)}>
