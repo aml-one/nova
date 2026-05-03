@@ -2,7 +2,7 @@
 "use client";
 
 import type { RefObject } from "react";
-import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import {
   FaCheck,
@@ -135,9 +135,9 @@ function rememberChatTtsBlob(
 }
 
 /** 3D-style energy orb while TTS audio is actually playing (transparent background). */
-function NovaSpeakingEntity() {
+const NovaSpeakingEntity = forwardRef<HTMLDivElement>(function NovaSpeakingEntity(_, ref) {
   return (
-    <div className="nova-speaking-entity" aria-hidden>
+    <div ref={ref} className="nova-speaking-entity" aria-hidden>
       <div className="nova-speaking-entity__halo" />
       <div className="nova-speaking-entity__ribbon nova-speaking-entity__ribbon--a" />
       <div className="nova-speaking-entity__ribbon nova-speaking-entity__ribbon--b" />
@@ -145,7 +145,8 @@ function NovaSpeakingEntity() {
       <div className="nova-speaking-entity__void" />
     </div>
   );
-}
+});
+NovaSpeakingEntity.displayName = "NovaSpeakingEntity";
 
 function getMicCapabilityError(): string | null {
   if (typeof window === "undefined") return null;
@@ -475,6 +476,15 @@ export default function HomePage() {
   const [sttError, setSttError] = useState<string | null>(null);
   const [sttCapabilityError, setSttCapabilityError] = useState<string | null>(null);
   const chatTtsAudioRef = useRef<HTMLAudioElement | null>(null);
+  /** Outer wrapper: scale pulse from voice amplitude. */
+  const novaTtsOrbMeterRef = useRef<HTMLDivElement | null>(null);
+  /** Root `.nova-speaking-entity`: wobble speed from voice amplitude. */
+  const novaSpeakingOrbRootRef = useRef<HTMLDivElement | null>(null);
+  const chatTtsAudioContextRef = useRef<AudioContext | null>(null);
+  const chatTtsMediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const chatTtsAnalyserRef = useRef<AnalyserNode | null>(null);
+  const chatTtsOrbRafRef = useRef<number | null>(null);
+  const novaOrbMeterSmoothedRef = useRef(0);
   const chatTtsObjectUrlRef = useRef<string | null>(null);
   const chatTtsFetchAbortRef = useRef<AbortController | null>(null);
   const chatSttRecorderRef = useRef<MediaRecorder | null>(null);
@@ -868,7 +878,133 @@ export default function HomePage() {
     }
   }, []);
 
+  const detachTtsOrbAnalyser = useCallback(() => {
+    if (chatTtsOrbRafRef.current != null) {
+      cancelAnimationFrame(chatTtsOrbRafRef.current);
+      chatTtsOrbRafRef.current = null;
+    }
+    novaOrbMeterSmoothedRef.current = 0;
+    const meter = novaTtsOrbMeterRef.current;
+    const orb = novaSpeakingOrbRootRef.current;
+    if (meter) {
+      meter.style.removeProperty("transform");
+    }
+    if (orb) {
+      orb.style.removeProperty("animation-duration");
+    }
+  }, []);
+
+  const teardownChatTtsWebAudio = useCallback(() => {
+    detachTtsOrbAnalyser();
+    try {
+      chatTtsAnalyserRef.current?.disconnect();
+    } catch {
+      // Ignore disconnect failures.
+    }
+    chatTtsAnalyserRef.current = null;
+    try {
+      chatTtsMediaSourceRef.current?.disconnect();
+    } catch {
+      // Ignore disconnect failures.
+    }
+    chatTtsMediaSourceRef.current = null;
+    void chatTtsAudioContextRef.current?.close().catch(() => {
+      // Ignore close failures.
+    });
+    chatTtsAudioContextRef.current = null;
+  }, [detachTtsOrbAnalyser]);
+
+  const teardownChatTtsWebAudioRef = useRef(teardownChatTtsWebAudio);
+  teardownChatTtsWebAudioRef.current = teardownChatTtsWebAudio;
+
+  const attachTtsVoiceOrbDriver = useCallback(
+    (el: HTMLAudioElement) => {
+      detachTtsOrbAnalyser();
+      const meter = novaTtsOrbMeterRef.current;
+      const orb = novaSpeakingOrbRootRef.current;
+      if (!meter || !orb) {
+        return;
+      }
+
+      const win = typeof window !== "undefined" ? window : undefined;
+      const AudioCtx = win?.AudioContext ?? (win as unknown as { webkitAudioContext?: typeof AudioContext } | undefined)?.webkitAudioContext;
+      if (!AudioCtx) {
+        return;
+      }
+
+      const timeDomainBufRef = { current: new Float32Array(0) };
+
+      const tick = () => {
+        const analyser = chatTtsAnalyserRef.current;
+        const m = novaTtsOrbMeterRef.current;
+        const o = novaSpeakingOrbRootRef.current;
+        if (!analyser || !m || !o) {
+          return;
+        }
+        if (el.paused || el.ended) {
+          return;
+        }
+
+        const n = analyser.fftSize;
+        let buf = timeDomainBufRef.current;
+        if (buf.length !== n) {
+          buf = new Float32Array(n);
+          timeDomainBufRef.current = buf;
+        }
+        analyser.getFloatTimeDomainData(buf);
+        let sumSq = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = buf[i] ?? 0;
+          sumSq += v * v;
+        }
+        const rms = Math.sqrt(sumSq / Math.max(1, buf.length));
+        const alpha = 0.28;
+        novaOrbMeterSmoothedRef.current =
+          alpha * rms + (1 - alpha) * novaOrbMeterSmoothedRef.current;
+        const s = Math.min(0.55, Math.max(0, novaOrbMeterSmoothedRef.current));
+        const scale = 1 + s * 0.42;
+        m.style.transform = `scale(${scale.toFixed(4)})`;
+        const wobbleSec = Math.max(2.4, 6.4 - s * 7.5);
+        o.style.animationDuration = `${wobbleSec.toFixed(2)}s`;
+
+        chatTtsOrbRafRef.current = requestAnimationFrame(tick);
+      };
+
+      try {
+        let ctx = chatTtsAudioContextRef.current;
+        if (!ctx) {
+          ctx = new AudioCtx();
+          chatTtsAudioContextRef.current = ctx;
+        }
+        void ctx.resume().catch(() => {
+          // Browser may block until gesture; playback already started.
+        });
+
+        let analyser = chatTtsAnalyserRef.current;
+        if (!analyser) {
+          analyser = ctx.createAnalyser();
+          analyser.fftSize = 1024;
+          analyser.smoothingTimeConstant = 0.72;
+          chatTtsAnalyserRef.current = analyser;
+        }
+
+        if (!chatTtsMediaSourceRef.current) {
+          const src = ctx.createMediaElementSource(el);
+          chatTtsMediaSourceRef.current = src;
+          src.connect(analyser);
+          analyser.connect(ctx.destination);
+        }
+      } catch {
+        return;
+      }
+
+      chatTtsOrbRafRef.current = requestAnimationFrame(tick);
+    },
+    [detachTtsOrbAnalyser]
+  );
+
   const stopChatTtsPlayback = useCallback((opts?: { naturalTtsEnd?: boolean }) => {
+    detachTtsOrbAnalyser();
     chatTtsFetchAbortRef.current?.abort();
     chatTtsFetchAbortRef.current = null;
     const el = chatTtsAudioRef.current;
@@ -894,7 +1030,7 @@ export default function HomePage() {
         void startMicTranscriptionRef.current?.();
       }, 450);
     }
-  }, []);
+  }, [detachTtsOrbAnalyser]);
 
   const persistSendOnEnter = useCallback(async (next: boolean) => {
     setSendOnEnter(next);
@@ -1009,6 +1145,13 @@ export default function HomePage() {
 
   useEffect(() => () => stopChatTtsPlayback(), [stopChatTtsPlayback]);
 
+  useEffect(
+    () => () => {
+      teardownChatTtsWebAudioRef.current();
+    },
+    []
+  );
+
   useEffect(() => {
     setSttCapabilityError(getMicCapabilityError());
   }, []);
@@ -1059,7 +1202,10 @@ export default function HomePage() {
         }
         el.src = url;
         setTtsPlayingTurnId(turnId);
-        el.onplaying = () => setTtsPlaybackActive(true);
+        el.onplaying = () => {
+          setTtsPlaybackActive(true);
+          attachTtsVoiceOrbDriver(el);
+        };
         el.onended = () => {
           stopChatTtsPlayback({ naturalTtsEnd: true });
         };
@@ -1088,7 +1234,10 @@ export default function HomePage() {
           setTtsGeneratingTurnId(null);
           return;
         }
-        el.onplaying = () => setTtsPlaybackActive(true);
+        el.onplaying = () => {
+          setTtsPlaybackActive(true);
+          attachTtsVoiceOrbDriver(el);
+        };
         el.onended = () => {
           stopChatTtsPlayback({ naturalTtsEnd: true });
         };
@@ -1117,7 +1266,7 @@ export default function HomePage() {
         }
       }
     },
-    [stopChatTtsPlayback]
+    [stopChatTtsPlayback, attachTtsVoiceOrbDriver]
   );
 
   const downloadChatTtsForTurn = useCallback(async (turnId: string, rawText: string): Promise<void> => {
@@ -2273,9 +2422,9 @@ export default function HomePage() {
             </div>
           ) : null}
           {ttsPlaybackActive && ttsPlayingTurnId !== null ? (
-            <div className="pointer-events-none flex justify-end px-6">
-              <div className="mb-[35px]">
-                <NovaSpeakingEntity />
+            <div className="pointer-events-none flex justify-end px-6 pb-5 pr-[calc(1.5rem+20px)]">
+              <div className="mb-[calc(35px+20px)] origin-center will-change-transform" ref={novaTtsOrbMeterRef}>
+                <NovaSpeakingEntity ref={novaSpeakingOrbRootRef} />
               </div>
             </div>
           ) : null}
