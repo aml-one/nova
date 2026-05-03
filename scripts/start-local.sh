@@ -20,19 +20,48 @@ https_enabled() {
 AGENT_PID=""
 WEB_PID=""
 
+# Kill a PID and its descendants (pnpm → tsx/node often leaves children holding ports).
+kill_tree() {
+  local pid="$1"
+  [[ -z "${pid}" ]] && return 0
+  local child
+  for child in $(pgrep -P "${pid}" 2>/dev/null || true); do
+    kill_tree "${child}"
+  done
+  kill "${pid}" 2>/dev/null || true
+}
+
 cleanup() {
-  if [[ -n "${AGENT_PID}" ]] && kill -0 "${AGENT_PID}" 2>/dev/null; then
-    kill "${AGENT_PID}" 2>/dev/null || true
+  kill_tree "${AGENT_PID}"
+  kill_tree "${WEB_PID}"
+}
+
+# Optional: before starting, free default dev ports (macOS/Linux). Set NOVA_LOCAL_FREE_PORTS=1.
+free_tcp_port_if_requested() {
+  case "${NOVA_LOCAL_FREE_PORTS:-}" in
+    [Tt][Rr][Uu][Ee] | 1 | [Yy][Ee][Ss]) ;;
+    *) return 0 ;;
+  esac
+  if ! command -v lsof >/dev/null 2>&1; then
+    echo "NOVA_LOCAL_FREE_PORTS is set but lsof was not found; skipping port cleanup."
+    return 0
   fi
-  if [[ -n "${WEB_PID}" ]] && kill -0 "${WEB_PID}" 2>/dev/null; then
-    kill "${WEB_PID}" 2>/dev/null || true
-  fi
+  local port pids
+  for port in 8787 "${WEB_PORT}"; do
+    pids="$(lsof -ti tcp:"${port}" 2>/dev/null || true)"
+    if [[ -n "${pids}" ]]; then
+      echo "NOVA_LOCAL_FREE_PORTS: freeing TCP ${port} (PIDs: ${pids})"
+      kill ${pids} 2>/dev/null || true
+    fi
+  done
+  sleep 1
 }
 
 trap 'echo "Stopping Nova local stack..."; cleanup; exit 0' INT TERM
 
 echo "Starting Nova local stack supervisor..."
 echo "This script now auto-restarts services after update-triggered exits."
+echo "Tip: if agent-core fails with EADDRINUSE on 8787, another Nova (or stale tsx) is still running, or use NOVA_LOCAL_FREE_PORTS=1 once to clear 8787 and the web port."
 
 if https_enabled; then
   mkdir -p "$(dirname "${HTTPS_CERT_PATH}")"
@@ -62,6 +91,8 @@ while true; do
     echo "Cleared apps/web/.next after in-app update (avoids stale Next dev chunks)."
   fi
 
+  free_tcp_port_if_requested
+
   echo "Launching agent-core and web..."
   (
     cd "${ROOT_DIR}"
@@ -69,17 +100,20 @@ while true; do
   ) &
   AGENT_PID=$!
 
+  # Do not use `pnpm run dev -- ...`: pnpm forwards `--` to the script, and Next.js
+  # treats everything after `--` as positional args, so `--hostname` is misread as [directory].
   (
-    cd "${ROOT_DIR}"
+    cd "${ROOT_DIR}/apps/web"
+    export PORT="${WEB_PORT}"
     if https_enabled; then
-      PORT="${WEB_PORT}" HOSTNAME="${WEB_HOST}" corepack pnpm --filter @nova/web dev -- \
-        --hostname "${WEB_HOST}" \
-        --port "${WEB_PORT}" \
+      corepack pnpm exec next dev \
+        -H "${WEB_HOST}" \
+        -p "${WEB_PORT}" \
         --experimental-https \
         --experimental-https-cert "${HTTPS_CERT_PATH}" \
         --experimental-https-key "${HTTPS_KEY_PATH}"
     else
-      PORT="${WEB_PORT}" HOSTNAME="${WEB_HOST}" corepack pnpm --filter @nova/web dev -- --hostname "${WEB_HOST}" --port "${WEB_PORT}"
+      corepack pnpm exec next dev -H "${WEB_HOST}" -p "${WEB_PORT}"
     fi
   ) &
   WEB_PID=$!
