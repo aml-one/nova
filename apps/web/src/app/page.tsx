@@ -22,7 +22,6 @@ import {
   FaChevronDown,
   FaArrowUp
 } from "react-icons/fa6";
-import { Card } from "../components/ui/card";
 import { Textarea } from "../components/ui/textarea";
 import { Select } from "../components/ui/select";
 import { Button } from "../components/ui/button";
@@ -1361,24 +1360,22 @@ export default function HomePage() {
   ]);
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col gap-4">
-      <Card className="flex h-full min-h-0 flex-1 flex-col overflow-hidden border-0 bg-transparent p-0 shadow-none">
-        <div
-          ref={chatScrollRef}
-          className="min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden rounded-2xl border border-slate-200/60 bg-surface p-3 dark:border-white/[0.08]"
-          onScroll={(event) => {
-            const target = event.currentTarget;
-            const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
-            const nearBottom = distanceFromBottom < 56;
-            setAutoScrollEnabled(nearBottom);
-          }}
-        >
+    <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+      <div
+        ref={chatScrollRef}
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+        onScroll={(event) => {
+          const target = event.currentTarget;
+          const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+          const nearBottom = distanceFromBottom < 120;
+          setAutoScrollEnabled(nearBottom);
+        }}
+      >
+        <div className="space-y-2 px-6 pb-80 pt-2 sm:px-7">
           {!chatStyleReady ? <div className="text-sm text-muted">Loading chat style…</div> : null}
           {chatStyleReady && turns.length === 0 ? (
-            <div className="flex min-h-[min(48vh,26rem)] flex-col items-center justify-center px-4 py-10 text-center">
-              <p className="text-lg font-normal tracking-tight text-slate-800 dark:text-slate-100">
-                What&apos;s on your mind today?
-              </p>
+            <div className="flex min-h-[min(48vh,26rem)] flex-col items-center justify-center py-10 text-center">
+              <p className="text-lg font-normal tracking-tight text-text">What&apos;s on your mind today?</p>
             </div>
           ) : null}
           {chatStyleReady && turns.map((turn, index) => (
@@ -1720,15 +1717,17 @@ export default function HomePage() {
             </article>
           ))}
         </div>
-        <audio ref={chatTtsAudioRef} className="hidden" playsInline preload="none" />
-        <form onSubmit={onSubmit} className="mx-auto mt-4 w-full max-w-3xl shrink-0 space-y-2 px-0 sm:px-1">
+      </div>
+      <audio ref={chatTtsAudioRef} className="hidden" playsInline preload="none" />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col bg-gradient-to-t from-surface from-60% via-surface/95 to-transparent pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-10">
+        <form onSubmit={onSubmit} className="pointer-events-auto flex w-full flex-col gap-2">
           {loading ? (
-            <div className="flex min-h-10 items-center justify-between gap-3 rounded-2xl border border-rose-500/50 bg-pastelRed/40 px-3 py-2 dark:bg-rose-950/35">
+            <div className="flex w-full min-h-9 items-center justify-between gap-3 border-t border-rose-500/50 bg-pastelRed/40 py-2 pl-6 pr-4 dark:bg-rose-950/35">
               <span className="min-w-0 text-sm font-medium text-slate-900 dark:text-slate-100">Nova is generating a reply…</span>
               <Button
                 type="button"
                 tone="red"
-                className="h-9 shrink-0 px-4 text-sm font-semibold"
+                className="h-8 shrink-0 px-3 text-sm font-semibold"
                 onClick={() => stopGeneration()}
                 title="Stop immediately"
               >
@@ -1738,9 +1737,10 @@ export default function HomePage() {
             </div>
           ) : null}
           {uploads.length ? (
-            <div className="rounded-2xl border border-slate-200/50 bg-surface2/80 p-2 dark:border-white/10">
-              <div className="mb-2 flex flex-wrap gap-2">
-                {uploads.map((item, idx) => {
+            <div className="px-6">
+              <div className="rounded-2xl border border-border bg-surface2/90 p-2">
+                <div className="mb-2 flex flex-wrap gap-2">
+                  {uploads.map((item, idx) => {
                   const previewUrl =
                     item.uploaded?.kind === "video"
                       ? (item.uploaded.posterUrl || item.uploaded.url)
@@ -1762,20 +1762,21 @@ export default function HomePage() {
                       ) : null}
                     </div>
                   );
-                })}
-              </div>
-              <div className="text-xs text-muted">
-                {uploads.some((item) => item.status === "failed")
-                  ? "Some files failed to upload. Remove and retry."
-                  : `${uploads.length} file${uploads.length > 1 ? "s" : ""} ready`}
+                  })}
+                </div>
+                <div className="text-xs text-muted">
+                  {uploads.some((item) => item.status === "failed")
+                    ? "Some files failed to upload. Remove and retry."
+                    : `${uploads.length} file${uploads.length > 1 ? "s" : ""} ready`}
+                </div>
               </div>
             </div>
           ) : null}
+          <div className="px-6">
           <div
             className={cn(
-              "flex min-h-[52px] w-full items-end gap-1 rounded-[28px] border border-slate-300/30 px-2 py-1.5 shadow-sm transition sm:gap-2 sm:px-3 sm:py-2",
-              "bg-slate-200/95 dark:border-transparent dark:bg-[#2f2f2f]",
-              dragging && "ring-2 ring-sky-500/50 ring-offset-2 ring-offset-surface dark:ring-offset-slate-900"
+              "flex w-full items-center gap-1.5 rounded-[22px] border border-border bg-surface2 px-2 py-1 shadow-sm transition sm:gap-2 sm:px-2.5",
+              dragging && "ring-2 ring-sky-500/45 ring-offset-2 ring-offset-surface"
             )}
             onDragOver={(event) => {
               event.preventDefault();
@@ -1805,11 +1806,11 @@ export default function HomePage() {
             />
             <button
               type="button"
-              className="mb-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-600 transition hover:bg-black/8 dark:text-slate-300 dark:hover:bg-white/10"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted transition hover:bg-black/6 dark:hover:bg-white/10"
               onClick={() => chatComposerFileInputRef.current?.click()}
               title="Add images or videos"
             >
-              <FaPlus className="h-4 w-4" />
+              <FaPlus className="h-3.5 w-3.5" />
             </button>
             <Textarea
               value={message}
@@ -1823,17 +1824,17 @@ export default function HomePage() {
                   }
                 }
               }}
-              rows={2}
+              rows={1}
               placeholder="Ask anything"
-              className="mb-0.5 min-h-[48px] max-h-[200px] flex-1 resize-none border-0 bg-transparent py-2.5 text-[15px] leading-snug text-slate-900 shadow-none ring-0 placeholder:text-slate-500 focus:ring-0 dark:text-slate-100 dark:placeholder:text-slate-500"
+              className="min-h-[36px] max-h-[180px] flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-snug text-text shadow-none ring-0 placeholder:text-muted focus:ring-0"
             />
-            <div className="mb-1 flex shrink-0 items-center gap-1 sm:gap-1.5">
+            <div className="flex h-8 shrink-0 items-center gap-1 sm:gap-1.5">
               <Link
                 href="/thoughts"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-violet-500 transition hover:bg-black/6 dark:text-violet-400 dark:hover:bg-white/8"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-violet-500 transition hover:bg-black/6 dark:text-violet-400 dark:hover:bg-white/8"
                 title="Open Live Thoughts"
               >
-                <FaBrain className="h-4 w-4" />
+                <FaBrain className="h-3.5 w-3.5" />
               </Link>
               {uploadedMedia.length > 0 ? (
                 <span className="hidden sm:inline">
@@ -1843,10 +1844,10 @@ export default function HomePage() {
               <button
                 type="button"
                 className={cn(
-                  "inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition",
+                  "inline-flex h-8 items-center gap-1 rounded-full px-2.5 text-xs font-medium transition",
                   sttRecording
-                    ? "bg-rose-500/25 text-rose-950 dark:bg-rose-500/30 dark:text-rose-50"
-                    : "bg-slate-300/80 text-slate-800 hover:bg-slate-300 dark:bg-white/12 dark:text-slate-100 dark:hover:bg-white/18",
+                    ? "bg-rose-500/20 text-rose-900 dark:bg-rose-500/25 dark:text-rose-50"
+                    : "bg-black/[0.06] text-text hover:bg-black/[0.09] dark:bg-white/10 dark:hover:bg-white/16",
                   (sttTranscribing || Boolean(sttCapabilityError)) && "cursor-not-allowed opacity-55"
                 )}
                 onClick={() => {
@@ -1873,21 +1874,22 @@ export default function HomePage() {
                 disabled={loading || !message.trim()}
                 title="Send message"
                 className={cn(
-                  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition",
+                  "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition",
                   !loading && message.trim().length > 0
                     ? "bg-slate-900 text-white shadow-sm hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
-                    : "cursor-not-allowed bg-slate-300/55 text-slate-500 dark:bg-white/8 dark:text-slate-500"
+                    : "cursor-not-allowed bg-border/50 text-muted dark:bg-white/10 dark:text-slate-500"
                 )}
               >
-                <FaArrowUp className="h-4 w-4" />
+                <FaArrowUp className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
+          </div>
           {sttError || sttCapabilityError ? (
-            <div className="px-1 text-center text-xs text-rose-400">{sttError ?? sttCapabilityError}</div>
+            <div className="px-6 text-center text-xs text-rose-400">{sttError ?? sttCapabilityError}</div>
           ) : null}
-          <p className="px-2 text-center text-[11px] text-muted">Drop images or videos onto the bar. Shift+Enter for a new line.</p>
-          <details className="rounded-xl border border-slate-200/60 bg-surface2/50 px-2 py-1.5 text-xs dark:border-white/10">
+          <p className="px-6 text-center text-[11px] text-muted">Drop images or videos onto the bar. Shift+Enter for a new line.</p>
+          <details className="mx-6 rounded-xl border border-border bg-surface2/80 px-2 py-1.5 text-xs">
             <summary className="cursor-pointer select-none text-muted">Chat options</summary>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
               <label className="flex items-center gap-1 text-xs text-muted">
@@ -1943,7 +1945,7 @@ export default function HomePage() {
             </div>
           </details>
         </form>
-      </Card>
+      </div>
       {lightbox ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
           <div className="max-h-[92vh] w-full max-w-5xl rounded-ui border bg-surface p-3">

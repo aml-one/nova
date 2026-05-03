@@ -103,8 +103,20 @@ function AppMainColumn({ children }: { children: ReactNode }) {
           </div>
         </div>
       </header>
-      <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-6">{children}</main>
-      <footer className="shrink-0 px-4 pb-4 text-[11px] text-muted" />
+      <main
+        className={cn(
+          "flex min-h-0 flex-1 flex-col",
+          pathname === "/" ? "min-h-0 overflow-hidden px-0 py-0" : "overflow-y-auto px-4 py-6"
+        )}
+      >
+        {children}
+      </main>
+      <footer
+        className={cn(
+          "shrink-0 text-[11px] text-muted",
+          pathname === "/" ? "hidden" : "px-4 pb-4"
+        )}
+      />
     </>
   );
 }
