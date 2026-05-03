@@ -1507,10 +1507,10 @@ export default function HomePage() {
               event.error === "disconnected";
             if (tryServerStt) {
               void (async () => {
-                const ok = await refreshSttServerConfigured(false);
+                const ok = await refreshSttServerConfigured(true);
                 if (!ok) {
                   setSttError(
-                    "Browser speech service failed (network). Server dictation is not configured on the agent — set OPENAI_API_KEY or NOVA_STT_COMMAND — or use a stable connection."
+                    "Browser speech failed (network). The agent this page talks to still reports no server STT (OPENAI_API_KEY or NOVA_STT_COMMAND), or the check could not reach it. Reload the page after fixing the agent; on LAN set NOVA_AGENT_API_URL for the web server to the Mac that runs agent-core. Otherwise fix Wi‑Fi / VPN."
                   );
                   return;
                 }
@@ -1565,9 +1565,9 @@ export default function HomePage() {
         }
       }
 
-      const serverOk = await refreshSttServerConfigured(false);
+      const serverOk = await refreshSttServerConfigured(true);
       if (!serverOk) {
-        setSttError(NOVA_CHAT_STT_SERVER_HINT);
+        setSttError(`${NOVA_CHAT_STT_SERVER_HINT} Reload after configuring the agent.`);
         return;
       }
       await startMediaRecorderTranscription();
