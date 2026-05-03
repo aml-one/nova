@@ -274,7 +274,7 @@ function ChatSessionHeaderControls({
     <>
       <div className="relative min-w-0 max-w-[min(20rem,calc(100vw-11rem))] flex-[1_1_10rem]">
         <Select
-          className="h-7 w-full appearance-none rounded-lg border border-border bg-surface2 py-0 pl-2 pr-8 text-xs leading-snug text-text dark:bg-white/[0.06]"
+          className="min-h-9 w-full appearance-none rounded-lg border border-border bg-surface2 py-2 pl-2.5 pr-9 text-xs leading-normal text-text shadow-none ring-0 focus:outline-none focus:ring-0 dark:bg-white/[0.06]"
           value={activeSessionId}
           onChange={(event) => onSessionChange(event.target.value)}
         >
@@ -285,7 +285,7 @@ function ChatSessionHeaderControls({
           ))}
         </Select>
         <FaChevronDown
-          className="pointer-events-none absolute right-2 top-1/2 h-2.5 w-2.5 -translate-y-1/2 text-muted"
+          className="pointer-events-none absolute right-2.5 top-1/2 h-2.5 w-2.5 -translate-y-1/2 text-muted"
           aria-hidden
         />
       </div>
