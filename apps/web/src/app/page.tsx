@@ -98,6 +98,39 @@ function stripMarkdownForTts(raw: string): string {
   return visible.slice(0, 8000);
 }
 
+/** Max distinct synthesized clips kept in memory per chat session (replay without calling speak-audio again). */
+const MAX_SESSION_TTS_AUDIO_CACHE = 10;
+
+function chatTtsCacheKey(turnId: string, cleaned: string): string {
+  return `${turnId}\u0000${cleaned}`;
+}
+
+function touchChatTtsCacheOrder(order: string[], key: string): void {
+  const i = order.indexOf(key);
+  if (i >= 0) {
+    order.splice(i, 1);
+    order.push(key);
+  }
+}
+
+function rememberChatTtsBlob(
+  map: Map<string, { blob: Blob; mime: string }>,
+  order: string[],
+  key: string,
+  value: { blob: Blob; mime: string }
+): void {
+  if (map.has(key)) {
+    const i = order.indexOf(key);
+    if (i >= 0) order.splice(i, 1);
+  }
+  map.set(key, value);
+  order.push(key);
+  while (order.length > MAX_SESSION_TTS_AUDIO_CACHE) {
+    const oldest = order.shift();
+    if (oldest) map.delete(oldest);
+  }
+}
+
 export default function HomePage() {
   const { resolvedTheme } = useTheme();
   const [message, setMessage] = useState("");
@@ -148,8 +181,9 @@ export default function HomePage() {
   const chatTtsAudioRef = useRef<HTMLAudioElement | null>(null);
   const chatTtsObjectUrlRef = useRef<string | null>(null);
   const chatTtsFetchAbortRef = useRef<AbortController | null>(null);
-  /** Last synthesized clip per turn (same payload as speak-audio) for download without re-fetch when possible. */
+  /** Session-scoped clips: key = turnId + normalized TTS text (evicted after MAX_SESSION_TTS_AUDIO_CACHE). */
   const chatTtsBlobCacheRef = useRef<Map<string, { blob: Blob; mime: string }>>(new Map());
+  const chatTtsCacheOrderRef = useRef<string[]>([]);
   const [streamPhase, setStreamPhase] = useState<StreamPhase>("thinking");
   const webSearchDepthRef = useRef(0);
   const lastStreamRawRef = useRef("");
@@ -484,6 +518,7 @@ export default function HomePage() {
   useEffect(() => {
     stopChatTtsPlayback();
     chatTtsBlobCacheRef.current.clear();
+    chatTtsCacheOrderRef.current.length = 0;
   }, [activeSessionId, stopChatTtsPlayback]);
 
   const playChatTts = useCallback(
@@ -492,7 +527,32 @@ export default function HomePage() {
       if (!cleaned.trim()) {
         return;
       }
+      const key = chatTtsCacheKey(turnId, cleaned);
+      const map = chatTtsBlobCacheRef.current;
+      const order = chatTtsCacheOrderRef.current;
+      const cached = map.get(key);
       stopChatTtsPlayback();
+      if (cached) {
+        touchChatTtsCacheOrder(order, key);
+        const url = URL.createObjectURL(cached.blob.slice());
+        chatTtsObjectUrlRef.current = url;
+        const el = chatTtsAudioRef.current;
+        if (!el) {
+          URL.revokeObjectURL(url);
+          chatTtsObjectUrlRef.current = null;
+          return;
+        }
+        el.src = url;
+        setTtsPlayingTurnId(turnId);
+        el.onended = () => {
+          stopChatTtsPlayback();
+        };
+        el.onerror = () => {
+          stopChatTtsPlayback();
+        };
+        await loadAudioElementThenPlay(el).catch(() => stopChatTtsPlayback());
+        return;
+      }
       const ac = new AbortController();
       chatTtsFetchAbortRef.current = ac;
       setTtsGeneratingTurnId(turnId);
@@ -509,7 +569,7 @@ export default function HomePage() {
         }
         const blob = await response.blob();
         const mime = response.headers.get("content-type") ?? "audio/wav";
-        chatTtsBlobCacheRef.current.set(turnId, { blob: blob.slice(), mime });
+        rememberChatTtsBlob(map, order, key, { blob: blob.slice(), mime });
         const url = URL.createObjectURL(blob);
         chatTtsObjectUrlRef.current = url;
         const el = chatTtsAudioRef.current;
@@ -548,12 +608,16 @@ export default function HomePage() {
   const downloadChatTtsForTurn = useCallback(async (turnId: string, rawText: string): Promise<void> => {
     const cleaned = stripMarkdownForTts(rawText);
     if (!cleaned.trim()) return;
-    const cached = chatTtsBlobCacheRef.current.get(turnId);
+    const key = chatTtsCacheKey(turnId, cleaned);
+    const map = chatTtsBlobCacheRef.current;
+    const order = chatTtsCacheOrderRef.current;
+    const cached = map.get(key);
     let blob: Blob;
     let mime: string;
     if (cached) {
       blob = cached.blob;
       mime = cached.mime;
+      touchChatTtsCacheOrder(order, key);
     } else {
       const response = await fetch("/api/voice/speak-audio", {
         method: "POST",
@@ -563,7 +627,7 @@ export default function HomePage() {
       if (!response.ok) return;
       blob = await response.blob();
       mime = response.headers.get("content-type") ?? "audio/wav";
-      chatTtsBlobCacheRef.current.set(turnId, { blob: blob.slice(), mime });
+      rememberChatTtsBlob(map, order, key, { blob: blob.slice(), mime });
     }
     triggerBlobDownload(blob, mime, `nova-chat-${turnId.slice(0, 12)}`);
   }, []);
@@ -1325,7 +1389,7 @@ export default function HomePage() {
                         title={
                           ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id
                             ? "Stop audio"
-                            : "Read aloud (Orpheus)"
+                            : "Read aloud — replay uses cached audio when this message unchanged (session, last 10 clips)"
                         }
                         aria-pressed={ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id}
                         onClick={() => {
