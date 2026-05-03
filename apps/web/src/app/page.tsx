@@ -104,6 +104,11 @@ function stripMarkdownForTts(raw: string): string {
 /** Max distinct synthesized clips kept in memory per chat session (replay without calling speak-audio again). */
 const MAX_SESSION_TTS_AUDIO_CACHE = 10;
 
+/** Skip server transcribe for accidental empty/stop blobs (avoids STT misconfig spam). */
+const NOVA_CHAT_STT_MIN_AUDIO_BYTES = 900;
+const NOVA_CHAT_STT_SERVER_HINT =
+  "Server speech-to-text is not configured on the agent (set OPENAI_API_KEY or NOVA_STT_COMMAND). Use Chrome or Edge for in-browser dictation, or configure the agent.";
+
 function chatTtsCacheKey(turnId: string, cleaned: string): string {
   return `${turnId}\u0000${cleaned}`;
 }
@@ -484,8 +489,14 @@ export default function HomePage() {
   const chatTtsMediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const chatTtsAnalyserRef = useRef<AnalyserNode | null>(null);
   const chatTtsOrbRafRef = useRef<number | null>(null);
+  /** Retries attaching the voice orb after layout (refs null on synchronous `playing`). */
+  const chatTtsOrbAttachRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const orbVoiceAttachAttemptRef = useRef(0);
   /** Voice-reactive level (0–1), asymmetric attack/release. */
   const novaOrbVoiceLevelRef = useRef(0);
+  /** Agent `/v1/voice/stt-status`: whether server mic transcription is available. */
+  const sttServerConfiguredRef = useRef<boolean | null>(null);
+  const lastWebSpeechEndAtRef = useRef(0);
   const chatTtsObjectUrlRef = useRef<string | null>(null);
   const chatTtsFetchAbortRef = useRef<AbortController | null>(null);
   const chatSttRecorderRef = useRef<MediaRecorder | null>(null);
@@ -880,6 +891,10 @@ export default function HomePage() {
   }, []);
 
   const detachTtsOrbAnalyser = useCallback(() => {
+    if (chatTtsOrbAttachRetryRef.current != null) {
+      clearTimeout(chatTtsOrbAttachRetryRef.current);
+      chatTtsOrbAttachRetryRef.current = null;
+    }
     if (chatTtsOrbRafRef.current != null) {
       cancelAnimationFrame(chatTtsOrbRafRef.current);
       chatTtsOrbRafRef.current = null;
@@ -892,6 +907,7 @@ export default function HomePage() {
     }
     if (orb) {
       orb.style.removeProperty("animation-duration");
+      orb.style.removeProperty("--nova-wobble-dur");
     }
   }, []);
 
@@ -918,14 +934,44 @@ export default function HomePage() {
   const teardownChatTtsWebAudioRef = useRef(teardownChatTtsWebAudio);
   teardownChatTtsWebAudioRef.current = teardownChatTtsWebAudio;
 
+  const refreshSttServerConfigured = useCallback(async (force = false): Promise<boolean> => {
+    if (!force && sttServerConfiguredRef.current !== null) {
+      return sttServerConfiguredRef.current;
+    }
+    try {
+      const r = await fetch("/api/voice/stt-status");
+      const j = (await r.json()) as { configured?: boolean };
+      sttServerConfiguredRef.current = Boolean(j.configured);
+    } catch {
+      sttServerConfiguredRef.current = false;
+    }
+    return sttServerConfiguredRef.current ?? false;
+  }, []);
+
+  useEffect(() => {
+    void refreshSttServerConfigured(false);
+  }, [refreshSttServerConfigured]);
+
   const attachTtsVoiceOrbDriver = useCallback(
     (el: HTMLAudioElement) => {
       detachTtsOrbAnalyser();
       const meter = novaTtsOrbMeterRef.current;
       const orb = novaSpeakingOrbRootRef.current;
       if (!meter || !orb) {
+        if (el.paused || el.ended) {
+          return;
+        }
+        if (orbVoiceAttachAttemptRef.current >= 55) {
+          return;
+        }
+        orbVoiceAttachAttemptRef.current += 1;
+        chatTtsOrbAttachRetryRef.current = window.setTimeout(() => {
+          chatTtsOrbAttachRetryRef.current = null;
+          attachTtsVoiceOrbDriver(el);
+        }, 24);
         return;
       }
+      orbVoiceAttachAttemptRef.current = 0;
 
       const win = typeof window !== "undefined" ? window : undefined;
       const AudioCtx = win?.AudioContext ?? (win as unknown as { webkitAudioContext?: typeof AudioContext } | undefined)?.webkitAudioContext;
@@ -934,7 +980,6 @@ export default function HomePage() {
       }
 
       const timeDomainBufRef = { current: new Float32Array(0) };
-      const freqByteBufRef = { current: new Uint8Array(0) };
 
       const tick = () => {
         const analyser = chatTtsAnalyserRef.current;
@@ -963,36 +1008,12 @@ export default function HomePage() {
           sumSq += v * v;
         }
         const rms = Math.sqrt(sumSq / Math.max(1, buf.length));
-        const instant = Math.min(1, 0.55 * rms + 0.45 * peak);
-
-        let freqBand = 0;
-        const binCount = analyser.frequencyBinCount;
-        let fbuf = freqByteBufRef.current;
-        if (fbuf.length !== binCount) {
-          fbuf = new Uint8Array(binCount);
-          freqByteBufRef.current = fbuf;
-        }
-        analyser.getByteFrequencyData(fbuf);
-        const sr = analyser.context.sampleRate;
-        const nyquist = sr / 2;
-        const binHz = nyquist / Math.max(1, binCount);
-        let lo = Math.floor(180 / binHz);
-        let hi = Math.ceil(3400 / binHz);
-        lo = Math.max(1, Math.min(lo, binCount - 2));
-        hi = Math.max(lo + 1, Math.min(hi, binCount - 1));
-        let sum = 0;
-        let count = 0;
-        for (let b = lo; b <= hi; b++) {
-          sum += fbuf[b] ?? 0;
-          count++;
-        }
-        freqBand = count ? sum / (count * 255) : 0;
-        const combined = Math.min(1, instant * 0.62 + freqBand * 0.95);
-        const gated = Math.max(0, combined - 0.014);
+        const instant = Math.min(1, rms * 14 + peak * 2.4);
+        const gated = Math.max(0, instant - 0.018);
 
         let level = novaOrbVoiceLevelRef.current;
-        const attack = 0.62;
-        const release = 0.09;
+        const attack = 0.72;
+        const release = 0.055;
         if (gated > level) {
           level += (gated - level) * attack;
         } else {
@@ -1001,12 +1022,12 @@ export default function HomePage() {
         novaOrbVoiceLevelRef.current = level;
 
         const s = Math.min(1, Math.max(0, level));
-        const calm = s < 0.035;
-        const sx = calm ? 1 : 1 + s * 0.14;
-        const sy = calm ? 1 : 1 + s * 0.58;
+        const calm = s < 0.04;
+        const sx = calm ? 1 : 1 + s * 0.12;
+        const sy = calm ? 1 : 1 + s * 0.52;
         m.style.transform = `scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`;
-        const wobbleSec = calm ? 6.8 : Math.max(1.65, 5.9 - s * 5.8);
-        o.style.animationDuration = `${wobbleSec.toFixed(2)}s`;
+        const wobbleSec = calm ? 6.5 : Math.max(1.35, 5.4 - s * 5.2);
+        o.style.setProperty("--nova-wobble-dur", `${wobbleSec.toFixed(2)}s`);
 
         chatTtsOrbRafRef.current = requestAnimationFrame(tick);
       };
@@ -1025,7 +1046,7 @@ export default function HomePage() {
         if (!analyser) {
           analyser = ctx.createAnalyser();
           analyser.fftSize = 2048;
-          analyser.smoothingTimeConstant = 0.38;
+          analyser.smoothingTimeConstant = 0.35;
           chatTtsAnalyserRef.current = analyser;
         }
 
@@ -1046,6 +1067,7 @@ export default function HomePage() {
 
   const stopChatTtsPlayback = useCallback((opts?: { naturalTtsEnd?: boolean }) => {
     detachTtsOrbAnalyser();
+    orbVoiceAttachAttemptRef.current = 0;
     chatTtsFetchAbortRef.current?.abort();
     chatTtsFetchAbortRef.current = null;
     const el = chatTtsAudioRef.current;
@@ -1069,7 +1091,7 @@ export default function HomePage() {
         if (loadingRef.current || sttTranscribingRef.current || sttRecordingRef.current) return;
         if (getMicCapabilityError()) return;
         void startMicTranscriptionRef.current?.();
-      }, 450);
+      }, 580);
     }
   }, [detachTtsOrbAnalyser]);
 
@@ -1258,7 +1280,9 @@ export default function HomePage() {
         setTtsPlayingTurnId(turnId);
         el.onplaying = () => {
           setTtsPlaybackActive(true);
-          attachTtsVoiceOrbDriver(el);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => attachTtsVoiceOrbDriver(el));
+          });
         };
         el.onended = () => {
           stopChatTtsPlayback({ naturalTtsEnd: true });
@@ -1290,7 +1314,9 @@ export default function HomePage() {
         }
         el.onplaying = () => {
           setTtsPlaybackActive(true);
-          attachTtsVoiceOrbDriver(el);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => attachTtsVoiceOrbDriver(el));
+          });
         };
         el.onended = () => {
           stopChatTtsPlayback({ naturalTtsEnd: true });
@@ -1364,7 +1390,13 @@ export default function HomePage() {
       const response = await fetch("/api/voice/transcribe-audio", { method: "POST", body: form });
       const data = (await response.json().catch(() => ({}))) as { text?: string; error?: string };
       if (!response.ok) {
-        setSttError(data.error ?? "Transcription failed.");
+        const raw = data.error ?? "Transcription failed.";
+        if (raw.includes("Speech-to-text is not configured")) {
+          sttServerConfiguredRef.current = false;
+          setSttError(NOVA_CHAT_STT_SERVER_HINT);
+        } else {
+          setSttError(raw);
+        }
         return;
       }
       const transcript = (data.text ?? "").trim();
@@ -1372,6 +1404,7 @@ export default function HomePage() {
         setSttError("No speech detected. Try again closer to the microphone.");
         return;
       }
+      sttServerConfiguredRef.current = true;
       setMessage((prev) => (prev.trim().length ? `${prev.trim()} ${transcript}` : transcript));
     } catch {
       setSttError("Could not transcribe audio.");
@@ -1400,7 +1433,7 @@ export default function HomePage() {
       recorder.stream.getTracks().forEach((t) => t.stop());
       chatSttRecorderRef.current = null;
       setSttRecording(false);
-      if (blob.size > 0) {
+      if (blob.size >= NOVA_CHAT_STT_MIN_AUDIO_BYTES) {
         void transcribeBlobToMessage(blob);
       }
     };
@@ -1440,6 +1473,10 @@ export default function HomePage() {
           }
           chatSttWebRecognitionRef.current = null;
           sttWebSpeechPrefixRef.current = message.trimEnd();
+          {
+            const gapSinceLastEnd = Date.now() - lastWebSpeechEndAtRef.current;
+            await new Promise((r) => setTimeout(r, gapSinceLastEnd < 3200 ? 200 : 55));
+          }
           const rec = new SpeechRecCtor();
           rec.continuous = true;
           rec.interimResults = true;
@@ -1470,6 +1507,13 @@ export default function HomePage() {
               event.error === "disconnected";
             if (tryServerStt) {
               void (async () => {
+                const ok = await refreshSttServerConfigured(false);
+                if (!ok) {
+                  setSttError(
+                    "Browser speech service failed (network). Server dictation is not configured on the agent — set OPENAI_API_KEY or NOVA_STT_COMMAND — or use a stable connection."
+                  );
+                  return;
+                }
                 try {
                   await startMediaRecorderTranscription();
                 } catch (err) {
@@ -1483,6 +1527,7 @@ export default function HomePage() {
             }
           };
           rec.onend = () => {
+            lastWebSpeechEndAtRef.current = Date.now();
             if (chatSttWebRecognitionRef.current === rec) {
               chatSttWebRecognitionRef.current = null;
             }
@@ -1491,7 +1536,23 @@ export default function HomePage() {
             }
           };
           chatSttWebRecognitionRef.current = rec;
-          rec.start();
+          {
+            let started = false;
+            let lastStartErr: unknown;
+            for (let attempt = 0; attempt < 6; attempt++) {
+              try {
+                rec.start();
+                started = true;
+                break;
+              } catch (err) {
+                lastStartErr = err;
+                await new Promise((r) => setTimeout(r, 85 + attempt * 55));
+              }
+            }
+            if (!started) {
+              throw lastStartErr ?? new Error("Speech recognition could not start");
+            }
+          }
           setSttRecording(true);
           return;
         } catch {
@@ -1504,6 +1565,11 @@ export default function HomePage() {
         }
       }
 
+      const serverOk = await refreshSttServerConfigured(false);
+      if (!serverOk) {
+        setSttError(NOVA_CHAT_STT_SERVER_HINT);
+        return;
+      }
       await startMediaRecorderTranscription();
     } catch (error) {
       setSttError(describeMicStartError(error));

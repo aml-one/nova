@@ -8,6 +8,11 @@ import { augmentOrpheusSpeechForMood } from "./emotion-tts.js";
 import { normalizeOrpheusSpeechCues, prepareChatTextForSpeech } from "./tts-text.js";
 import { prependSilenceToWavPcm } from "./wav-prepend-silence.js";
 
+/** True when agent-core can run mic upload transcription (Whisper API or NOVA_STT_COMMAND). */
+export function isVoiceSttConfigured(): boolean {
+  return Boolean(process.env.NOVA_STT_COMMAND?.trim() || process.env.OPENAI_API_KEY?.trim());
+}
+
 const MIME_BY_FORMAT: Record<AppSettings["orpheusTts"]["responseFormat"], string> = {
   mp3: "audio/mpeg",
   wav: "audio/wav",
@@ -30,6 +35,11 @@ export class VoiceService {
   ) {}
 
   async transcribe(audioPath: string): Promise<string> {
+    if (!isVoiceSttConfigured()) {
+      throw new Error(
+        "Speech-to-text is not configured. Set OPENAI_API_KEY for Whisper API transcription, or set NOVA_STT_COMMAND to a shell command that receives the audio file path as argv[1] and prints the transcript to stdout. Optional: OPENAI_BASE_URL, NOVA_WHISPER_MODEL."
+      );
+    }
     const command = process.env.NOVA_STT_COMMAND?.trim();
     if (command) {
       const result = spawnSync(command, [audioPath], { shell: true, encoding: "utf8" });
@@ -39,12 +49,12 @@ export class VoiceService {
       return result.stdout.trim();
     }
     const apiKey = process.env.OPENAI_API_KEY?.trim();
-    if (apiKey) {
-      return await transcribeOpenAIWhisper(audioPath, apiKey);
+    if (!apiKey) {
+      throw new Error(
+        "Speech-to-text is not configured. Set OPENAI_API_KEY for Whisper API transcription, or set NOVA_STT_COMMAND to a shell command that receives the audio file path as argv[1] and prints the transcript to stdout. Optional: OPENAI_BASE_URL, NOVA_WHISPER_MODEL."
+      );
     }
-    throw new Error(
-      "Speech-to-text is not configured. Set OPENAI_API_KEY for Whisper API transcription, or set NOVA_STT_COMMAND to a shell command that receives the audio file path as argv[1] and prints the transcript to stdout. Optional: OPENAI_BASE_URL, NOVA_WHISPER_MODEL."
-    );
+    return await transcribeOpenAIWhisper(audioPath, apiKey);
   }
 
   /** Decode uploaded browser audio bytes into text (normalizes to 16k mono WAV via ffmpeg when available). */

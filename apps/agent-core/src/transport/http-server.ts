@@ -15,7 +15,7 @@ import {
 } from "../security/webhook-verifier.js";
 import { OutboundDispatcher } from "../messaging/outbound-dispatcher.js";
 import { Logger } from "../observability/logger.js";
-import { VoiceService } from "../voice/voice-service.js";
+import { VoiceService, isVoiceSttConfigured } from "../voice/voice-service.js";
 import { getRecentTtsEntries, recordTtsSpeakResult } from "../voice/tts-recent-log.js";
 import { prepareChatTextForSpeech } from "../voice/tts-text.js";
 import { getDatabase } from "../storage/sqlite.js";
@@ -1093,6 +1093,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           )
           .all();
         return sendJson(response, 200, { items: rows, correlationId });
+      }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/voice/stt-status") {
+        return sendJson(response, 200, { correlationId, configured: isVoiceSttConfigured() });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/voice/transcribe") {
         const payload = (await readJson(request)) as { audioPath: string };
