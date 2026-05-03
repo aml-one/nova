@@ -16,6 +16,7 @@ import {
 import { OutboundDispatcher } from "../messaging/outbound-dispatcher.js";
 import { Logger } from "../observability/logger.js";
 import { VoiceService } from "../voice/voice-service.js";
+import { getRecentTtsEntries, recordTtsSpeakResult } from "../voice/tts-recent-log.js";
 import { prepareChatTextForSpeech } from "../voice/tts-text.js";
 import { getDatabase } from "../storage/sqlite.js";
 import { RagService } from "../rag/rag-service.js";
@@ -1103,14 +1104,33 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const out = await voice.speak(payload.text, payload.outputPath);
         return sendJson(response, 200, { outputPath: out, correlationId });
       }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/voice/tts-recent") {
+        const lim = Number(parsedUrl.searchParams.get("limit") ?? "20");
+        const limit = Number.isFinite(lim) ? Math.min(50, Math.max(1, lim)) : 20;
+        return sendJson(response, 200, {
+          correlationId,
+          limit,
+          entries: getRecentTtsEntries(limit),
+          note:
+            "Each row matches chat read-aloud / POST /v1/voice/speak-audio: raw request → preparedForSpeech → sentToOrpheus (Orpheus input). Compare sentToOrpheus when debugging repeats or audio glitches."
+        });
+      }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/voice/speak-audio") {
         const payload = (await readJson(request)) as { text?: string };
-        const text = prepareChatTextForSpeech(typeof payload.text === "string" ? payload.text : "");
-        if (!text) {
+        const raw = typeof payload.text === "string" ? payload.text : "";
+        const trace = voice.getTtsPipelineTrace(raw);
+        if (!trace.preparedForSpeech.trim()) {
           return sendJson(response, 400, { error: "text is required", correlationId });
         }
         try {
-          const body = await voice.synthesizeOrpheusBuffer(text);
+          const body = await voice.synthesizeOrpheusBuffer(trace.preparedForSpeech);
+          recordTtsSpeakResult({
+            ...trace,
+            correlationId,
+            ok: true,
+            responseMime: voice.mimeTypeForCurrentFormat(),
+            audioBytes: body.length
+          });
           response.writeHead(200, {
             "content-type": voice.mimeTypeForCurrentFormat(),
             "x-correlation-id": correlationId,
@@ -1118,6 +1138,12 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           });
           response.end(body);
         } catch (error) {
+          recordTtsSpeakResult({
+            ...trace,
+            correlationId,
+            ok: false,
+            error: error instanceof Error ? error.message : "tts failed"
+          });
           return sendJson(response, 502, {
             error: error instanceof Error ? error.message : "tts failed",
             correlationId

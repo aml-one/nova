@@ -199,6 +199,14 @@ const ENDPOINTS: EndpointItem[] = [
     method: "POST",
     path: "/api/voice/tts-trace",
     note: 'JSON `{ "text": "…" }` → request → preparedForSpeech → sentToOrpheus + mood; no Orpheus HTTP call.'
+  },
+  {
+    category: "voice",
+    title: "Recent TTS / read-aloud log",
+    method: "GET",
+    path: "/api/voice/tts-recent?limit=20",
+    note:
+      "Last runs from real chat read-aloud and POST speak-audio (newest first): requestText, preparedForSpeech, sentToOrpheus — compare strings when debugging repeats or glitches. In-memory on agent-core process; optional ?limit=1–50."
   }
 ];
 
@@ -293,7 +301,8 @@ export default function EndpointsPage() {
         <h1 className="text-2xl font-semibold">Endpoints</h1>
         <p className="text-sm text-muted">
           Browse HTTP routes exposed by this web app (mostly proxies to agent-core). Items are grouped by category with pastel bands.
-          Under <strong className="text-foreground">Voice & speech</strong>, use <strong className="text-foreground">Spoken audio (TTS)</strong> for the same synthesis as chat read-aloud.
+          Under <strong className="text-foreground">Voice & speech</strong>, <strong className="text-foreground">Spoken audio (TTS)</strong> matches chat read-aloud;{" "}
+          <strong className="text-foreground">Recent TTS / read-aloud log</strong> shows what was actually synthesized (last N), for debugging Orpheus repeats.
         </p>
       </Card>
       <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">

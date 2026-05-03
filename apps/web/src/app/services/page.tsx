@@ -4,14 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Card } from "../../components/ui/card";
 import type { ServiceWebUiEntry } from "../../lib/service-webui-catalog";
+import { serviceEmbedUrl } from "../../lib/service-webui-catalog";
 
 export default function ServicesWebUiPage() {
   const [catalog, setCatalog] = useState<ServiceWebUiEntry[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [origin, setOrigin] = useState<{ protocol: string; hostname: string } | null>(null);
+  const [origin, setOrigin] = useState<{ origin: string; protocol: string; hostname: string } | null>(null);
 
   useEffect(() => {
     setOrigin({
+      origin: window.location.origin,
       protocol: window.location.protocol,
       hostname: window.location.hostname
     });
@@ -29,12 +31,10 @@ export default function ServicesWebUiPage() {
 
   const frames = useMemo(() => {
     if (!origin) return [];
-    const { protocol, hostname } = origin;
-    return catalog.map((svc) => {
-      const path = svc.basePath ?? "/";
-      const url = `${protocol}//${hostname}:${svc.port}${path}`;
-      return { svc, url };
-    });
+    return catalog.map((svc) => ({
+      svc,
+      url: serviceEmbedUrl(svc, origin)
+    }));
   }, [catalog, origin]);
 
   const httpsEmbeddingHttp = origin?.protocol === "https:";
@@ -44,19 +44,21 @@ export default function ServicesWebUiPage() {
       <Card className="space-y-2">
         <h1 className="text-2xl font-semibold">Service Web UIs</h1>
         <p className="text-sm text-muted">
-          Embedded dashboards run on other TCP ports on the <strong className="text-foreground">same computer</strong> as Nova.
-          Frames use your browser&apos;s current host (<strong className="text-foreground">not</strong> <code className="rounded bg-surface2 px-1">127.0.0.1</code>), so opening Nova as{" "}
+          Nova routes (e.g. Memory) embed on the <strong className="text-foreground">same origin</strong> as this UI. Other panels target TCP ports on the{" "}
+          <strong className="text-foreground">same machine</strong> as Nova; frames use your browser&apos;s current hostname (<strong className="text-foreground">not</strong>{" "}
+          <code className="rounded bg-surface2 px-1">127.0.0.1</code>), so opening Nova as{" "}
           <code className="rounded bg-surface2 px-1">http://192.168.x.x:3000</code> loads{" "}
-          <code className="rounded bg-surface2 px-1">http://192.168.x.x:5005</code> automatically for each listed port.
+          <code className="rounded bg-surface2 px-1">http://192.168.x.x:5005</code> for port-based entries.
         </p>
         <ul className="list-inside list-disc text-xs text-muted">
           <li>Each service must listen on <code className="rounded bg-surface2 px-0.5">0.0.0.0</code> (or your LAN IP), not only loopback, if clients are remote.</li>
           <li>Open the firewall on those ports on the Nova host.</li>
           <li>
             Extend this list with env{" "}
-            <code className="rounded bg-surface2 px-0.5">NOVA_SERVICE_WEBUIS_JSON</code> on the Next.js server (JSON array of{" "}
-            <code className="rounded bg-surface2 px-0.5">port</code>, <code className="rounded bg-surface2 px-0.5">title</code>,{" "}
-            <code className="rounded bg-surface2 px-0.5">description</code>, <code className="rounded bg-surface2 px-0.5">basePath</code>).
+            <code className="rounded bg-surface2 px-0.5">NOVA_SERVICE_WEBUIS_JSON</code> on the Next.js server (JSON array of rows with{" "}
+            <code className="rounded bg-surface2 px-0.5">title</code>, <code className="rounded bg-surface2 px-0.5">description</code>, and either{" "}
+            <code className="rounded bg-surface2 px-0.5">sameOriginPath</code> e.g. <code className="rounded bg-surface2 px-0.5">&quot;/memory&quot;</code> or{" "}
+            <code className="rounded bg-surface2 px-0.5">port</code> + optional <code className="rounded bg-surface2 px-0.5">basePath</code>).
           </li>
           <li>
             If a frame stays blank, the upstream app may send{" "}
