@@ -134,7 +134,7 @@ function rememberChatTtsBlob(
 
 function VoiceSpeakingOrb() {
   return (
-    <span className="relative inline-flex h-5 w-5 items-center justify-center" aria-hidden>
+    <span className="relative inline-flex h-8 w-8 items-center justify-center" aria-hidden>
       <span
         className="absolute inset-0 rounded-full opacity-80"
         style={{
@@ -144,20 +144,20 @@ function VoiceSpeakingOrb() {
         }}
       />
       <span
-        className="absolute inset-[2px] rounded-full"
+        className="absolute inset-[3px] rounded-full"
         style={{
           border: "1px solid rgba(148, 163, 184, .55)",
           animation: "pulse 1.5s ease-in-out infinite"
         }}
       />
       <span
-        className="absolute inset-[6px] rounded-full"
+        className="absolute inset-[9px] rounded-full"
         style={{
           background: "rgba(15, 23, 42, .72)",
           border: "1px solid rgba(148, 163, 184, .35)"
         }}
       />
-      <FaMicrophone className="relative z-10 h-2.5 w-2.5 text-cyan-200 drop-shadow-[0_0_6px_rgba(125,211,252,.8)]" />
+      <FaMicrophone className="relative z-10 h-4 w-4 text-cyan-200 drop-shadow-[0_0_8px_rgba(125,211,252,.85)]" />
     </span>
   );
 }
@@ -1542,7 +1542,11 @@ export default function HomePage() {
                       </button>
                       <button
                         type="button"
-                        className={bubbleIconActionClass}
+                        className={cn(
+                          bubbleIconActionClass,
+                          ttsPlayingTurnId === turn.id &&
+                            "h-8 w-auto gap-1.5 rounded-full border border-cyan-400/45 bg-cyan-500/10 px-1.5"
+                        )}
                         style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
                         disabled={
                           !turn.text.trim() ||
@@ -1563,7 +1567,10 @@ export default function HomePage() {
                         }}
                       >
                         {ttsPlayingTurnId === turn.id ? (
-                          <VoiceSpeakingOrb />
+                          <>
+                            <VoiceSpeakingOrb />
+                            <span className="pr-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-200">Speaking</span>
+                          </>
                         ) : ttsGeneratingTurnId === turn.id ? (
                           <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-[2px] bg-current" aria-hidden />
                         ) : (
@@ -1753,10 +1760,65 @@ export default function HomePage() {
             <div className="text-xs text-rose-400">{sttError ?? sttCapabilityError}</div>
           ) : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-              <span className="min-w-0 text-xs text-muted">
-                Tip: commands like <code>/run ...</code> can execute shell tasks when command mode is enabled.
-              </span>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition",
+                  sttRecording
+                    ? "border-rose-400/60 bg-rose-500/20 text-rose-100"
+                    : "border-sky-400/45 bg-sky-500/15 text-sky-100 hover:bg-sky-500/25",
+                  (sttTranscribing || Boolean(sttCapabilityError)) && "cursor-not-allowed opacity-55"
+                )}
+                onClick={() => {
+                  if (sttRecording) {
+                    stopMicTranscription();
+                  } else {
+                    void startMicTranscription();
+                  }
+                }}
+                disabled={sttTranscribing || Boolean(sttCapabilityError)}
+                title={
+                  sttCapabilityError
+                    ? sttCapabilityError
+                    : sttRecording
+                      ? "Stop recording and transcribe"
+                      : "Record voice and transcribe into message"
+                }
+              >
+                <span
+                  className={cn(
+                    "inline-flex h-5 w-5 items-center justify-center rounded-full border",
+                    sttRecording
+                      ? "border-rose-300/70 bg-rose-400/20"
+                      : "border-sky-300/60 bg-sky-400/20"
+                  )}
+                >
+                  <FaMicrophone className={cn("h-3 w-3", sttRecording && "animate-pulse")} />
+                </span>
+                {sttRecording ? "Listening..." : sttTranscribing ? "Transcribing..." : "Voice"}
+              </button>
+              <Link href="/thoughts" className="inline-flex items-center text-violet-400 hover:text-violet-300" title="Open Live Thoughts">
+                <FaBrain className="h-3.5 w-3.5" />
+              </Link>
+              {uploadedMedia.length > 0 ? <Badge tone="pink">{uploadedMedia.length} media ready</Badge> : null}
+            </div>
+            <div className="flex h-8 min-w-[4.75rem] shrink-0 items-center justify-end">
+              <Button
+                type="submit"
+                tone="green"
+                className={cn(
+                  "h-8 w-[4.5rem] px-3 text-sm transition-opacity",
+                  !loading && message.trim().length > 0 ? "opacity-100" : "pointer-events-none opacity-0 invisible"
+                )}
+              >
+                Send
+              </Button>
+            </div>
+          </div>
+          <details className="rounded-ui border border-white/10 bg-surface2/40 px-2 py-1 text-xs">
+            <summary className="cursor-pointer select-none text-muted">Chat options</summary>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
               <label className="flex items-center gap-1 text-xs text-muted">
                 <input
                   type="checkbox"
@@ -1804,63 +1866,11 @@ export default function HomePage() {
                 />
                 Read aloud messages
               </label>
-              <button
-                type="button"
-                className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition",
-                  sttRecording
-                    ? "border-rose-400/60 bg-rose-500/20 text-rose-100"
-                    : "border-sky-400/45 bg-sky-500/15 text-sky-100 hover:bg-sky-500/25",
-                  (sttTranscribing || Boolean(sttCapabilityError)) && "cursor-not-allowed opacity-55"
-                )}
-                onClick={() => {
-                  if (sttRecording) {
-                    stopMicTranscription();
-                  } else {
-                    void startMicTranscription();
-                  }
-                }}
-                disabled={sttTranscribing || Boolean(sttCapabilityError)}
-                title={
-                  sttCapabilityError
-                    ? sttCapabilityError
-                    : sttRecording
-                      ? "Stop recording and transcribe"
-                      : "Record voice and transcribe into message"
-                }
-              >
-                <span
-                  className={cn(
-                    "inline-flex h-5 w-5 items-center justify-center rounded-full border",
-                    sttRecording
-                      ? "border-rose-300/70 bg-rose-400/20"
-                      : "border-sky-300/60 bg-sky-400/20"
-                  )}
-                >
-                  <FaMicrophone className={cn("h-3 w-3", sttRecording && "animate-pulse")} />
-                </span>
-                {sttRecording ? "Listening..." : sttTranscribing ? "Transcribing..." : "Voice"}
-              </button>
-              <Link href="/thoughts" className="inline-flex items-center text-violet-400 hover:text-violet-300" title="Open Live Thoughts">
-                <FaBrain className="h-3.5 w-3.5" />
-              </Link>
-              {uploadedMedia.length > 0 ? <Badge tone="pink">{uploadedMedia.length} media ready</Badge> : null}
+              <span className="text-muted">
+                Tip: commands like <code>/run ...</code> can execute shell tasks when command mode is enabled.
+              </span>
             </div>
-            {!loading ? (
-              <div className="flex h-8 min-w-[4.75rem] shrink-0 items-center justify-end">
-                <Button
-                  type="submit"
-                  tone="green"
-                  className={cn(
-                    "h-8 w-[4.5rem] px-3 text-sm transition-opacity",
-                    message.trim().length > 0 ? "opacity-100" : "pointer-events-none opacity-0 invisible"
-                  )}
-                >
-                  Send
-                </Button>
-              </div>
-            ) : null}
-          </div>
+          </details>
         </form>
       </Card>
       {lightbox ? (
