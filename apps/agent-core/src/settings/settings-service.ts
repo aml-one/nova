@@ -77,7 +77,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     importantPeople: []
   },
   emotions: {
-    enabled: process.env.NOVA_EMOTIONS_ENABLED === "true",
+    enabled: process.env.NOVA_EMOTIONS_ENABLED !== "false",
     expressionStyle:
       process.env.NOVA_EMOTIONS_STYLE === "subtle" || process.env.NOVA_EMOTIONS_STYLE === "expressive"
         ? process.env.NOVA_EMOTIONS_STYLE
@@ -134,8 +134,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     enabled: process.env.NOVA_OFFLINE_MODE === "true"
   },
   memoryBear: {
-    enabled: process.env.NOVA_MEMORYBEAR_ENABLED === "true",
-    baseUrl: process.env.NOVA_MEMORYBEAR_BASE_URL?.trim() ?? "",
+    enabled: process.env.NOVA_MEMORYBEAR_ENABLED !== "false",
+    baseUrl: process.env.NOVA_MEMORYBEAR_BASE_URL?.trim() || "http://127.0.0.1:8000",
     apiKey: process.env.NOVA_MEMORYBEAR_API_KEY?.trim() ?? "",
     searchSwitch:
       process.env.NOVA_MEMORYBEAR_SEARCH_SWITCH === "0" || process.env.NOVA_MEMORYBEAR_SEARCH_SWITCH === "1"
@@ -149,10 +149,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     orchestrationMarkdownPath: process.env.NOVA_SENTICORE_ORCHESTRATION_PATH?.trim() ?? ""
   },
   orpheusTts: {
-    enabled: process.env.NOVA_ORPHEUS_TTS_ENABLED === "true",
-    baseUrl: process.env.NOVA_ORPHEUS_TTS_BASE_URL?.trim() ?? "",
+    enabled: process.env.NOVA_ORPHEUS_TTS_ENABLED !== "false",
+    baseUrl: process.env.NOVA_ORPHEUS_TTS_BASE_URL?.trim() || "http://127.0.0.1:5005",
     apiKey: process.env.NOVA_ORPHEUS_TTS_API_KEY?.trim() ?? "",
-    voice: process.env.NOVA_ORPHEUS_TTS_VOICE?.trim() ?? "",
+    voice: process.env.NOVA_ORPHEUS_TTS_VOICE?.trim() || "tara",
     model: process.env.NOVA_ORPHEUS_TTS_MODEL?.trim() ?? "",
     responseFormat:
       process.env.NOVA_ORPHEUS_TTS_FORMAT === "mp3"
@@ -552,7 +552,7 @@ export class SettingsService {
         importantPeople: normalizeImportantPeople(settings.messagingAccess?.importantPeople)
       },
       emotions: {
-        enabled: settings.emotions?.enabled === true,
+        enabled: settings.emotions?.enabled !== false,
         expressionStyle:
           settings.emotions?.expressionStyle === "subtle" || settings.emotions?.expressionStyle === "expressive"
             ? settings.emotions.expressionStyle
@@ -613,8 +613,8 @@ export class SettingsService {
         enabled: settings.offlineMode?.enabled === true
       },
       memoryBear: {
-        enabled: settings.memoryBear?.enabled === true,
-        baseUrl: String(settings.memoryBear?.baseUrl ?? "").trim(),
+        enabled: settings.memoryBear?.enabled !== false,
+        baseUrl: String(settings.memoryBear?.baseUrl ?? "").trim() || "http://127.0.0.1:8000",
         apiKey: String(settings.memoryBear?.apiKey ?? "").trim(),
         searchSwitch:
           settings.memoryBear?.searchSwitch === "0" || settings.memoryBear?.searchSwitch === "1"
@@ -630,10 +630,10 @@ export class SettingsService {
           .slice(0, 2048)
       },
       orpheusTts: {
-        enabled: settings.orpheusTts?.enabled === true,
-        baseUrl: String(settings.orpheusTts?.baseUrl ?? "").trim(),
+        enabled: settings.orpheusTts?.enabled !== false,
+        baseUrl: String(settings.orpheusTts?.baseUrl ?? "").trim() || "http://127.0.0.1:5005",
         apiKey: String(settings.orpheusTts?.apiKey ?? "").trim(),
-        voice: String(settings.orpheusTts?.voice ?? "").trim().slice(0, 128),
+        voice: (String(settings.orpheusTts?.voice ?? "").trim().slice(0, 128) || "tara").slice(0, 128),
         model: String(settings.orpheusTts?.model ?? "").trim().slice(0, 128),
         responseFormat:
           settings.orpheusTts?.responseFormat === "mp3"

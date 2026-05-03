@@ -25,6 +25,7 @@ import {
   type SkillBadgeState
 } from "../../lib/skill-badge";
 import { VoiceWakeWordPanel, OrpheusTtsPreviewCard } from "../../components/voice-settings-panel";
+import { apiFetch } from "../../lib/api-fetch";
 
 type HealthCheck = { id: string; name: string; level: "green" | "orange" | "red"; detail: string; lastSuccessfulAt?: string };
 type FullHealth = { level: "green" | "orange" | "red"; checks: HealthCheck[] };
@@ -205,21 +206,21 @@ const DEFAULT_SETTINGS: SettingsState = {
     qualityTier: "balanced",
     providerPricing: { ollamaPer1k: 0.0002, lmstudioPer1k: 0.001, copilotPer1k: 0.008 }
   },
-  emotions: { enabled: false, expressionStyle: "balanced", mirrorUserValence: true },
+  emotions: { enabled: true, expressionStyle: "balanced", mirrorUserValence: true },
   memoryBear: {
-    enabled: false,
+    enabled: true,
     baseUrl: "http://127.0.0.1:8000",
     apiKey: "",
     searchSwitch: "2",
     storageType: "neo4j",
-    syncWrites: true
+    syncWrites: false
   },
   sentiCore: { enabled: false, orchestrationMarkdownPath: "" },
   orpheusTts: {
-    enabled: false,
+    enabled: true,
     baseUrl: "http://127.0.0.1:5005",
     apiKey: "",
-    voice: "",
+    voice: "tara",
     model: "",
     responseFormat: "wav"
   },
@@ -431,12 +432,12 @@ export default function SettingsPage() {
 
   useEffect(() => {
     void (async () => {
-      const stateResponse = await fetch("/api/auth/state", { credentials: "include" });
+      const stateResponse = await apiFetch("/api/auth/state", { credentials: "include" });
       const stateData = (await stateResponse.json()) as { loginEnabled?: boolean };
       const loginEnabled = stateData.loginEnabled !== false;
-      const meResponse = await fetch("/api/auth/me", { credentials: "include" });
+      const meResponse = await apiFetch("/api/auth/me", { credentials: "include" });
       if (loginEnabled && !meResponse.ok) {
-        await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
+        await apiFetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
         router.push("/login");
         return;
       }
@@ -486,7 +487,7 @@ export default function SettingsPage() {
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const response = await fetch("/api/settings", {
+          const response = await apiFetch("/api/settings", {
             method: "PUT",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ web: { chatStyle: settings.web.chatStyle } })
@@ -517,7 +518,7 @@ export default function SettingsPage() {
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const response = await fetch("/api/settings", {
+          const response = await apiFetch("/api/settings", {
             method: "PUT",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ web: { voiceDictationSilenceSec: sec } })
@@ -541,7 +542,7 @@ export default function SettingsPage() {
     if (!copilotDeviceLoginSessionId) return;
     let cancelled = false;
     const poll = async (): Promise<void> => {
-      const response = await fetch(`/api/setup/copilot/device-login/status?sessionId=${encodeURIComponent(copilotDeviceLoginSessionId)}`);
+      const response = await apiFetch(`/api/setup/copilot/device-login/status?sessionId=${encodeURIComponent(copilotDeviceLoginSessionId)}`);
       const data = (await response.json().catch(() => ({}))) as {
         state?: "starting" | "waiting_for_user" | "authorized" | "failed" | "cancelled";
         url?: string;
@@ -575,7 +576,7 @@ export default function SettingsPage() {
   }, [settings.ollama.disabled, settings.lmstudio.disabled, loading]);
 
   async function loadSettings(): Promise<void> {
-    const response = await fetch("/api/settings");
+    const response = await apiFetch("/api/settings");
     const data = (await response.json()) as { settings?: Partial<SettingsState> };
     if (response.ok) {
       const normalized = normalizeSettings(data.settings);
@@ -584,32 +585,32 @@ export default function SettingsPage() {
     }
   }
   async function loadHealth(): Promise<void> {
-    const response = await fetch("/api/system/health");
+    const response = await apiFetch("/api/system/health");
     const data = (await response.json()) as { health?: FullHealth };
     if (response.ok) setHealth(data.health ?? null);
   }
   async function loadCatalog(): Promise<void> {
-    const response = await fetch("/api/providers/catalog");
+    const response = await apiFetch("/api/providers/catalog");
     const data = (await response.json()) as ProviderCatalog;
     if (response.ok) setCatalog(data);
   }
   async function loadUpdateStatus(): Promise<void> {
-    const response = await fetch("/api/system/update/status");
+    const response = await apiFetch("/api/system/update/status");
     const data = (await response.json()) as { status?: UpdateStatus };
     if (response.ok) setUpdateStatus(data.status ?? null);
   }
   async function loadSkillManifests(): Promise<void> {
-    const response = await fetch("/api/skills/manifests");
+    const response = await apiFetch("/api/skills/manifests");
     const data = (await response.json()) as { items?: SkillManifest[] };
     if (response.ok) setSkillManifests(data.items ?? []);
   }
   async function loadWebsites(): Promise<void> {
-    const response = await fetch("/api/websites");
+    const response = await apiFetch("/api/websites");
     const data = (await response.json()) as { items?: WebsiteProject[] };
     if (response.ok) setWebsites(data.items ?? []);
   }
   async function loadDefaultPersona(): Promise<void> {
-    const response = await fetch("/api/persona/default");
+    const response = await apiFetch("/api/persona/default");
     const data = (await response.json()) as { persona?: PersonaState; source?: "file" | "fallback"; filePath?: string };
     if (!response.ok || !data.persona) return;
     setDefaultPersona({
@@ -622,21 +623,21 @@ export default function SettingsPage() {
     setPersonaPath(data.filePath ?? "");
   }
   async function loadPersonaVersions(): Promise<void> {
-    const response = await fetch("/api/personas/versions?personaId=default&rewritesOnly=true");
+    const response = await apiFetch("/api/personas/versions?personaId=default&rewritesOnly=true");
     const data = (await response.json()) as { items?: PersonaVersion[] };
     if (response.ok) {
       setPersonaVersions(Array.isArray(data.items) ? data.items : []);
     }
   }
   async function loadImprovementHistory(): Promise<void> {
-    const response = await fetch("/api/improvement/history");
+    const response = await apiFetch("/api/improvement/history");
     const data = (await response.json()) as { itemsByDate?: ImprovementHistoryByDate };
     if (response.ok) {
       setImprovementHistoryByDate(data.itemsByDate ?? {});
     }
   }
   async function loadIdentityBackupStatus(): Promise<void> {
-    const response = await fetch("/api/backup/identity/status");
+    const response = await apiFetch("/api/backup/identity/status");
     const data = (await response.json()) as { latestSuccess?: BackupRunState; latestRun?: BackupRunState };
     if (response.ok) {
       setLatestIdentityBackup(data.latestSuccess ?? data.latestRun ?? null);
@@ -651,7 +652,7 @@ export default function SettingsPage() {
     setSentiCoreResolvedPath("");
     setSentiCoreMissingFile(false);
     try {
-      const r = await fetch("/api/settings/senti-core/file");
+      const r = await apiFetch("/api/settings/senti-core/file");
       const data = (await r.json()) as { path?: string; content?: string; missing?: boolean; error?: string };
       if (!r.ok) {
         setSentiCoreModalError(data.error ?? `HTTP ${r.status}`);
@@ -671,7 +672,7 @@ export default function SettingsPage() {
     setSentiCoreModalError(null);
     setSentiCoreSaving(true);
     try {
-      const r = await fetch("/api/settings/senti-core/file", {
+      const r = await apiFetch("/api/settings/senti-core/file", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ content: sentiCoreDraft })
@@ -696,7 +697,7 @@ export default function SettingsPage() {
     setSaving(true);
     setStatus(null);
     setError(null);
-    const response = await fetch("/api/settings", {
+    const response = await apiFetch("/api/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(settings)
@@ -713,7 +714,7 @@ export default function SettingsPage() {
 
   async function pushIdentityBackup(): Promise<void> {
     setStatus(null);
-    const response = await fetch("/api/backup/identity/push", {
+    const response = await apiFetch("/api/backup/identity/push", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ label: backupLabel })
@@ -730,14 +731,14 @@ export default function SettingsPage() {
   }
 
   async function checkUpdates(): Promise<void> {
-    const response = await fetch("/api/system/update/check", { method: "POST" });
+    const response = await apiFetch("/api/system/update/check", { method: "POST" });
     const data = (await response.json()) as { status?: UpdateStatus; error?: string };
     if (!response.ok) setError(data.error ?? "Update check failed");
     else setUpdateStatus(data.status ?? null);
   }
 
   async function applyUpdates(): Promise<void> {
-    const response = await fetch("/api/system/update/apply", { method: "POST" });
+    const response = await apiFetch("/api/system/update/apply", { method: "POST" });
     const data = (await response.json()) as { result?: { message?: string }; error?: string };
     if (!response.ok) setError(data.error ?? "Update apply failed");
     else setStatus(data.result?.message ?? "Update apply requested");
@@ -757,7 +758,7 @@ export default function SettingsPage() {
     setError(null);
     setStatus(null);
     const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
-    const response = await fetch("/api/setup/channels/test", {
+    const response = await apiFetch("/api/setup/channels/test", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -806,7 +807,7 @@ export default function SettingsPage() {
     }
     const preset = COPILOT_PRESETS.find((item) => item.baseUrl === settings.copilot.baseUrl.trim());
     const sendApiKey = preset?.authMode === "device-login" ? "" : settings.copilot.apiKey;
-    const response = await fetch("/api/setup/copilot/test", {
+    const response = await apiFetch("/api/setup/copilot/test", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -830,7 +831,7 @@ export default function SettingsPage() {
     setModelPingError(null);
     setModelPingLoading(true);
     try {
-      const response = await fetch("/api/models/ping", { method: "POST" });
+      const response = await apiFetch("/api/models/ping", { method: "POST" });
       const data = (await response.json().catch(() => ({}))) as { results?: ModelPingResult[]; error?: string };
       if (!response.ok) {
         setModelPingResults(null);
@@ -855,7 +856,7 @@ export default function SettingsPage() {
     setCopilotDeviceLoginCode("");
     setCopilotDeviceLoginUrl("");
     setCopilotDeviceLoginMessage("");
-    const response = await fetch("/api/setup/copilot/device-login/start", { method: "POST" });
+    const response = await apiFetch("/api/setup/copilot/device-login/start", { method: "POST" });
     const data = (await response.json().catch(() => ({}))) as {
       sessionId?: string;
       state?: "starting" | "waiting_for_user" | "authorized" | "failed" | "cancelled";
@@ -873,7 +874,7 @@ export default function SettingsPage() {
 
   async function cancelCopilotDeviceLogin(): Promise<void> {
     if (!copilotDeviceLoginSessionId) return;
-    await fetch("/api/setup/copilot/device-login/cancel", {
+    await apiFetch("/api/setup/copilot/device-login/cancel", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sessionId: copilotDeviceLoginSessionId })
@@ -894,7 +895,7 @@ export default function SettingsPage() {
 
   async function testWebsiteBuilderSshConnection(): Promise<void> {
     setSshTestResult(null);
-    const response = await fetch("/api/websites/test-ssh", {
+    const response = await apiFetch("/api/websites/test-ssh", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -911,7 +912,7 @@ export default function SettingsPage() {
     });
   }
   async function saveDefaultPersona(): Promise<void> {
-    const response = await fetch("/api/persona/default", {
+    const response = await apiFetch("/api/persona/default", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(defaultPersona)
@@ -933,7 +934,7 @@ export default function SettingsPage() {
     setRestoringPersonaVersion(version);
     setStatus(null);
     setError(null);
-    const response = await fetch("/api/personas/rollback", {
+    const response = await apiFetch("/api/personas/rollback", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ personaId: "default", version })
@@ -2167,7 +2168,7 @@ export default function SettingsPage() {
               onClick={async () => {
                 if (channelsSetupMode === "signal") {
                   const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
-                  const response = await fetch("/api/setup/channels/test", {
+                  const response = await apiFetch("/api/setup/channels/test", {
                     method: "POST",
                     headers: { "content-type": "application/json" },
                     body: JSON.stringify({
@@ -2190,7 +2191,7 @@ export default function SettingsPage() {
                 }
                 if (channelsSetupMode === "whatsapp") {
                   const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
-                  const response = await fetch("/api/setup/channels/test", {
+                  const response = await apiFetch("/api/setup/channels/test", {
                     method: "POST",
                     headers: { "content-type": "application/json" },
                     body: JSON.stringify({
@@ -2679,7 +2680,7 @@ export default function SettingsPage() {
                     type="button"
                     tone="red"
                     onClick={async () => {
-                      await fetch("/api/websites", {
+                      await apiFetch("/api/websites", {
                         method: "DELETE",
                         headers: { "content-type": "application/json" },
                         body: JSON.stringify({ id: site.id })

@@ -9,6 +9,7 @@ import {
   labelForSkillBadgeState,
   resolveSkillBadgeState
 } from "../../lib/skill-badge";
+import { apiFetch } from "../../lib/api-fetch";
 
 type SkillManifest = {
   id: string;
@@ -30,9 +31,9 @@ export default function SkillsPage() {
   useEffect(() => {
     void (async () => {
       const [skillsResponse, healthResponse, settingsResponse] = await Promise.all([
-        fetch("/api/skills/manifests"),
-        fetch("/api/system/health"),
-        fetch("/api/settings")
+        apiFetch("/api/skills/manifests"),
+        apiFetch("/api/system/health"),
+        apiFetch("/api/settings")
       ]);
       const skillsData = (await skillsResponse.json()) as { items?: SkillManifest[] };
       const healthData = (await healthResponse.json()) as { health?: FullHealth };
@@ -53,7 +54,7 @@ export default function SkillsPage() {
         skillId === "camera-vision" || skillId === "cameraVision"
           ? { "camera-vision": { enabled }, cameraVision: { enabled } }
           : { [skillId]: { enabled } };
-      const response = await fetch("/api/settings", {
+      const response = await apiFetch("/api/settings", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ skillSettings: skillSettingsPayload })

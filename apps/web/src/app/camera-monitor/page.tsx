@@ -9,6 +9,7 @@ import {
   labelForSkillBadgeState,
   resolveSkillBadgeState
 } from "../../lib/skill-badge";
+import { apiFetch } from "../../lib/api-fetch";
 
 type CameraTimelineItem = {
   camera_id?: string;
@@ -59,10 +60,10 @@ export default function CameraMonitorPage() {
     setLoading(true);
     setStatus("");
     const [settingsRes, timelineRes, skillsRes, healthRes] = await Promise.all([
-      fetch("/api/settings"),
-      fetch("/api/camera/timeline"),
-      fetch("/api/skills/manifests"),
-      fetch("/api/system/health")
+      apiFetch("/api/settings"),
+      apiFetch("/api/camera/timeline"),
+      apiFetch("/api/skills/manifests"),
+      apiFetch("/api/system/health")
     ]);
     const settingsData = (await settingsRes.json()) as { settings?: AppSettings };
     const timelineData = (await timelineRes.json()) as { items?: CameraTimelineItem[] };
@@ -125,7 +126,7 @@ export default function CameraMonitorPage() {
         disabledCameraNames: Array.from(disabled)
       }
     };
-    const response = await fetch("/api/settings", {
+    const response = await apiFetch("/api/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ skillSettings: nextSkillSettings })
@@ -161,7 +162,7 @@ export default function CameraMonitorPage() {
         rtspUrls: rewritten
       }
     };
-    const response = await fetch("/api/settings", {
+    const response = await apiFetch("/api/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ skillSettings: nextSkillSettings })
@@ -180,7 +181,7 @@ export default function CameraMonitorPage() {
   async function testCamera(cameraName: string): Promise<void> {
     setTestingName(cameraName);
     setStatus("");
-    const response = await fetch("/api/camera/test", {
+    const response = await apiFetch("/api/camera/test", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ cameraName })

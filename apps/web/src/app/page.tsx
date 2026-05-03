@@ -32,6 +32,7 @@ import { triggerBlobDownload } from "../lib/audio-download";
 import { loadAudioElementThenPlay } from "../lib/audio-play";
 import { shouldUseNovaIdentityBufferedChat } from "../lib/nova-identity-chat";
 import { useShellHeaderExtras } from "../components/shell-header-extras";
+import { apiFetch } from "../lib/api-fetch";
 
 type MediaItem = {
   url: string;
@@ -490,7 +491,7 @@ export default function HomePage() {
   const chatTtsAnalyserRef = useRef<AnalyserNode | null>(null);
   const chatTtsOrbRafRef = useRef<number | null>(null);
   /** Retries attaching the voice orb after layout (refs null on synchronous `playing`). */
-  const chatTtsOrbAttachRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chatTtsOrbAttachRetryRef = useRef<number | null>(null);
   const orbVoiceAttachAttemptRef = useRef(0);
   /** Voice-reactive level (0–1), asymmetric attack/release. */
   const novaOrbVoiceLevelRef = useRef(0);
@@ -652,7 +653,7 @@ export default function HomePage() {
     if (!loading) return;
     let active = true;
     const loadThought = async () => {
-      const response = await fetch("/api/thoughts?limit=8");
+      const response = await apiFetch("/api/thoughts?limit=8");
       const data = (await response.json()) as {
         items?: Array<{ title?: string; content?: string; category?: string }>;
       };
@@ -673,7 +674,7 @@ export default function HomePage() {
   useEffect(() => {
     void (async () => {
       try {
-        const response = await fetch("/api/settings");
+        const response = await apiFetch("/api/settings");
         const data = (await response.json()) as {
           settings?: {
             web?: {
@@ -939,7 +940,7 @@ export default function HomePage() {
       return sttServerConfiguredRef.current;
     }
     try {
-      const r = await fetch("/api/voice/stt-status");
+      const r = await apiFetch("/api/voice/stt-status");
       const j = (await r.json()) as { configured?: boolean };
       sttServerConfiguredRef.current = Boolean(j.configured);
     } catch {
@@ -1098,7 +1099,7 @@ export default function HomePage() {
   const persistSendOnEnter = useCallback(async (next: boolean) => {
     setSendOnEnter(next);
     try {
-      await fetch("/api/settings", {
+      await apiFetch("/api/settings", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ web: { sendOnEnter: next } })
@@ -1111,7 +1112,7 @@ export default function HomePage() {
   const persistVoiceDictationAutoSend = useCallback(async (next: boolean) => {
     setVoiceDictationAutoSend(next);
     try {
-      await fetch("/api/settings", {
+      await apiFetch("/api/settings", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ web: { voiceDictationAutoSend: next } })
@@ -1124,7 +1125,7 @@ export default function HomePage() {
   const persistVoiceContinuousConversation = useCallback(async (next: boolean) => {
     setVoiceContinuousConversation(next);
     try {
-      await fetch("/api/settings", {
+      await apiFetch("/api/settings", {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ web: { voiceContinuousConversation: next } })
@@ -1297,7 +1298,7 @@ export default function HomePage() {
       chatTtsFetchAbortRef.current = ac;
       setTtsGeneratingTurnId(turnId);
       try {
-        const response = await fetch("/api/voice/speak-audio", {
+        const response = await apiFetch("/api/voice/speak-audio", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ text: cleaned }),
@@ -1363,7 +1364,7 @@ export default function HomePage() {
       mime = cached.mime;
       touchChatTtsCacheOrder(order, key);
     } else {
-      const response = await fetch("/api/voice/speak-audio", {
+      const response = await apiFetch("/api/voice/speak-audio", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ text: cleaned })
@@ -1387,7 +1388,7 @@ export default function HomePage() {
     try {
       const form = new FormData();
       form.append("audio", blob, `nova-mic-${Date.now()}.webm`);
-      const response = await fetch("/api/voice/transcribe-audio", { method: "POST", body: form });
+      const response = await apiFetch("/api/voice/transcribe-audio", { method: "POST", body: form });
       const data = (await response.json().catch(() => ({}))) as { text?: string; error?: string };
       if (!response.ok) {
         const raw = data.error ?? "Transcription failed.";
@@ -1698,7 +1699,7 @@ export default function HomePage() {
       } else {
         const startedAt = Date.now();
         let emotionRefreshedOnFirstToken = false;
-        const response = await fetch("/api/chat/stream", {
+        const response = await apiFetch("/api/chat/stream", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -1894,7 +1895,7 @@ export default function HomePage() {
     }, 140);
     try {
       const base64 = await fileToBase64(target.file);
-      const response = await fetch("/api/media/upload", {
+      const response = await apiFetch("/api/media/upload", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ filename: target.file.name, base64 })
@@ -2887,7 +2888,7 @@ async function fetchNovaBufferedChatReply(input: {
   imageUrl?: string;
   signal: AbortSignal;
 }): Promise<{ ok: true; reply: string } | { ok: false; error: string }> {
-  const response = await fetch("/api/chat", {
+  const response = await apiFetch("/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({

@@ -5,6 +5,7 @@ import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import Link from "next/link";
 import { parseCameraConfig, type ParsedCameraConfig } from "../../lib/camera-config";
+import { apiFetch } from "../../lib/api-fetch";
 
 type CameraItem = {
   camera_id: string;
@@ -20,7 +21,10 @@ export default function CamerasPage() {
   const [configured, setConfigured] = useState<ParsedCameraConfig[]>([]);
 
   async function load(): Promise<void> {
-    const [timelineRes, settingsRes] = await Promise.all([fetch("/api/camera/timeline"), fetch("/api/settings")]);
+    const [timelineRes, settingsRes] = await Promise.all([
+      apiFetch("/api/camera/timeline"),
+      apiFetch("/api/settings")
+    ]);
     const timelineData = (await timelineRes.json()) as { items?: CameraItem[] };
     const settingsData = (await settingsRes.json()) as { settings?: { skillSettings?: Record<string, Record<string, unknown>> } };
     if (timelineRes.ok) setItems(timelineData.items ?? []);

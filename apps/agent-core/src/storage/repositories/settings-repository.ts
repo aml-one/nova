@@ -347,7 +347,7 @@ export class SettingsRepository {
             : []
         },
         emotions: {
-          enabled: parsed.emotions?.enabled === true,
+          enabled: parsed.emotions?.enabled === false ? false : true,
           expressionStyle:
             parsed.emotions?.expressionStyle === "subtle" || parsed.emotions?.expressionStyle === "expressive"
               ? parsed.emotions.expressionStyle
@@ -360,7 +360,7 @@ export class SettingsRepository {
           labelPrefix: typeof parsed.identityBackup?.labelPrefix === "string" ? parsed.identityBackup.labelPrefix : "nova-core"
         },
         memoryBear: {
-          enabled: parsed.memoryBear?.enabled === true,
+          enabled: parsed.memoryBear?.enabled === false ? false : true,
           baseUrl: typeof parsed.memoryBear?.baseUrl === "string" ? parsed.memoryBear.baseUrl.trim() : "",
           apiKey: memoryBearApiKey,
           searchSwitch:
@@ -378,10 +378,11 @@ export class SettingsRepository {
               : ""
         },
         orpheusTts: {
-          enabled: parsed.orpheusTts?.enabled === true,
+          enabled: parsed.orpheusTts?.enabled === false ? false : true,
           baseUrl: typeof parsed.orpheusTts?.baseUrl === "string" ? parsed.orpheusTts.baseUrl.trim() : "",
           apiKey: orpheusTtsApiKey,
-          voice: typeof parsed.orpheusTts?.voice === "string" ? parsed.orpheusTts.voice.trim().slice(0, 128) : "",
+          voice:
+            (typeof parsed.orpheusTts?.voice === "string" ? parsed.orpheusTts.voice.trim().slice(0, 128) : "") || "tara",
           model: typeof parsed.orpheusTts?.model === "string" ? parsed.orpheusTts.model.trim().slice(0, 128) : "",
           responseFormat: normalizeOrpheusFormat(parsed.orpheusTts?.responseFormat)
         },

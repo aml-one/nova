@@ -85,7 +85,7 @@ function AppMainColumn({ children }: { children: ReactNode }) {
   const chatHeaderMode = pathname === "/" && extras != null;
 
   return (
-    <>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <header className="sticky top-0 z-30 shrink-0 border-b bg-surface/90 backdrop-blur">
         <div className="flex items-center justify-between gap-2 px-4 py-2">
           <div className="min-w-0 flex-1">
@@ -105,8 +105,8 @@ function AppMainColumn({ children }: { children: ReactNode }) {
       </header>
       <main
         className={cn(
-          "flex min-h-0 flex-1 flex-col",
-          pathname === "/" ? "min-h-0 overflow-hidden px-0 py-0" : "overflow-y-auto px-4 py-6"
+          "flex min-h-0 min-w-0 flex-1 flex-col",
+          pathname === "/" ? "min-h-0 overflow-hidden px-0 py-0" : "overflow-y-auto overflow-x-hidden px-4 py-6"
         )}
       >
         {children}
@@ -117,7 +117,7 @@ function AppMainColumn({ children }: { children: ReactNode }) {
           pathname === "/" ? "hidden" : "px-4 pb-4"
         )}
       />
-    </>
+    </div>
   );
 }
 
@@ -192,7 +192,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           {!navCollapsed ? <div className="text-center text-[11px] text-muted">Made by AmL</div> : null}
         </div>
       </aside>
-      <div className={cn("flex min-h-0 flex-1 flex-col", navCollapsed ? "ml-14" : "ml-56")}>
+      <div
+        className={cn(
+          "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+          navCollapsed ? "ml-14" : "ml-56"
+        )}
+      >
         <ShellHeaderExtrasProvider>
           <AppMainColumn>{children}</AppMainColumn>
         </ShellHeaderExtrasProvider>
