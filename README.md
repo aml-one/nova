@@ -49,6 +49,8 @@ Local-first headless AI agent framework for macOS, Windows, and Ubuntu.
 
 ## Installation Guide
 
+For a **long-form, step-by-step** guide (Nova core, optional providers, SentiCore / Orpheus / MemoryBear, offline repo backups, and troubleshooting), see **[docs/install-nova-complete-guide.md](docs/install-nova-complete-guide.md)**.
+
 ### Prerequisites (all platforms)
 - Git 2.40+
 - Node.js 22 LTS (recommended)

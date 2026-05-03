@@ -130,6 +130,35 @@ const DEFAULT_SETTINGS: AppSettings = {
   offlineMode: {
     enabled: process.env.NOVA_OFFLINE_MODE === "true"
   },
+  memoryBear: {
+    enabled: process.env.NOVA_MEMORYBEAR_ENABLED === "true",
+    baseUrl: process.env.NOVA_MEMORYBEAR_BASE_URL?.trim() ?? "",
+    apiKey: process.env.NOVA_MEMORYBEAR_API_KEY?.trim() ?? "",
+    searchSwitch:
+      process.env.NOVA_MEMORYBEAR_SEARCH_SWITCH === "0" || process.env.NOVA_MEMORYBEAR_SEARCH_SWITCH === "1"
+        ? process.env.NOVA_MEMORYBEAR_SEARCH_SWITCH
+        : "2",
+    storageType: process.env.NOVA_MEMORYBEAR_STORAGE_TYPE === "rag" ? "rag" : "neo4j",
+    syncWrites: process.env.NOVA_MEMORYBEAR_SYNC_WRITES === "true"
+  },
+  sentiCore: {
+    enabled: process.env.NOVA_SENTICORE_ENABLED === "true",
+    orchestrationMarkdownPath: process.env.NOVA_SENTICORE_ORCHESTRATION_PATH?.trim() ?? ""
+  },
+  orpheusTts: {
+    enabled: process.env.NOVA_ORPHEUS_TTS_ENABLED === "true",
+    baseUrl: process.env.NOVA_ORPHEUS_TTS_BASE_URL?.trim() ?? "",
+    apiKey: process.env.NOVA_ORPHEUS_TTS_API_KEY?.trim() ?? "",
+    voice: process.env.NOVA_ORPHEUS_TTS_VOICE?.trim() ?? "",
+    model: process.env.NOVA_ORPHEUS_TTS_MODEL?.trim() ?? "",
+    responseFormat:
+      process.env.NOVA_ORPHEUS_TTS_FORMAT === "wav" ||
+      process.env.NOVA_ORPHEUS_TTS_FORMAT === "opus" ||
+      process.env.NOVA_ORPHEUS_TTS_FORMAT === "pcm" ||
+      process.env.NOVA_ORPHEUS_TTS_FORMAT === "flac"
+        ? process.env.NOVA_ORPHEUS_TTS_FORMAT
+        : "mp3"
+  },
   skillSettings: {}
 };
 
@@ -330,6 +359,27 @@ export class SettingsService {
       },
       offlineMode: {
         enabled: update.offlineMode?.enabled ?? current.offlineMode.enabled
+      },
+      memoryBear: {
+        enabled: update.memoryBear?.enabled ?? current.memoryBear.enabled,
+        baseUrl: update.memoryBear?.baseUrl ?? current.memoryBear.baseUrl,
+        apiKey: update.memoryBear?.apiKey ?? current.memoryBear.apiKey,
+        searchSwitch: update.memoryBear?.searchSwitch ?? current.memoryBear.searchSwitch,
+        storageType: update.memoryBear?.storageType ?? current.memoryBear.storageType,
+        syncWrites: update.memoryBear?.syncWrites ?? current.memoryBear.syncWrites
+      },
+      sentiCore: {
+        enabled: update.sentiCore?.enabled ?? current.sentiCore.enabled,
+        orchestrationMarkdownPath:
+          update.sentiCore?.orchestrationMarkdownPath ?? current.sentiCore.orchestrationMarkdownPath
+      },
+      orpheusTts: {
+        enabled: update.orpheusTts?.enabled ?? current.orpheusTts.enabled,
+        baseUrl: update.orpheusTts?.baseUrl ?? current.orpheusTts.baseUrl,
+        apiKey: update.orpheusTts?.apiKey ?? current.orpheusTts.apiKey,
+        voice: update.orpheusTts?.voice ?? current.orpheusTts.voice,
+        model: update.orpheusTts?.model ?? current.orpheusTts.model,
+        responseFormat: update.orpheusTts?.responseFormat ?? current.orpheusTts.responseFormat
       },
       skillSettings: mergeSkillSettings(current.skillSettings, update.skillSettings)
     });
@@ -536,6 +586,37 @@ export class SettingsService {
       },
       offlineMode: {
         enabled: settings.offlineMode?.enabled === true
+      },
+      memoryBear: {
+        enabled: settings.memoryBear?.enabled === true,
+        baseUrl: String(settings.memoryBear?.baseUrl ?? "").trim(),
+        apiKey: String(settings.memoryBear?.apiKey ?? "").trim(),
+        searchSwitch:
+          settings.memoryBear?.searchSwitch === "0" || settings.memoryBear?.searchSwitch === "1"
+            ? settings.memoryBear.searchSwitch
+            : "2",
+        storageType: settings.memoryBear?.storageType === "rag" ? "rag" : "neo4j",
+        syncWrites: settings.memoryBear?.syncWrites === true
+      },
+      sentiCore: {
+        enabled: settings.sentiCore?.enabled === true,
+        orchestrationMarkdownPath: String(settings.sentiCore?.orchestrationMarkdownPath ?? "")
+          .trim()
+          .slice(0, 2048)
+      },
+      orpheusTts: {
+        enabled: settings.orpheusTts?.enabled === true,
+        baseUrl: String(settings.orpheusTts?.baseUrl ?? "").trim(),
+        apiKey: String(settings.orpheusTts?.apiKey ?? "").trim(),
+        voice: String(settings.orpheusTts?.voice ?? "").trim().slice(0, 128),
+        model: String(settings.orpheusTts?.model ?? "").trim().slice(0, 128),
+        responseFormat:
+          settings.orpheusTts?.responseFormat === "wav" ||
+          settings.orpheusTts?.responseFormat === "opus" ||
+          settings.orpheusTts?.responseFormat === "pcm" ||
+          settings.orpheusTts?.responseFormat === "flac"
+            ? settings.orpheusTts.responseFormat
+            : "mp3"
       },
       skillSettings:
         settings.skillSettings && typeof settings.skillSettings === "object"

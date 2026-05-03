@@ -38,7 +38,7 @@ async function bootstrap(): Promise<void> {
     () => settings.get().skillSettings
   );
   const router = new ModelRouter();
-  const memory = new MemoryService();
+  const memory = new MemoryService(() => settings.get());
   const personas = new PersonaLoader();
   const identities = new PhoneIdentityResolver();
   const userProfiles = new UserProfileStore();

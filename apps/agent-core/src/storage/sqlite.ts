@@ -3,7 +3,7 @@ import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 let database: DatabaseSync | undefined;
-const LATEST_SCHEMA_VERSION = 16;
+const LATEST_SCHEMA_VERSION = 17;
 
 export function getDatabase(): DatabaseSync {
   if (database) {
@@ -481,6 +481,16 @@ function runMigrations(db: DatabaseSync): void {
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_mobile_push_token_unique
       ON mobile_push_registrations(token);
+  `);
+    },
+    () => {
+      db.exec(`
+    CREATE TABLE IF NOT EXISTS memorybear_user_link (
+      nova_user_id TEXT PRIMARY KEY,
+      end_user_id TEXT NOT NULL,
+      memory_config_id TEXT NOT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
     }
   ];

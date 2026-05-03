@@ -98,6 +98,23 @@ type SettingsState = {
     providerPricing: { ollamaPer1k: number; lmstudioPer1k: number; copilotPer1k: number };
   };
   emotions: { enabled: boolean; expressionStyle: "subtle" | "balanced" | "expressive"; mirrorUserValence: boolean };
+  memoryBear: {
+    enabled: boolean;
+    baseUrl: string;
+    apiKey: string;
+    searchSwitch: "0" | "1" | "2";
+    storageType: "neo4j" | "rag";
+    syncWrites: boolean;
+  };
+  sentiCore: { enabled: boolean; orchestrationMarkdownPath: string };
+  orpheusTts: {
+    enabled: boolean;
+    baseUrl: string;
+    apiKey: string;
+    voice: string;
+    model: string;
+    responseFormat: "mp3" | "wav" | "opus" | "pcm" | "flac";
+  };
   messagingAccess: { novaPhoneNumber: string; denyUnknownNumbers: boolean; systemAdmins: string[]; guests: string[] };
   shell: { timeoutMs: number; maxOutputBytes: number };
   skills: { isolationEnabled: boolean; timeoutMs: number; maxMemoryMb: number; skillAuthoringDisabled: boolean };
@@ -181,6 +198,23 @@ const DEFAULT_SETTINGS: SettingsState = {
     providerPricing: { ollamaPer1k: 0.0002, lmstudioPer1k: 0.001, copilotPer1k: 0.008 }
   },
   emotions: { enabled: false, expressionStyle: "balanced", mirrorUserValence: true },
+  memoryBear: {
+    enabled: false,
+    baseUrl: "http://127.0.0.1:8000",
+    apiKey: "",
+    searchSwitch: "2",
+    storageType: "neo4j",
+    syncWrites: true
+  },
+  sentiCore: { enabled: false, orchestrationMarkdownPath: "" },
+  orpheusTts: {
+    enabled: false,
+    baseUrl: "http://127.0.0.1:5005",
+    apiKey: "",
+    voice: "",
+    model: "",
+    responseFormat: "mp3"
+  },
   messagingAccess: { novaPhoneNumber: "", denyUnknownNumbers: true, systemAdmins: [], guests: [] },
   shell: { timeoutMs: 30000, maxOutputBytes: 1024 * 1024 },
   skills: { isolationEnabled: false, timeoutMs: 15000, maxMemoryMb: 256, skillAuthoringDisabled: false },
@@ -828,7 +862,7 @@ export default function SettingsPage() {
     { id: "models", label: "Models", tone: "purple" as const },
     { id: "identity", label: "Identity", tone: "pink" as const },
     { id: "channels", label: "Channels", tone: "orange" as const },
-    { id: "learning", label: "Learning", tone: "green" as const },
+    { id: "learning", label: "Memory & cores", tone: "green" as const },
     { id: "backup", label: "Backup", tone: "pink" as const },
     { id: "updates", label: "Updates", tone: "yellow" as const }
   ].concat(
@@ -1989,7 +2023,7 @@ export default function SettingsPage() {
 
         {tab === "learning" ? (
           <Card className="space-y-3">
-            <h2 className="text-lg font-semibold">Learning & Emotion</h2>
+            <h2 className="text-lg font-semibold">Learning, memory & cognitive cores</h2>
             <label className="flex items-center gap-2"><Checkbox checked={settings.learning.enabled} onChange={(e) => setSettings((p) => ({ ...p, learning: { ...p.learning, enabled: e.target.checked } }))} /> Enable background learning</label>
             <div className="grid gap-2 md:grid-cols-3">
               <label className="grid gap-1 text-xs">
@@ -2012,6 +2046,185 @@ export default function SettingsPage() {
               <option value="balanced">Balanced</option>
               <option value="expressive">Expressive</option>
             </Select>
+            <label className="flex items-center gap-2">
+              <Checkbox
+                checked={settings.emotions.mirrorUserValence}
+                onChange={(e) => setSettings((p) => ({ ...p, emotions: { ...p.emotions, mirrorUserValence: e.target.checked } }))}
+              />
+              Mirror user valence from phrasing
+            </label>
+            <div className="mt-4 border-t border-border pt-3 space-y-2">
+              <h3 className="text-sm font-semibold">SentiCore (optional)</h3>
+              <p className="text-xs text-muted">
+                Point Nova at a SentiCore orchestration markdown file on the <strong>agent-core host</strong> (clone{" "}
+                <a className="underline" href="https://github.com/chuchuyei/SentiCore" rel="noreferrer" target="_blank">
+                  SentiCore
+                </a>
+                ). Injected after local/MemoryBear memory so facts stay ahead of tone and orchestration rules.
+              </p>
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={settings.sentiCore.enabled}
+                  onChange={(e) => setSettings((p) => ({ ...p, sentiCore: { ...p.sentiCore, enabled: e.target.checked } }))}
+                />
+                Enable SentiCore orchestration block
+              </label>
+              <label className="grid gap-1 text-xs">
+                Path to orchestration .md (absolute or ~/…)
+                <Input
+                  value={settings.sentiCore.orchestrationMarkdownPath}
+                  onChange={(e) =>
+                    setSettings((p) => ({ ...p, sentiCore: { ...p.sentiCore, orchestrationMarkdownPath: e.target.value } }))
+                  }
+                  placeholder="~/nova-support/SentiCore/…/orchestration.md"
+                />
+              </label>
+            </div>
+            <div className="mt-4 border-t border-border pt-3 space-y-2">
+              <h3 className="text-sm font-semibold">Orpheus TTS (optional)</h3>
+              <p className="text-xs text-muted">
+                <a className="underline" href="https://github.com/Lex-au/Orpheus-FastAPI" rel="noreferrer" target="_blank">
+                  Orpheus-FastAPI
+                </a>{" "}
+                exposes OpenAI-compatible <code className="text-xs">POST /v1/audio/speech</code>. Enables speakable phrasing in chat and audio preview on the Voice page.
+              </p>
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={settings.orpheusTts.enabled}
+                  onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, enabled: e.target.checked } }))}
+                />
+                Enable Orpheus HTTP TTS
+              </label>
+              <label className="grid gap-1 text-xs">
+                Base URL (e.g. http://127.0.0.1:5005)
+                <Input
+                  value={settings.orpheusTts.baseUrl}
+                  onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, baseUrl: e.target.value } }))}
+                  placeholder="http://127.0.0.1:5005"
+                />
+              </label>
+              <label className="grid gap-1 text-xs">
+                API key (optional)
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  value={settings.orpheusTts.apiKey}
+                  onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, apiKey: e.target.value } }))}
+                  placeholder="Bearer if required"
+                />
+              </label>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="grid gap-1 text-xs">
+                  Voice id
+                  <Input
+                    value={settings.orpheusTts.voice}
+                    onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, voice: e.target.value } }))}
+                    placeholder="upstream default / speaker id"
+                  />
+                </label>
+                <label className="grid gap-1 text-xs">
+                  Model (optional)
+                  <Input
+                    value={settings.orpheusTts.model}
+                    onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, model: e.target.value } }))}
+                    placeholder="tts-1 or omit"
+                  />
+                </label>
+              </div>
+              <label className="grid gap-1 text-xs">
+                Response format
+                <Select
+                  value={settings.orpheusTts.responseFormat}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      orpheusTts: { ...p.orpheusTts, responseFormat: e.target.value as SettingsState["orpheusTts"]["responseFormat"] }
+                    }))
+                  }
+                >
+                  <option value="mp3">mp3</option>
+                  <option value="wav">wav</option>
+                  <option value="opus">opus</option>
+                  <option value="pcm">pcm</option>
+                  <option value="flac">flac</option>
+                </Select>
+              </label>
+            </div>
+            <div className="mt-4 border-t border-border pt-3 space-y-2">
+              <h3 className="text-sm font-semibold">MemoryBear (optional)</h3>
+              <p className="text-xs text-muted">
+                Connect to a running{" "}
+                <a className="underline" href="https://github.com/SuanmoSuanyangTechnology/MemoryBear" rel="noreferrer" target="_blank">
+                  MemoryBear
+                </a>{" "}
+                API. Nova maps each Nova user to a MemoryBear end-user automatically. Paste a service API key with the <code className="text-xs">memory</code> scope.
+              </p>
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={settings.memoryBear.enabled}
+                  onChange={(e) => setSettings((p) => ({ ...p, memoryBear: { ...p.memoryBear, enabled: e.target.checked } }))}
+                />
+                Enable MemoryBear retrieval + optional writes
+              </label>
+              <label className="grid gap-1 text-xs">
+                MemoryBear base URL (e.g. http://127.0.0.1:8000)
+                <Input
+                  value={settings.memoryBear.baseUrl}
+                  onChange={(e) => setSettings((p) => ({ ...p, memoryBear: { ...p.memoryBear, baseUrl: e.target.value } }))}
+                  placeholder="http://127.0.0.1:8000"
+                />
+              </label>
+              <label className="grid gap-1 text-xs">
+                API key (Bearer)
+                <Input
+                  type="password"
+                  autoComplete="off"
+                  value={settings.memoryBear.apiKey}
+                  onChange={(e) => setSettings((p) => ({ ...p, memoryBear: { ...p.memoryBear, apiKey: e.target.value } }))}
+                  placeholder="sk-…"
+                />
+              </label>
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="grid gap-1 text-xs">
+                  Search mode
+                  <Select
+                    value={settings.memoryBear.searchSwitch}
+                    onChange={(e) =>
+                      setSettings((p) => ({
+                        ...p,
+                        memoryBear: { ...p.memoryBear, searchSwitch: e.target.value as SettingsState["memoryBear"]["searchSwitch"] }
+                      }))
+                    }
+                  >
+                    <option value="0">0 — verify</option>
+                    <option value="1">1 — direct</option>
+                    <option value="2">2 — fast (default)</option>
+                  </Select>
+                </label>
+                <label className="grid gap-1 text-xs">
+                  Storage
+                  <Select
+                    value={settings.memoryBear.storageType}
+                    onChange={(e) =>
+                      setSettings((p) => ({
+                        ...p,
+                        memoryBear: { ...p.memoryBear, storageType: e.target.value as SettingsState["memoryBear"]["storageType"] }
+                      }))
+                    }
+                  >
+                    <option value="neo4j">neo4j</option>
+                    <option value="rag">rag</option>
+                  </Select>
+                </label>
+              </div>
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={settings.memoryBear.syncWrites}
+                  onChange={(e) => setSettings((p) => ({ ...p, memoryBear: { ...p.memoryBear, syncWrites: e.target.checked } }))}
+                />
+                Sync each chat turn to MemoryBear after reply (write/sync)
+              </label>
+            </div>
           </Card>
         ) : null}
 
@@ -2649,6 +2862,36 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
       enabled: value?.emotions?.enabled ?? DEFAULT_SETTINGS.emotions.enabled,
       expressionStyle: value?.emotions?.expressionStyle ?? DEFAULT_SETTINGS.emotions.expressionStyle,
       mirrorUserValence: value?.emotions?.mirrorUserValence ?? DEFAULT_SETTINGS.emotions.mirrorUserValence
+    },
+    memoryBear: {
+      enabled: value?.memoryBear?.enabled ?? DEFAULT_SETTINGS.memoryBear.enabled,
+      baseUrl: value?.memoryBear?.baseUrl ?? DEFAULT_SETTINGS.memoryBear.baseUrl,
+      apiKey: value?.memoryBear?.apiKey ?? DEFAULT_SETTINGS.memoryBear.apiKey,
+      searchSwitch:
+        value?.memoryBear?.searchSwitch === "0" || value?.memoryBear?.searchSwitch === "1"
+          ? value.memoryBear.searchSwitch
+          : DEFAULT_SETTINGS.memoryBear.searchSwitch,
+      storageType: value?.memoryBear?.storageType === "rag" ? "rag" : DEFAULT_SETTINGS.memoryBear.storageType,
+      syncWrites: value?.memoryBear?.syncWrites ?? DEFAULT_SETTINGS.memoryBear.syncWrites
+    },
+    sentiCore: {
+      enabled: value?.sentiCore?.enabled ?? DEFAULT_SETTINGS.sentiCore.enabled,
+      orchestrationMarkdownPath:
+        value?.sentiCore?.orchestrationMarkdownPath ?? DEFAULT_SETTINGS.sentiCore.orchestrationMarkdownPath
+    },
+    orpheusTts: {
+      enabled: value?.orpheusTts?.enabled ?? DEFAULT_SETTINGS.orpheusTts.enabled,
+      baseUrl: value?.orpheusTts?.baseUrl ?? DEFAULT_SETTINGS.orpheusTts.baseUrl,
+      apiKey: value?.orpheusTts?.apiKey ?? DEFAULT_SETTINGS.orpheusTts.apiKey,
+      voice: value?.orpheusTts?.voice ?? DEFAULT_SETTINGS.orpheusTts.voice,
+      model: value?.orpheusTts?.model ?? DEFAULT_SETTINGS.orpheusTts.model,
+      responseFormat:
+        value?.orpheusTts?.responseFormat === "wav" ||
+        value?.orpheusTts?.responseFormat === "opus" ||
+        value?.orpheusTts?.responseFormat === "pcm" ||
+        value?.orpheusTts?.responseFormat === "flac"
+          ? value.orpheusTts.responseFormat
+          : DEFAULT_SETTINGS.orpheusTts.responseFormat
     },
     messagingAccess: {
       novaPhoneNumber: value?.messagingAccess?.novaPhoneNumber ?? DEFAULT_SETTINGS.messagingAccess.novaPhoneNumber,

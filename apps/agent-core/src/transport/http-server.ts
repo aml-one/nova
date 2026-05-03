@@ -84,7 +84,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   const router = new ChannelRouter();
   const dispatcher = new OutboundDispatcher();
   const logger = new Logger();
-  const voice = new VoiceService();
+  const voice = new VoiceService(() => options.settings.get());
   const rag = new RagService();
   const backup = new BackupService();
   const identityBackup = new IdentityBackupService();
@@ -1040,6 +1040,28 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const payload = (await readJson(request)) as { text: string; outputPath?: string };
         const out = await voice.speak(payload.text, payload.outputPath);
         return sendJson(response, 200, { outputPath: out, correlationId });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/voice/speak-audio") {
+        const payload = (await readJson(request)) as { text?: string };
+        const text = typeof payload.text === "string" ? payload.text.trim() : "";
+        if (!text) {
+          return sendJson(response, 400, { error: "text is required", correlationId });
+        }
+        try {
+          const body = await voice.synthesizeOrpheusBuffer(text);
+          response.writeHead(200, {
+            "content-type": voice.mimeTypeForCurrentFormat(),
+            "x-correlation-id": correlationId,
+            "cache-control": "no-store"
+          });
+          response.end(body);
+        } catch (error) {
+          return sendJson(response, 502, {
+            error: error instanceof Error ? error.message : "tts failed",
+            correlationId
+          });
+        }
+        return;
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/rag/index") {
         const payload = (await readJson(request)) as { path: string; content: string };

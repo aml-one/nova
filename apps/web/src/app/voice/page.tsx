@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Card } from "../../components/ui/card";
 import { Input } from "../../components/ui/input";
 import { Button } from "../../components/ui/button";
@@ -9,6 +9,10 @@ export default function VoicePage() {
   const [status, setStatus] = useState<{ enabled?: boolean; wakeWord?: string; command?: string }>({});
   const [phrase, setPhrase] = useState("hey nova");
   const [result, setResult] = useState<unknown>(null);
+  const [ttsLine, setTtsLine] = useState("Hello from Nova.");
+  const [ttsError, setTtsError] = useState<string | null>(null);
+  const [ttsBusy, setTtsBusy] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -69,6 +73,51 @@ export default function VoicePage() {
             <pre className="mt-2 overflow-x-auto rounded-ui border bg-surface2 p-2">{JSON.stringify(result, null, 2)}</pre>
           </details>
         ) : null}
+      </Card>
+      <Card className="space-y-2">
+        <h2 className="text-lg font-semibold">Orpheus TTS (via agent)</h2>
+        <p className="text-xs text-muted">
+          Requires <strong>Settings → Learning</strong>: Orpheus enabled with base URL. Audio is synthesized by agent-core (not the browser) and streamed back.
+        </p>
+        <Input value={ttsLine} onChange={(e) => setTtsLine(e.target.value)} placeholder="Text to speak" />
+        {ttsError ? <p className="text-xs text-red-600">{ttsError}</p> : null}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            tone="purple"
+            disabled={ttsBusy}
+            onClick={async () => {
+              setTtsError(null);
+              setTtsBusy(true);
+              try {
+                const response = await fetch("/api/voice/speak-audio", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ text: ttsLine })
+                });
+                if (!response.ok) {
+                  const data = (await response.json().catch(() => ({}))) as { error?: string };
+                  setTtsError(data.error ?? `HTTP ${response.status}`);
+                  return;
+                }
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const el = audioRef.current;
+                if (el) {
+                  el.src = url;
+                  await el.play().catch(() => setTtsError("Playback blocked or unsupported in this browser."));
+                }
+              } catch {
+                setTtsError("Request failed");
+              } finally {
+                setTtsBusy(false);
+              }
+            }}
+          >
+            {ttsBusy ? "Synthesizing…" : "Play TTS"}
+          </Button>
+        </div>
+        <audio ref={audioRef} className="mt-2 w-full" controls />
       </Card>
     </div>
   );

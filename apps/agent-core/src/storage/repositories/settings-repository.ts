@@ -89,6 +89,30 @@ export type AppSettings = {
     intervalDays: number;
     labelPrefix: string;
   };
+  /** Optional [MemoryBear](https://github.com/SuanmoSuanyangTechnology/MemoryBear) HTTP API (`/v1/...`) for long-term memory. */
+  memoryBear: {
+    enabled: boolean;
+    baseUrl: string;
+    apiKey: string;
+    searchSwitch: "0" | "1" | "2";
+    storageType: "neo4j" | "rag";
+    /** When true, each chat turn is written to MemoryBear after the reply is stored locally. */
+    syncWrites: boolean;
+  };
+  /** Optional [SentiCore](https://github.com/chuchuyei/SentiCore) orchestration markdown injected into chat (prompt-aligned). */
+  sentiCore: {
+    enabled: boolean;
+    orchestrationMarkdownPath: string;
+  };
+  /** Optional [Orpheus-FastAPI](https://github.com/Lex-au/Orpheus-FastAPI) OpenAI-compatible `POST /v1/audio/speech`. */
+  orpheusTts: {
+    enabled: boolean;
+    baseUrl: string;
+    apiKey: string;
+    voice: string;
+    model: string;
+    responseFormat: "mp3" | "wav" | "opus" | "pcm" | "flac";
+  };
   models: {
     defaultByProvider: {
       ollama: string;
@@ -164,6 +188,14 @@ export class SettingsRepository {
       const visionCloudApiKey = visionCloudKeyRaw.startsWith("enc:v1:")
         ? decryptValue(visionCloudKeyRaw) ?? ""
         : visionCloudKeyRaw;
+      const memoryBearApiKeyRaw = typeof parsed.memoryBear?.apiKey === "string" ? parsed.memoryBear.apiKey : "";
+      const memoryBearApiKey = memoryBearApiKeyRaw.startsWith("enc:v1:")
+        ? decryptValue(memoryBearApiKeyRaw) ?? ""
+        : memoryBearApiKeyRaw;
+      const orpheusApiKeyRaw = typeof parsed.orpheusTts?.apiKey === "string" ? parsed.orpheusTts.apiKey : "";
+      const orpheusTtsApiKey = orpheusApiKeyRaw.startsWith("enc:v1:")
+        ? decryptValue(orpheusApiKeyRaw) ?? ""
+        : orpheusApiKeyRaw;
       return {
         delegatedFolders: Array.isArray(parsed.delegatedFolders)
           ? parsed.delegatedFolders.filter((entry): entry is string => typeof entry === "string")
@@ -314,6 +346,32 @@ export class SettingsRepository {
           intervalDays: Number(parsed.identityBackup?.intervalDays ?? 0),
           labelPrefix: typeof parsed.identityBackup?.labelPrefix === "string" ? parsed.identityBackup.labelPrefix : "nova-core"
         },
+        memoryBear: {
+          enabled: parsed.memoryBear?.enabled === true,
+          baseUrl: typeof parsed.memoryBear?.baseUrl === "string" ? parsed.memoryBear.baseUrl.trim() : "",
+          apiKey: memoryBearApiKey,
+          searchSwitch:
+            parsed.memoryBear?.searchSwitch === "0" || parsed.memoryBear?.searchSwitch === "1"
+              ? parsed.memoryBear.searchSwitch
+              : "2",
+          storageType: parsed.memoryBear?.storageType === "rag" ? "rag" : "neo4j",
+          syncWrites: parsed.memoryBear?.syncWrites === true
+        },
+        sentiCore: {
+          enabled: parsed.sentiCore?.enabled === true,
+          orchestrationMarkdownPath:
+            typeof parsed.sentiCore?.orchestrationMarkdownPath === "string"
+              ? parsed.sentiCore.orchestrationMarkdownPath.trim().slice(0, 2048)
+              : ""
+        },
+        orpheusTts: {
+          enabled: parsed.orpheusTts?.enabled === true,
+          baseUrl: typeof parsed.orpheusTts?.baseUrl === "string" ? parsed.orpheusTts.baseUrl.trim() : "",
+          apiKey: orpheusTtsApiKey,
+          voice: typeof parsed.orpheusTts?.voice === "string" ? parsed.orpheusTts.voice.trim().slice(0, 128) : "",
+          model: typeof parsed.orpheusTts?.model === "string" ? parsed.orpheusTts.model.trim().slice(0, 128) : "",
+          responseFormat: normalizeOrpheusFormat(parsed.orpheusTts?.responseFormat)
+        },
         models: {
           defaultByProvider: {
             ollama: typeof parsed.models?.defaultByProvider?.ollama === "string" ? parsed.models.defaultByProvider.ollama : "",
@@ -386,6 +444,14 @@ export class SettingsRepository {
       vision: {
         ...settings.vision,
         cloudApiKey: settings.vision.cloudApiKey ? encryptValue(settings.vision.cloudApiKey) : ""
+      },
+      memoryBear: {
+        ...settings.memoryBear,
+        apiKey: settings.memoryBear.apiKey ? encryptValue(settings.memoryBear.apiKey) : ""
+      },
+      orpheusTts: {
+        ...settings.orpheusTts,
+        apiKey: settings.orpheusTts.apiKey ? encryptValue(settings.orpheusTts.apiKey) : ""
       }
     };
     db.prepare(
@@ -432,4 +498,13 @@ function getEncryptionKey(): Buffer | undefined {
   const secret = process.env.NOVA_SETTINGS_SECRET?.trim();
   if (!secret) return undefined;
   return createHash("sha256").update(secret).digest();
+}
+
+function normalizeOrpheusFormat(
+  raw: string | undefined
+): AppSettings["orpheusTts"]["responseFormat"] {
+  if (raw === "wav" || raw === "opus" || raw === "pcm" || raw === "flac") {
+    return raw;
+  }
+  return "mp3";
 }

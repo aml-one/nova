@@ -93,6 +93,26 @@ type AppSettingsPayload = {
     expressionStyle?: "subtle" | "balanced" | "expressive";
     mirrorUserValence?: boolean;
   };
+  memoryBear?: {
+    enabled?: boolean;
+    baseUrl?: string;
+    apiKey?: string;
+    searchSwitch?: "0" | "1" | "2";
+    storageType?: "neo4j" | "rag";
+    syncWrites?: boolean;
+  };
+  sentiCore?: {
+    enabled?: boolean;
+    orchestrationMarkdownPath?: string;
+  };
+  orpheusTts?: {
+    enabled?: boolean;
+    baseUrl?: string;
+    apiKey?: string;
+    voice?: string;
+    model?: string;
+    responseFormat?: "mp3" | "wav" | "opus" | "pcm" | "flac";
+  };
   identityBackup?: {
     enabled?: boolean;
     intervalDays?: number;

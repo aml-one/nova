@@ -49,6 +49,7 @@ import { resolveUploadedMediaUrl } from "../media/media-storage.js";
 import { SettingsService } from "../settings/settings-service.js";
 import type { ChannelAccessProfile } from "../security/phone-access.js";
 import { EmotionService } from "../emotion/emotion-service.js";
+import { buildUnifiedCognitiveCoreBlock } from "../emotion/cognitive-core-prompt.js";
 import { ThoughtRepository } from "../storage/repositories/thought-repository.js";
 import { getDatabase } from "../storage/sqlite.js";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
@@ -173,8 +174,13 @@ export class TaskOrchestrator {
     const profile = this.deps.userProfiles.get(userId);
     const persona = this.deps.personaLoader.getPersonaForUser(userId, input.channel, profile);
     const emotionState = this.deps.emotionService.updateFromUserInput(userId, input.text, runtimeSettings.emotions);
-    const emotionOverlay = this.deps.emotionService.buildSystemOverlay(emotionState, runtimeSettings.emotions);
-    const memoryContext = this.deps.memoryService.buildPromptContext(userId, input.text);
+    const cognitiveCoreBlock = buildUnifiedCognitiveCoreBlock(
+      this.deps.emotionService,
+      emotionState,
+      runtimeSettings.emotions,
+      runtimeSettings
+    );
+    const memoryContext = await this.deps.memoryService.buildPromptContext(userId, input.text);
     const pendingQuestionsForUser = this.deps.improvement.consumePendingQuestions(userId, 2);
     const runId = randomUUID();
     const correlationId = input.correlationId ?? runId;
@@ -715,14 +721,16 @@ export class TaskOrchestrator {
       { role: "system", content: persona.systemPrompt },
       { role: "system", content: INTEGRITY_SYSTEM_GUARD },
       ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
-      ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
+      ...memoryContext,
+      ...(cognitiveCoreBlock.trim()
+        ? ([{ role: "system" as const, content: cognitiveCoreBlock.trim() }] as const)
+        : []),
       ...(pendingQuestionsForUser.length > 0
         ? [{
             role: "system" as const,
             content: `You have follow-up questions for this user. Ask naturally near the end if still relevant:\n${pendingQuestionsForUser.map((item, index) => `${index + 1}. ${item}`).join("\n")}`
           }]
         : []),
-      ...memoryContext,
       ...visionExtras,
       { role: "user", content: userContent }
     ];
@@ -813,7 +821,9 @@ export class TaskOrchestrator {
           { role: "system", content: persona.systemPrompt },
           { role: "system", content: INTEGRITY_SYSTEM_GUARD },
           ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
-          ...(emotionOverlay ? [{ role: "system" as const, content: emotionOverlay }] : []),
+          ...(cognitiveCoreBlock.trim()
+            ? ([{ role: "system" as const, content: cognitiveCoreBlock.trim() }] as const)
+            : []),
           ...visionExtras,
           { role: "user", content: emergencyUser }
         ];
