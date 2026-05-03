@@ -17,8 +17,7 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({ error: err.error ?? "tts failed" }, { status: response.status });
   }
   const mime = response.headers.get("content-type") ?? "audio/wav";
-  const buf = await response.arrayBuffer();
-  return new NextResponse(buf, {
+  return new NextResponse(response.body, {
     status: 200,
     headers: {
       "content-type": mime,
