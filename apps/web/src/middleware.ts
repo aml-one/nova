@@ -23,7 +23,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/learning") ||
     pathname.startsWith("/thoughts") ||
     pathname.startsWith("/emotion") ||
-    pathname.startsWith("/security");
+    pathname.startsWith("/security") ||
+    pathname.startsWith("/services");
   let loginEnabled = true;
   try {
     const response = await fetch(new URL("/api/auth/state", request.url));
@@ -71,6 +72,7 @@ export const config = {
     "/learning/:path*",
     "/thoughts/:path*",
     "/emotion/:path*",
-    "/security/:path*"
+    "/security/:path*",
+    "/services/:path*"
   ]
 };
