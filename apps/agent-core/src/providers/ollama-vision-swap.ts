@@ -9,9 +9,18 @@ export function normalizeOllamaBaseUrl(baseUrl: string | undefined, fallback: st
   return trimBase(raw.length > 0 ? raw : fallback);
 }
 
+/** Root URL for Ollama native `/api/*` routes (strips `/v1` if someone pasted an OpenAI-compat base). */
+export function normalizeOllamaNativeApiBase(baseUrl: string | undefined, fallback: string): string {
+  let b = normalizeOllamaBaseUrl(baseUrl, fallback);
+  if (/\/v1$/i.test(b)) {
+    b = b.slice(0, -3);
+  }
+  return trimBase(b);
+}
+
 /** Best-effort unload: Ollama evicts the model shortly after a zero keep-alive generate. */
 export async function ollamaUnloadModel(baseUrl: string, model: string): Promise<void> {
-  const base = normalizeOllamaBaseUrl(baseUrl, "http://127.0.0.1:11434");
+  const base = normalizeOllamaNativeApiBase(baseUrl, "http://127.0.0.1:11434");
   const m = model.trim();
   if (!m) return;
   try {
@@ -36,7 +45,7 @@ export async function ollamaUnloadModel(baseUrl: string, model: string): Promise
  * generate to pull the chat model back and retries with short gaps (configurable via env).
  */
 export async function ollamaPrewarmChatModelAfterVisionSwap(baseUrl: string, chatModel: string): Promise<void> {
-  const base = normalizeOllamaBaseUrl(baseUrl, "http://127.0.0.1:11434");
+  const base = normalizeOllamaNativeApiBase(baseUrl, "http://127.0.0.1:11434");
   const m = chatModel.trim();
   if (!m) return;
   const settleMs = Math.min(10_000, Math.max(0, Number(process.env.NOVA_OLLAMA_POST_VISION_SETTLE_MS ?? "500")));

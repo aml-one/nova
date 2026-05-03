@@ -1,6 +1,7 @@
 import type { ChatRequest, ModelProvider, ModelResponse, ProviderHealth } from "@nova/sdk/provider";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import { registerAppSettingsForProviderToggles } from "./provider-integration.js";
+import { normalizeOllamaNativeApiBase } from "./ollama-vision-swap.js";
 
 let appSettingsGetter: (() => AppSettings) | undefined;
 
@@ -8,6 +9,73 @@ let appSettingsGetter: (() => AppSettings) | undefined;
 export function registerOllamaSettingsSource(getter: () => AppSettings): void {
   appSettingsGetter = getter;
   registerAppSettingsForProviderToggles(getter);
+}
+
+const OLLAMA_DISABLED_MODEL_SENTINEL = "__nova_ollama_provider_disabled__";
+const TAGS_CACHE_MS = 30_000;
+const tagsCache = new Map<string, { at: number; names: string[] }>();
+
+/**
+ * Base URL for native Ollama `/api/tags`, `/api/chat`, etc.
+ * Uses `OLLAMA_BASE_URL` when set; otherwise **Settings → Vision → Ollama vision base URL** (same host many users configure once).
+ */
+export function resolveOllamaNativeApiBaseUrl(): string {
+  let raw = process.env.OLLAMA_BASE_URL?.trim() ?? "";
+  if (!raw) {
+    try {
+      raw = appSettingsGetter?.().vision.ollamaBaseUrl?.trim() ?? "";
+    } catch {
+      // ignore
+    }
+  }
+  return normalizeOllamaNativeApiBase(raw || undefined, "http://127.0.0.1:11434");
+}
+
+async function fetchOllamaModelNames(baseUrl: string): Promise<string[]> {
+  const now = Date.now();
+  const prev = tagsCache.get(baseUrl);
+  if (prev && now - prev.at < TAGS_CACHE_MS) {
+    return prev.names;
+  }
+  try {
+    const response = await fetch(`${baseUrl}/api/tags`);
+    if (!response.ok) {
+      tagsCache.set(baseUrl, { at: now, names: [] });
+      return [];
+    }
+    const data = (await response.json()) as { models?: Array<{ name?: string }> };
+    const names = (data.models ?? [])
+      .map((m) => m.name?.trim())
+      .filter((x): x is string => Boolean(x));
+    tagsCache.set(baseUrl, { at: now, names });
+    return names;
+  } catch {
+    tagsCache.set(baseUrl, { at: now, names: [] });
+    return [];
+  }
+}
+
+function pickFallbackModelFromTags(requested: string, names: string[]): string | null {
+  if (names.length === 0) return null;
+  if (names.includes(requested)) return requested;
+  const bare = requested.split(":")[0] ?? requested;
+  const byPrefix = names.find((n) => n === bare || n.startsWith(`${bare}:`));
+  if (byPrefix) return byPrefix;
+  return names[0] ?? null;
+}
+
+async function readHttpErrorHint(response: Response): Promise<string> {
+  const bodyText = await response.text();
+  let hint = bodyText.slice(0, 400).replace(/\s+/g, " ").trim();
+  try {
+    const errJson = JSON.parse(bodyText) as { error?: string };
+    if (typeof errJson.error === "string" && errJson.error.trim()) {
+      hint = errJson.error.trim();
+    }
+  } catch {
+    // keep truncated body
+  }
+  return hint ? `: ${hint}` : "";
 }
 
 type OllamaChatResponse = {
@@ -20,11 +88,10 @@ type OllamaChatResponse = {
 };
 
 function ollamaAssistantText(message: OllamaChatResponse["message"]): string {
-  if (!message) return "";
   const raw =
-    message.content?.trim() ||
-    message.thinking?.trim() ||
-    message.reasoning?.trim() ||
+    message?.content?.trim() ||
+    message?.thinking?.trim() ||
+    message?.reasoning?.trim() ||
     "";
   return raw;
 }
@@ -109,14 +176,77 @@ function appendOllamaSseJsonLine(
   }
 }
 
+function buildOllamaChatBody(modelId: string, request: ChatRequest, stream: boolean): string {
+  return JSON.stringify({
+    model: modelId,
+    messages: request.messages,
+    stream,
+    think: ollamaThinkForApi(),
+    keep_alive: ollamaKeepAliveForApi(),
+    options: {
+      temperature: request.temperature ?? 0.2,
+      num_predict: ollamaNumPredict(request.maxTokens)
+    }
+  });
+}
+
 export class OllamaProvider implements ModelProvider {
   readonly name = "ollama";
-  private readonly baseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
-  private readonly model = process.env.OLLAMA_MODEL ?? "llama3.1";
+
+  private getDefaultModelId(): string {
+    const env = process.env.OLLAMA_MODEL?.trim() ?? "";
+    let fromSettings = "";
+    try {
+      fromSettings = appSettingsGetter?.().models.defaultByProvider.ollama?.trim() ?? "";
+    } catch {
+      // ignore
+    }
+    const raw = fromSettings || env;
+    if (!raw || raw === OLLAMA_DISABLED_MODEL_SENTINEL) {
+      return env || "llama3.1";
+    }
+    return raw;
+  }
+
+  private resolveModelForRequest(requested: string | undefined): string {
+    const t = requested?.trim();
+    if (t && t !== OLLAMA_DISABLED_MODEL_SENTINEL) return t;
+    return this.getDefaultModelId();
+  }
+
+  private async postChat(baseUrl: string, modelId: string, request: ChatRequest, stream: boolean): Promise<Response> {
+    return fetch(`${baseUrl}/api/chat`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: buildOllamaChatBody(modelId, request, stream)
+    });
+  }
+
+  /** If `/api/chat` returns 404 (unknown model), retry once using a name from `/api/tags`. */
+  private async postChatWithModelFallback(
+    baseUrl: string,
+    request: ChatRequest,
+    stream: boolean
+  ): Promise<{ response: Response; modelId: string }> {
+    let modelId = this.resolveModelForRequest(request.model);
+    let response = await this.postChat(baseUrl, modelId, request, stream);
+    if (response.status === 404) {
+      const names = await fetchOllamaModelNames(baseUrl);
+      const fb = pickFallbackModelFromTags(modelId, names);
+      if (fb && fb !== modelId) {
+        modelId = fb;
+        response = await this.postChat(baseUrl, modelId, request, stream);
+      }
+    }
+    return { response, modelId };
+  }
 
   async health(): Promise<ProviderHealth> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/tags`);
+      const baseUrl = resolveOllamaNativeApiBaseUrl();
+      const response = await fetch(`${baseUrl}/api/tags`);
       return {
         name: this.name,
         ok: response.ok,
@@ -132,26 +262,11 @@ export class OllamaProvider implements ModelProvider {
   }
 
   async chat(request: ChatRequest): Promise<ModelResponse> {
-    const response = await fetch(`${this.baseUrl}/api/chat`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        model: request.model ?? this.model,
-        messages: request.messages,
-        stream: false,
-        think: ollamaThinkForApi(),
-        keep_alive: ollamaKeepAliveForApi(),
-        options: {
-          temperature: request.temperature ?? 0.2,
-          num_predict: ollamaNumPredict(request.maxTokens)
-        }
-      })
-    });
-
+    const baseUrl = resolveOllamaNativeApiBaseUrl();
+    const { response, modelId } = await this.postChatWithModelFallback(baseUrl, request, false);
     if (!response.ok) {
-      throw new Error(`ollama chat failed with status ${response.status}`);
+      const hint = await readHttpErrorHint(response);
+      throw new Error(`ollama chat failed with status ${response.status}${hint}`);
     }
     const payload = (await response.json()) as OllamaChatResponse;
     const content = ollamaAssistantText(payload.message);
@@ -161,31 +276,20 @@ export class OllamaProvider implements ModelProvider {
     return {
       provider: this.name,
       content,
-      model: request.model ?? this.model
+      model: modelId
     };
   }
 
   async streamChat(request: ChatRequest, onToken: (token: string) => void): Promise<ModelResponse> {
     const startedAt = Date.now();
-    const response = await fetch(`${this.baseUrl}/api/chat`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json"
-      },
-      body: JSON.stringify({
-        model: request.model ?? this.model,
-        messages: request.messages,
-        stream: true,
-        think: ollamaThinkForApi(),
-        keep_alive: ollamaKeepAliveForApi(),
-        options: {
-          temperature: request.temperature ?? 0.2,
-          num_predict: ollamaNumPredict(request.maxTokens)
-        }
-      })
-    });
-    if (!response.ok || !response.body) {
-      throw new Error(`ollama chat stream failed with status ${response.status}`);
+    const baseUrl = resolveOllamaNativeApiBaseUrl();
+    const { response, modelId } = await this.postChatWithModelFallback(baseUrl, request, true);
+    if (!response.ok) {
+      const hint = await readHttpErrorHint(response);
+      throw new Error(`ollama chat stream failed with status ${response.status}${hint}`);
+    }
+    if (!response.body) {
+      throw new Error(`ollama chat stream failed with status ${response.status}: empty body`);
     }
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
@@ -216,7 +320,7 @@ export class OllamaProvider implements ModelProvider {
     return {
       provider: this.name,
       content: full.trim(),
-      model: request.model ?? this.model,
+      model: modelId,
       firstTokenMs
     };
   }

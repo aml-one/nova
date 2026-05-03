@@ -6,6 +6,7 @@ import {
   resolveCopilotRuntime
 } from "./copilot-credentials.js";
 import { isLmStudioIntegrationDisabled, isOllamaIntegrationDisabled } from "./provider-integration.js";
+import { resolveOllamaNativeApiBaseUrl } from "./ollama.js";
 
 type ProviderName = "ollama" | "lmstudio" | "copilot";
 
@@ -56,19 +57,21 @@ export class ProviderCatalogService {
     const copilotConfigured = !copilotDisabled && copilotLikelyConfigured(this.getSettings);
     const waConfigured = Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TOKEN);
     const signalConfigured = Boolean(process.env.SIGNAL_API_URL && process.env.SIGNAL_ACCOUNT_NUMBER);
+    const ollamaEndpointConfigured =
+      Boolean(process.env.OLLAMA_BASE_URL?.trim()) || Boolean(s.vision.ollamaBaseUrl?.trim());
     return {
       ollama: {
-        configured: ollamaDisabled || Boolean(process.env.OLLAMA_BASE_URL),
+        configured: ollamaDisabled || ollamaEndpointConfigured,
         details: ollamaDisabled
           ? "Ollama is disabled (Models → Ollama default model → Disabled)."
-          : process.env.OLLAMA_BASE_URL
-            ? "Endpoint configured"
-            : "Set OLLAMA_BASE_URL and OLLAMA_MODEL",
+          : ollamaEndpointConfigured
+            ? "Endpoint configured (env OLLAMA_BASE_URL and/or Settings → Vision → Ollama vision base URL)"
+            : "Set OLLAMA_BASE_URL or Vision Ollama base URL, and OLLAMA_MODEL / default model",
         steps: ollamaDisabled
           ? ["Choose Auto / env default or a model to enable Ollama."]
           : [
               "Install Ollama and pull a model",
-              "Set OLLAMA_BASE_URL",
+              "Set OLLAMA_BASE_URL or Settings → Vision → Ollama vision base URL",
               "Choose default model in Settings > Models"
             ]
       },
@@ -124,7 +127,7 @@ export class ProviderCatalogService {
   }
 
   private async listOllamaModels(): Promise<ProviderModelInfo[]> {
-    const baseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
+    const baseUrl = resolveOllamaNativeApiBaseUrl();
     try {
       const response = await fetch(`${baseUrl}/api/tags`);
       if (!response.ok) return [];
@@ -140,7 +143,7 @@ export class ProviderCatalogService {
 
   /** Uses /api/tags `capabilities` when present, otherwise probes /api/show in small batches. */
   private async listOllamaVisionModels(): Promise<ProviderModelInfo[]> {
-    const baseUrl = process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434";
+    const baseUrl = resolveOllamaNativeApiBaseUrl();
     type TagModel = { name?: string; capabilities?: string[] };
     let tagModels: TagModel[] = [];
     try {
