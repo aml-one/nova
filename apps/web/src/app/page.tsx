@@ -16,7 +16,8 @@ import {
   FaTrash,
   FaDownload,
   FaVolumeHigh,
-  FaXmark
+  FaXmark,
+  FaMicrophone
 } from "react-icons/fa6";
 import { Card } from "../components/ui/card";
 import { Textarea } from "../components/ui/textarea";
@@ -178,9 +179,14 @@ export default function HomePage() {
   const readAloudRef = useRef(readAloudMessages);
   const [ttsPlayingTurnId, setTtsPlayingTurnId] = useState<string | null>(null);
   const [ttsGeneratingTurnId, setTtsGeneratingTurnId] = useState<string | null>(null);
+  const [sttRecording, setSttRecording] = useState(false);
+  const [sttTranscribing, setSttTranscribing] = useState(false);
+  const [sttError, setSttError] = useState<string | null>(null);
   const chatTtsAudioRef = useRef<HTMLAudioElement | null>(null);
   const chatTtsObjectUrlRef = useRef<string | null>(null);
   const chatTtsFetchAbortRef = useRef<AbortController | null>(null);
+  const chatSttRecorderRef = useRef<MediaRecorder | null>(null);
+  const chatSttChunksRef = useRef<BlobPart[]>([]);
   /** Session-scoped clips: key = turnId + normalized TTS text (evicted after MAX_SESSION_TTS_AUDIO_CACHE). */
   const chatTtsBlobCacheRef = useRef<Map<string, { blob: Blob; mime: string }>>(new Map());
   const chatTtsCacheOrderRef = useRef<string[]>([]);
@@ -515,6 +521,17 @@ export default function HomePage() {
 
   useEffect(() => () => stopChatTtsPlayback(), [stopChatTtsPlayback]);
 
+  useEffect(
+    () => () => {
+      try {
+        chatSttRecorderRef.current?.stream.getTracks().forEach((t) => t.stop());
+      } catch {
+        // Ignore stop failures.
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     stopChatTtsPlayback();
     chatTtsBlobCacheRef.current.clear();
@@ -633,6 +650,75 @@ export default function HomePage() {
   function stopGeneration(): void {
     streamAbortRef.current?.abort();
     stopChatTtsPlayback();
+  }
+
+  async function transcribeBlobToMessage(blob: Blob): Promise<void> {
+    setSttError(null);
+    setSttTranscribing(true);
+    try {
+      const form = new FormData();
+      form.append("audio", blob, `nova-mic-${Date.now()}.webm`);
+      const response = await fetch("/api/voice/transcribe-audio", { method: "POST", body: form });
+      const data = (await response.json().catch(() => ({}))) as { text?: string; error?: string };
+      if (!response.ok) {
+        setSttError(data.error ?? "Transcription failed.");
+        return;
+      }
+      const transcript = (data.text ?? "").trim();
+      if (!transcript) {
+        setSttError("No speech detected. Try again closer to the microphone.");
+        return;
+      }
+      setMessage((prev) => (prev.trim().length ? `${prev.trim()} ${transcript}` : transcript));
+    } catch {
+      setSttError("Could not transcribe audio.");
+    } finally {
+      setSttTranscribing(false);
+    }
+  }
+
+  async function startMicTranscription(): Promise<void> {
+    if (sttRecording || sttTranscribing) return;
+    setSttError(null);
+    try {
+      if (typeof MediaRecorder === "undefined") {
+        setSttError("This browser does not support microphone recording.");
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chatSttRecorderRef.current = recorder;
+      chatSttChunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) chatSttChunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        const chunks = chatSttChunksRef.current;
+        chatSttChunksRef.current = [];
+        const type = recorder.mimeType || "audio/webm";
+        const blob = new Blob(chunks, { type });
+        recorder.stream.getTracks().forEach((t) => t.stop());
+        chatSttRecorderRef.current = null;
+        setSttRecording(false);
+        if (blob.size > 0) {
+          void transcribeBlobToMessage(blob);
+        }
+      };
+      recorder.start();
+      setSttRecording(true);
+    } catch {
+      setSttError("Microphone permission denied or unavailable.");
+    }
+  }
+
+  function stopMicTranscription(): void {
+    const recorder = chatSttRecorderRef.current;
+    if (!recorder) return;
+    try {
+      if (recorder.state !== "inactive") recorder.stop();
+    } catch {
+      setSttRecording(false);
+    }
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -1583,6 +1669,7 @@ export default function HomePage() {
             rows={4}
             placeholder="Ask Nova to do something..."
           />
+          {sttError ? <div className="text-xs text-rose-400">{sttError}</div> : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
               <span className="min-w-0 text-xs text-muted">
@@ -1635,6 +1722,23 @@ export default function HomePage() {
                 />
                 Read aloud messages
               </label>
+              <Button
+                type="button"
+                tone={sttRecording ? "red" : "blue"}
+                className="h-7 px-2 text-xs"
+                onClick={() => {
+                  if (sttRecording) {
+                    stopMicTranscription();
+                  } else {
+                    void startMicTranscription();
+                  }
+                }}
+                disabled={sttTranscribing}
+                title={sttRecording ? "Stop recording and transcribe" : "Record voice and transcribe into message"}
+              >
+                <FaMicrophone className="mr-1 h-3.5 w-3.5" />
+                {sttRecording ? "Stop mic" : sttTranscribing ? "Transcribing..." : "Speak"}
+              </Button>
               <Link href="/thoughts" className="inline-flex items-center text-violet-400 hover:text-violet-300" title="Open Live Thoughts">
                 <FaBrain className="h-3.5 w-3.5" />
               </Link>

@@ -1099,6 +1099,31 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const text = await voice.transcribe(payload.audioPath);
         return sendJson(response, 200, { text, correlationId });
       }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/voice/transcribe-audio") {
+        const payload = (await readJson(request)) as { audioBase64?: string; mimeType?: string };
+        const b64 = typeof payload.audioBase64 === "string" ? payload.audioBase64.trim() : "";
+        if (!b64) {
+          return sendJson(response, 400, { error: "audioBase64 is required", correlationId });
+        }
+        let bytes: Buffer;
+        try {
+          bytes = Buffer.from(b64, "base64");
+        } catch {
+          return sendJson(response, 400, { error: "audioBase64 must be valid base64", correlationId });
+        }
+        if (bytes.length === 0) {
+          return sendJson(response, 400, { error: "audio payload is empty", correlationId });
+        }
+        const maxBytes = 20 * 1024 * 1024;
+        if (bytes.length > maxBytes) {
+          return sendJson(response, 413, { error: "audio payload too large (max 20MB)", correlationId });
+        }
+        const text = await voice.transcribeAudioBytes({
+          bytes,
+          mimeType: typeof payload.mimeType === "string" ? payload.mimeType : undefined
+        });
+        return sendJson(response, 200, { text, correlationId });
+      }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/voice/speak") {
         const payload = (await readJson(request)) as { text: string; outputPath?: string };
         const out = await voice.speak(payload.text, payload.outputPath);

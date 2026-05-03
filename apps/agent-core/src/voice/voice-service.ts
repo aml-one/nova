@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import type { EmotionState } from "../emotion/emotion-service.js";
 import { augmentOrpheusSpeechForMood } from "./emotion-tts.js";
@@ -38,6 +39,39 @@ export class VoiceService {
       throw new Error(result.stderr || "stt command failed");
     }
     return result.stdout.trim();
+  }
+
+  /** Decode uploaded browser audio bytes into text (normalizes to 16k mono WAV via ffmpeg when available). */
+  async transcribeAudioBytes(input: { bytes: Buffer; mimeType?: string }): Promise<string> {
+    const ext = extensionFromMime(input.mimeType);
+    const baseDir = resolve(process.cwd(), "data", "voice", "stt-temp");
+    mkdirSync(baseDir, { recursive: true });
+    const workDir = mkdtempSync(join(baseDir, "job-"));
+    const sourcePath = join(workDir, `input.${ext}`);
+    writeFileSync(sourcePath, input.bytes);
+    let sttPath = sourcePath;
+    let convertedPath = "";
+    try {
+      const shouldTryNormalize = !isWavMime(input.mimeType) || process.env.NOVA_STT_FORCE_NORMALIZE === "true";
+      if (shouldTryNormalize && hasFfmpeg()) {
+        convertedPath = join(workDir, "input-16k-mono.wav");
+        const ff = spawnSync(
+          "ffmpeg",
+          ["-y", "-i", sourcePath, "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", convertedPath],
+          { shell: false, encoding: "utf8" }
+        );
+        if (ff.status === 0 && existsSync(convertedPath)) {
+          sttPath = convertedPath;
+        }
+      }
+      return await this.transcribe(sttPath);
+    } finally {
+      try {
+        rmSync(workDir, { recursive: true, force: true });
+      } catch {
+        // Ignore temp cleanup failures.
+      }
+    }
   }
 
   /**
@@ -176,4 +210,27 @@ export class VoiceService {
     const fmt = this.getSettings?.().orpheusTts?.responseFormat ?? "wav";
     return MIME_BY_FORMAT[fmt] ?? "audio/wav";
   }
+}
+
+function isWavMime(mimeType: string | undefined): boolean {
+  const mime = (mimeType ?? "").toLowerCase();
+  return mime.includes("audio/wav") || mime.includes("audio/x-wav") || mime.includes("audio/wave");
+}
+
+function extensionFromMime(mimeType: string | undefined): string {
+  const m = (mimeType ?? "").toLowerCase();
+  if (m.includes("webm")) return "webm";
+  if (m.includes("ogg")) return "ogg";
+  if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
+  if (m.includes("mp4") || m.includes("m4a")) return "m4a";
+  if (isWavMime(mimeType)) return "wav";
+  return "bin";
+}
+
+let ffmpegAvailableCache: boolean | null = null;
+function hasFfmpeg(): boolean {
+  if (ffmpegAvailableCache !== null) return ffmpegAvailableCache;
+  const p = spawnSync("ffmpeg", ["-version"], { shell: false, encoding: "utf8" });
+  ffmpegAvailableCache = p.status === 0;
+  return ffmpegAvailableCache;
 }
