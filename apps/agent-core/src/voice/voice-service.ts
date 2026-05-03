@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import type { EmotionState } from "../emotion/emotion-service.js";
 import { augmentOrpheusSpeechForMood } from "./emotion-tts.js";
-import { prepareChatTextForSpeech } from "./tts-text.js";
+import { normalizeOrpheusSpeechCues, prepareChatTextForSpeech } from "./tts-text.js";
 import { prependSilenceToWavPcm } from "./wav-prepend-silence.js";
 
 const MIME_BY_FORMAT: Record<AppSettings["orpheusTts"]["responseFormat"], string> = {
@@ -98,12 +98,12 @@ export class VoiceService {
     try {
       const mood = this.getUnifiedMood?.();
       if (mood) {
-        return augmentOrpheusSpeechForMood(preparedText, mood);
+        return normalizeOrpheusSpeechCues(augmentOrpheusSpeechForMood(preparedText, mood));
       }
     } catch {
       /* keep prepared */
     }
-    return preparedText;
+    return normalizeOrpheusSpeechCues(preparedText);
   }
 
   private async synthesizeOrpheusBufferInternal(preparedOrRawText: string): Promise<Buffer> {

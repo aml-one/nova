@@ -1,13 +1,11 @@
 import type { EmotionState } from "../emotion/emotion-service.js";
+import { ORPHEUS_SPEECH_CUE_NAMES } from "./tts-text.js";
 
 /**
  * Lex-au / Orpheus non-speech markers — ASCII-only; forwarded to synthesis unchanged.
  * @see augmentOrpheusSpeechForMood
  */
-const ORPHEUS_NONVERB_TAG_NAMES =
-  "laugh|sigh|chuckle|cough|sniffle|groan|gasp" as const;
-
-const NONVERB_TAG_RE = new RegExp(`<(?:${ORPHEUS_NONVERB_TAG_NAMES})\\b[^>]*>`, "gi");
+const NONVERB_TAG_RE = new RegExp(`<(?:${ORPHEUS_SPEECH_CUE_NAMES})\\b[^>]*>`, "gi");
 
 /** Count Orpheus-style non-speech tags (conservative stacking guard). */
 export function countOrpheusNonverbTags(text: string): number {

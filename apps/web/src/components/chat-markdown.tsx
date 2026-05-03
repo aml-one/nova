@@ -37,8 +37,11 @@ type RenderUnit =
  * (raw text is still used by read-aloud synthesis, traces, and debugging views).
  */
 function stripOrpheusCueTagsForDisplay(source: string): string {
+  const names = "laugh|sigh|chuckle|cough|sniffle|groan|gasp";
   return source
-    .replace(/<(?:laugh|sigh|chuckle|cough|sniffle|groan|gasp)\b[^>]*>/gi, "")
+    .replace(new RegExp(`<(?:${names})\\b[^>]*>`, "gi"), "")
+    /** `<chuckle Cleo…` without `>` — strip cue prefix so chat stays readable */
+    .replace(new RegExp(`<(?:${names})\\b\\s+(?=[^\\s>])`, "gi"), "")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
