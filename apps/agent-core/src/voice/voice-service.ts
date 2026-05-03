@@ -1,29 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { Agent, fetch as undiciFetch } from "undici";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import type { EmotionState } from "../emotion/emotion-service.js";
 import { augmentOrpheusSpeechForMood } from "./emotion-tts.js";
 import { normalizeOrpheusSpeechCues, prepareChatTextForSpeech } from "./tts-text.js";
 import { prependSilenceToWavPcm } from "./wav-prepend-silence.js";
-
-/** Reused TCP connections to Orpheus save ~one RTT + TLS per utterance after the first. */
-const orpheusUndiciAgents = new Map<string, Agent>();
-
-function undiciAgentForOrpheusBase(baseNormalized: string): Agent {
-  let agent = orpheusUndiciAgents.get(baseNormalized);
-  if (!agent) {
-    agent = new Agent({
-      connections: 16,
-      pipelining: 1,
-      keepAliveTimeout: 60_000,
-      keepAliveMaxTimeout: 120_000
-    });
-    orpheusUndiciAgents.set(baseNormalized, agent);
-  }
-  return agent;
-}
 
 const MIME_BY_FORMAT: Record<AppSettings["orpheusTts"]["responseFormat"], string> = {
   mp3: "audio/mpeg",
@@ -144,7 +126,6 @@ export class VoiceService {
     }
     const base = tts.baseUrl.replace(/\/+$/, "");
     const url = `${base}/v1/audio/speech`;
-    const dispatcher = undiciAgentForOrpheusBase(base);
     const body: Record<string, unknown> = {
       input: inputText,
       response_format: tts.responseFormat ?? "wav"
@@ -162,14 +143,13 @@ export class VoiceService {
     }
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 120_000);
-    let response: Awaited<ReturnType<typeof undiciFetch>>;
+    let response: Response;
     try {
-      response = await undiciFetch(url, {
+      response = await fetch(url, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
-        signal: ac.signal,
-        dispatcher
+        signal: ac.signal
       });
     } finally {
       clearTimeout(timer);
