@@ -30,7 +30,9 @@ export default function EmotionPage() {
   async function load(targetUserId?: string): Promise<void> {
     setLoading(true);
     const id = targetUserId ?? moodUserId;
-    const response = await fetch(`/api/emotion/history?userId=${encodeURIComponent(id)}`);
+    const response = await fetch(`/api/emotion/history?userId=${encodeURIComponent(id)}`, {
+      credentials: "include"
+    });
     const data = (await response.json()) as { items?: EmotionEvent[]; itemsByDate?: Record<string, EmotionEvent[]> };
     const flat = Array.isArray(data.items) ? data.items : [];
     setItemsByDate(flat.length > 0 ? groupByLocalCalendarDate(flat) : data.itemsByDate ?? {});

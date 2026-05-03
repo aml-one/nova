@@ -78,7 +78,9 @@ export function EmotionBadge({ userId = WEB_CHAT_EMOTION_USER_ID }: { userId?: s
 
   const fetchState = useCallback(async () => {
     try {
-      const response = await fetch(`/api/emotion/state?userId=${encodeURIComponent(userId)}`);
+      const response = await fetch(`/api/emotion/state?userId=${encodeURIComponent(userId)}`, {
+        credentials: "include"
+      });
       const data = (await response.json()) as { state?: EmotionState | null };
       setState(data.state ?? null);
     } catch {

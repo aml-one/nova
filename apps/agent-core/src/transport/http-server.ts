@@ -152,7 +152,10 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         parsedUrl.pathname === "/v1/auth/login" ||
         parsedUrl.pathname === "/v1/auth/setup" ||
         /** Boolean only; used by web to gate mic upload without exposing secrets. */
-        parsedUrl.pathname === "/v1/voice/stt-status";
+        parsedUrl.pathname === "/v1/voice/stt-status" ||
+        /** Read-only mood chrome for the web UI; polls before login. Same exposure model as stt-status. */
+        parsedUrl.pathname === "/v1/emotion/state" ||
+        parsedUrl.pathname === "/v1/emotion/history";
       const sessionToken = request.headers["x-session-token"]?.toString();
       const sessionUser = options.auth.verifySession(sessionToken);
       const hasInternalAuth = verifyInternalAuthHeader(request.headers.authorization?.toString());
