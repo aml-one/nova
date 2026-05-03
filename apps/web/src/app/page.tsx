@@ -2,7 +2,7 @@
 "use client";
 
 import type { RefObject } from "react";
-import { FormEvent, forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, forwardRef, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import {
   FaCheck,
@@ -140,20 +140,63 @@ function rememberChatTtsBlob(
   }
 }
 
-/** 3D-style energy orb while TTS audio is actually playing (transparent background). */
-const NovaSpeakingEntity = forwardRef<HTMLDivElement>(function NovaSpeakingEntity(_, ref) {
+/** Closed path: modulated radius around (cx,cy) — only the wave moves; core circle stays fixed in SVG. */
+function buildWavyRingPath(
+  cx: number,
+  cy: number,
+  baseR: number,
+  segments: number,
+  time: number,
+  amp: number,
+  waveCount: number,
+  phase: number
+): string {
+  const twoPi = Math.PI * 2;
+  const parts: string[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const theta = (i / segments) * twoPi;
+    const wobble = amp * Math.sin(theta * waveCount + time + phase);
+    const r = baseR + wobble;
+    const x = cx + r * Math.cos(theta);
+    const y = cy + r * Math.sin(theta);
+    parts.push(i === 0 ? `M${x.toFixed(2)},${y.toFixed(2)}` : `L${x.toFixed(2)},${y.toFixed(2)}`);
+  }
+  return `${parts.join(" ")} Z`;
+}
+
+const WAVE_ORB_LAYERS = [
+  { baseR: 32.5, waveCount: 9, phase: 0 },
+  { baseR: 37, waveCount: 12, phase: 1.15 },
+  { baseR: 42, waveCount: 16, phase: 2.05 }
+] as const;
+
+/** Static disk + perimeter soundwaves (reference: calm circle, energy only in the ring). */
+const NovaSpeakingWavesOrb = forwardRef<HTMLDivElement>(function NovaSpeakingWavesOrb(_, ref) {
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const fid = `ng${uid || "w"}`;
+  const idle = (r: number) => buildWavyRingPath(50, 50, r, 72, 0, 0.15, 10, 0);
   return (
-    <div ref={ref} className="nova-speaking-entity" aria-hidden>
-      <div className="nova-speaking-entity__halo" />
-      <div className="nova-speaking-entity__surface-ring" />
-      <div className="nova-speaking-entity__ribbon nova-speaking-entity__ribbon--a" />
-      <div className="nova-speaking-entity__ribbon nova-speaking-entity__ribbon--b" />
-      <div className="nova-speaking-entity__ribbon nova-speaking-entity__ribbon--c" />
-      <div className="nova-speaking-entity__void" />
+    <div ref={ref} className="nova-voice-waves-orb" aria-hidden>
+      <svg className="nova-voice-waves-orb__svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <filter id={fid} x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="0.6" result="blur" />
+            <feMerge>
+              <feMergeNode in="blur" />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
+        </defs>
+        <path className="nova-voice-waves-orb__wave nova-voice-waves-orb__wave--3" data-nova-wave d={idle(42)} fill="none" filter={`url(#${fid})`} />
+        <path className="nova-voice-waves-orb__wave nova-voice-waves-orb__wave--2" data-nova-wave d={idle(37)} fill="none" filter={`url(#${fid})`} />
+        <path className="nova-voice-waves-orb__wave nova-voice-waves-orb__wave--1" data-nova-wave d={idle(32.5)} fill="none" filter={`url(#${fid})`} />
+        <circle className="nova-voice-waves-orb__core" cx={50} cy={50} r={26} />
+        <circle className="nova-voice-waves-orb__core-ring" cx={50} cy={50} r={26} fill="none" />
+      </svg>
     </div>
   );
 });
-NovaSpeakingEntity.displayName = "NovaSpeakingEntity";
+NovaSpeakingWavesOrb.displayName = "NovaSpeakingWavesOrb";
 
 function getMicCapabilityError(): string | null {
   if (typeof window === "undefined") return null;
@@ -485,7 +528,7 @@ export default function HomePage() {
   const chatTtsAudioRef = useRef<HTMLAudioElement | null>(null);
   /** Outer wrapper: scale pulse from voice amplitude. */
   const novaTtsOrbMeterRef = useRef<HTMLDivElement | null>(null);
-  /** Root `.nova-speaking-entity`: wobble speed from voice amplitude. */
+  /** Root `.nova-voice-waves-orb` — wave paths updated from TTS analyser; core circle is static in SVG. */
   const novaSpeakingOrbRootRef = useRef<HTMLDivElement | null>(null);
   const chatTtsAudioContextRef = useRef<AudioContext | null>(null);
   const chatTtsMediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
@@ -947,7 +990,16 @@ export default function HomePage() {
     }
     if (orb) {
       orb.style.removeProperty("animation-duration");
-      orb.style.removeProperty("--nova-wobble-dur");
+      const svg = orb.firstElementChild instanceof SVGSVGElement ? orb.firstElementChild : null;
+      if (svg) {
+        const paths = svg.querySelectorAll<SVGPathElement>("path[data-nova-wave]");
+        paths.forEach((path, i) => {
+          const r = WAVE_ORB_LAYERS[i]?.baseR;
+          if (r != null) {
+            path.setAttribute("d", buildWavyRingPath(50, 50, r, 72, 0, 0.12, 10, 0));
+          }
+        });
+      }
     }
   }, []);
 
@@ -1063,10 +1115,19 @@ export default function HomePage() {
 
         const s = Math.min(1, Math.max(0, level));
         const calm = s < 0.04;
-        const sc = calm ? 1 : 1 + s * 0.34;
-        m.style.transform = `scale(${sc.toFixed(4)})`;
-        const wobbleSec = calm ? 6.5 : Math.max(1.35, 5.4 - s * 5.2);
-        o.style.setProperty("--nova-wobble-dur", `${wobbleSec.toFixed(2)}s`);
+        m.style.removeProperty("transform");
+        const t = performance.now() * 0.0028;
+        const breath = 0.28 + 0.14 * Math.sin(performance.now() * 0.0016);
+        const amp = (calm ? 0.32 : 0.52 + s * 5.4) * breath;
+        const svg = o.firstElementChild instanceof SVGSVGElement ? o.firstElementChild : null;
+        if (svg) {
+          const paths = svg.querySelectorAll<SVGPathElement>("path[data-nova-wave]");
+          paths.forEach((path, i) => {
+            const cfg = WAVE_ORB_LAYERS[i];
+            if (!cfg) return;
+            path.setAttribute("d", buildWavyRingPath(50, 50, cfg.baseR, 96, t, amp, cfg.waveCount, cfg.phase));
+          });
+        }
 
         chatTtsOrbRafRef.current = requestAnimationFrame(tick);
       };
@@ -2616,7 +2677,7 @@ export default function HomePage() {
           {ttsPlaybackActive && ttsPlayingTurnId !== null ? (
             <div className="pointer-events-none flex justify-end px-6 pb-5 pr-[calc(1.5rem+20px)]">
               <div className="mb-[calc(35px+20px)] origin-center will-change-transform" ref={novaTtsOrbMeterRef}>
-                <NovaSpeakingEntity ref={novaSpeakingOrbRootRef} />
+                <NovaSpeakingWavesOrb ref={novaSpeakingOrbRootRef} />
               </div>
             </div>
           ) : null}
