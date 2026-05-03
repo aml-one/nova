@@ -30,6 +30,28 @@ if command -v cypher-shell >/dev/null 2>&1; then
   cypher-shell -a bolt://127.0.0.1:7687 -u neo4j -p neo4j "CALL dbms.security.changePassword('$MB_PASSWORD');" 2>/dev/null || true
 fi
 
+echo "==> libmagic (python-magic) for MemoryBear API"
+brew list libmagic >/dev/null 2>&1 || brew install libmagic
+
+echo "==> Elasticsearch on :9200 (Docker + Colima if available; MemoryBear defaults to HTTPS without a scheme)"
+if command -v docker >/dev/null 2>&1; then
+  export DOCKER_HOST="${DOCKER_HOST:-unix://$HOME/.colima/default/docker.sock}"
+  if docker info >/dev/null 2>&1; then
+    docker rm -f nova-es >/dev/null 2>&1 || true
+    docker run -d --name nova-es -p 9200:9200 \
+      -e discovery.type=single-node -e xpack.security.enabled=false \
+      -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
+      docker.elastic.co/elasticsearch/elasticsearch:8.11.0 >/dev/null 2>&1 || true
+    echo "    Waiting for Elasticsearch (up to 90s)..."
+    for _ in $(seq 1 18); do
+      curl -fsS "http://127.0.0.1:9200" >/dev/null 2>&1 && break
+      sleep 5
+    done
+  else
+    echo "WARN: docker not reachable (start Colima: colima start --runtime docker). Set ELASTICSEARCH_HOST=http://127.0.0.1 yourself if ES runs elsewhere."
+  fi
+fi
+
 echo "==> Writing $MB_DIR/.env"
 mkdir -p "$MB_DIR"
 cat >"$MB_DIR/.env" <<EOF
@@ -54,6 +76,11 @@ ENABLE_GENERAL_ONTOLOGY_TYPES=false
 FIRST_SUPERUSER_EMAIL=admin@example.com
 FIRST_SUPERUSER_USERNAME=admin
 FIRST_SUPERUSER_PASSWORD=$MB_PASSWORD
+ELASTICSEARCH_HOST=http://127.0.0.1
+ELASTICSEARCH_PORT=9200
+ELASTICSEARCH_USERNAME=
+ELASTICSEARCH_PASSWORD=
+ELASTICSEARCH_VERIFY_CERTS=false
 EOF
 
 cd "$MB_DIR"
@@ -63,8 +90,9 @@ uv run alembic upgrade head
 echo "==> Starting API on :8000 (background)"
 pkill -f "uv run -m app.main" 2>/dev/null || true
 sleep 1
-nohup uv run -m app.main > /tmp/memorybear-api.log 2>&1 &
-sleep 10
+export DYLD_LIBRARY_PATH="${DYLD_LIBRARY_PATH:-/opt/homebrew/lib}"
+nohup env DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH" uv run -m app.main > /tmp/memorybear-api.log 2>&1 &
+sleep 15
 
 echo "==> Initial superuser + API key"
 curl -fsS -X POST "http://127.0.0.1:8000/api/setup" -H "Content-Type: application/json" || true
@@ -79,6 +107,13 @@ fi
 
 WS_JSON="$(curl -fsS "http://127.0.0.1:8000/api/workspaces" -H "Authorization: Bearer $TOKEN")"
 WS_ID="$(python3 -c "import json,sys; d=json.load(sys.stdin); arr=d.get('data') or []; print(arr[0]['id'] if arr else '')" <<<"$WS_JSON")"
+if [[ -z "$WS_ID" ]]; then
+  echo "==> No workspace yet; creating default workspace (superuser)"
+  CREATE_JSON="$(curl -fsS -X POST "http://127.0.0.1:8000/api/workspaces" \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+    -d "{\"name\":\"Nova\",\"description\":\"Created by memorybear-mac-bootstrap.sh\"}")"
+  WS_ID="$(python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('data',{}).get('id',''))" <<<"$CREATE_JSON")"
+fi
 if [[ -n "$WS_ID" ]]; then
   curl -fsS -X PUT "http://127.0.0.1:8000/api/workspaces/$WS_ID/switch" -H "Authorization: Bearer $TOKEN" >/dev/null || true
 fi
@@ -99,4 +134,4 @@ fi
 
 echo "Done. MemoryBear API: http://127.0.0.1:8000/docs"
 echo "Logs: tail -f /tmp/memorybear-api.log"
-echo "In Nova Settings → Learning, enable MemoryBear and paste the API key; base URL http://127.0.0.1:8000"
+echo "In Nova Settings → Memory & cores, enable MemoryBear and paste the API key; base URL http://127.0.0.1:8000"
