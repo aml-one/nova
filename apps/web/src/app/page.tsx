@@ -131,107 +131,6 @@ function rememberChatTtsBlob(
   }
 }
 
-function canUseGuardedMp3Streaming(mime: string): boolean {
-  if (!mime.startsWith("audio/mpeg")) return false;
-  if (typeof window === "undefined" || typeof MediaSource === "undefined") return false;
-  if (!MediaSource.isTypeSupported("audio/mpeg")) return false;
-  const ua = window.navigator.userAgent;
-  // Restrict to Chromium family for now; Safari/Firefox MSE audio paths are less predictable here.
-  const isChromium = /\bChrome\/\d+/.test(ua) || /\bEdg\/\d+/.test(ua);
-  return isChromium;
-}
-
-async function blobFromStream(stream: ReadableStream<Uint8Array>, mime: string): Promise<Blob> {
-  const reader = stream.getReader();
-  const chunks: BlobPart[] = [];
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value || value.byteLength === 0) continue;
-    const copy = new Uint8Array(value.byteLength);
-    copy.set(value);
-    chunks.push(copy);
-  }
-  return new Blob(chunks, { type: mime });
-}
-
-async function streamMp3WithFallback(input: {
-  response: Response;
-  audio: HTMLAudioElement;
-}): Promise<{ blob: Blob; mime: string; objectUrl: string }> {
-  const { response, audio } = input;
-  const mime = response.headers.get("content-type") ?? "audio/mpeg";
-  const body = response.body;
-  if (!body || !canUseGuardedMp3Streaming(mime)) {
-    const blob = await response.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    audio.src = objectUrl;
-    await loadAudioElementThenPlay(audio);
-    return { blob, mime, objectUrl };
-  }
-
-  const [playStream, cacheStream] = body.tee();
-  const cacheBlobPromise = blobFromStream(cacheStream, mime);
-  const mediaSource = new MediaSource();
-  const objectUrl = URL.createObjectURL(mediaSource);
-  audio.src = objectUrl;
-  const sourceOpen = new Promise<void>((resolve) => {
-    mediaSource.addEventListener("sourceopen", () => resolve(), { once: true });
-  });
-  await sourceOpen;
-  const sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
-  const queue: ArrayBuffer[] = [];
-  let readerDone = false;
-  let playStarted = false;
-
-  const flush = (): void => {
-    if (sourceBuffer.updating) return;
-    const next = queue.shift();
-    if (next) {
-      sourceBuffer.appendBuffer(next);
-      return;
-    }
-    if (readerDone && mediaSource.readyState === "open") {
-      mediaSource.endOfStream();
-    }
-  };
-  sourceBuffer.addEventListener("updateend", flush);
-
-  try {
-    const reader = playStream.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value || value.byteLength === 0) continue;
-      const copy = new Uint8Array(value.byteLength);
-      copy.set(value);
-      queue.push(copy.buffer);
-      flush();
-      if (!playStarted) {
-        playStarted = true;
-        await loadAudioElementThenPlay(audio);
-      }
-    }
-    readerDone = true;
-    flush();
-    const blob = await cacheBlobPromise;
-    return { blob, mime, objectUrl };
-  } catch {
-    // Fallback if MSE append/playback fails for any runtime reason.
-    try {
-      if (mediaSource.readyState === "open") mediaSource.endOfStream();
-    } catch {
-      // ignore
-    }
-    const blob = await cacheBlobPromise;
-    const fallbackUrl = URL.createObjectURL(blob);
-    URL.revokeObjectURL(objectUrl);
-    audio.src = fallbackUrl;
-    await loadAudioElementThenPlay(audio);
-    return { blob, mime, objectUrl: fallbackUrl };
-  }
-}
-
 export default function HomePage() {
   const { resolvedTheme } = useTheme();
   const [message, setMessage] = useState("");
@@ -680,20 +579,12 @@ export default function HomePage() {
           stopChatTtsPlayback();
         };
         const mime = response.headers.get("content-type") ?? "audio/wav";
-        let blob: Blob;
-        let objectUrl: string;
         setTtsGeneratingTurnId(null);
         setTtsPlayingTurnId(turnId);
-        if (mime.startsWith("audio/mpeg")) {
-          const streamed = await streamMp3WithFallback({ response, audio: el });
-          blob = streamed.blob;
-          objectUrl = streamed.objectUrl;
-        } else {
-          blob = await response.blob();
-          objectUrl = URL.createObjectURL(blob);
-          el.src = objectUrl;
-          await loadAudioElementThenPlay(el).catch(() => stopChatTtsPlayback());
-        }
+        const blob = await response.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        el.src = objectUrl;
+        await loadAudioElementThenPlay(el).catch(() => stopChatTtsPlayback());
         chatTtsObjectUrlRef.current = objectUrl;
         rememberChatTtsBlob(map, order, key, { blob: blob.slice(), mime });
       } catch (err) {

@@ -164,9 +164,9 @@ export class VoiceService {
     if (rf === "wav") {
       const raw = process.env.NOVA_TTS_LEADING_SILENCE_MS?.trim();
       const parsed = raw ? Number(raw) : NaN;
-      /** Lower default = faster audible start; raise if first syllables clip (try 185). `NOVA_TTS_LEADING_SILENCE_MS`. */
+      /** Default favors clean starts over speed. Tune with `NOVA_TTS_LEADING_SILENCE_MS` if needed. */
       const silenceMs =
-        Number.isFinite(parsed) && parsed >= 0 ? Math.min(500, parsed) : 100;
+        Number.isFinite(parsed) && parsed >= 0 ? Math.min(500, parsed) : 185;
       buf = prependSilenceToWavPcm(buf, silenceMs) as Buffer;
     }
     return buf;
