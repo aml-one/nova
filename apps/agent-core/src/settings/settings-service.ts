@@ -152,12 +152,14 @@ const DEFAULT_SETTINGS: AppSettings = {
     voice: process.env.NOVA_ORPHEUS_TTS_VOICE?.trim() ?? "",
     model: process.env.NOVA_ORPHEUS_TTS_MODEL?.trim() ?? "",
     responseFormat:
-      process.env.NOVA_ORPHEUS_TTS_FORMAT === "wav" ||
-      process.env.NOVA_ORPHEUS_TTS_FORMAT === "opus" ||
-      process.env.NOVA_ORPHEUS_TTS_FORMAT === "pcm" ||
-      process.env.NOVA_ORPHEUS_TTS_FORMAT === "flac"
-        ? process.env.NOVA_ORPHEUS_TTS_FORMAT
-        : "mp3"
+      process.env.NOVA_ORPHEUS_TTS_FORMAT === "mp3"
+        ? "mp3"
+        : process.env.NOVA_ORPHEUS_TTS_FORMAT === "wav" ||
+            process.env.NOVA_ORPHEUS_TTS_FORMAT === "opus" ||
+            process.env.NOVA_ORPHEUS_TTS_FORMAT === "pcm" ||
+            process.env.NOVA_ORPHEUS_TTS_FORMAT === "flac"
+          ? process.env.NOVA_ORPHEUS_TTS_FORMAT
+          : "wav"
   },
   skillSettings: {}
 };
@@ -611,12 +613,14 @@ export class SettingsService {
         voice: String(settings.orpheusTts?.voice ?? "").trim().slice(0, 128),
         model: String(settings.orpheusTts?.model ?? "").trim().slice(0, 128),
         responseFormat:
-          settings.orpheusTts?.responseFormat === "wav" ||
-          settings.orpheusTts?.responseFormat === "opus" ||
-          settings.orpheusTts?.responseFormat === "pcm" ||
-          settings.orpheusTts?.responseFormat === "flac"
-            ? settings.orpheusTts.responseFormat
-            : "mp3"
+          settings.orpheusTts?.responseFormat === "mp3"
+            ? "mp3"
+            : settings.orpheusTts?.responseFormat === "wav" ||
+                settings.orpheusTts?.responseFormat === "opus" ||
+                settings.orpheusTts?.responseFormat === "pcm" ||
+                settings.orpheusTts?.responseFormat === "flac"
+              ? settings.orpheusTts.responseFormat
+              : "wav"
       },
       skillSettings:
         settings.skillSettings && typeof settings.skillSettings === "object"

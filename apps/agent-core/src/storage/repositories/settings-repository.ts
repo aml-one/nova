@@ -500,11 +500,11 @@ function getEncryptionKey(): Buffer | undefined {
   return createHash("sha256").update(secret).digest();
 }
 
-function normalizeOrpheusFormat(
-  raw: string | undefined
-): AppSettings["orpheusTts"]["responseFormat"] {
-  if (raw === "wav" || raw === "opus" || raw === "pcm" || raw === "flac") {
-    return raw;
+function normalizeOrpheusFormat(raw: unknown): AppSettings["orpheusTts"]["responseFormat"] {
+  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (s === "mp3") return "mp3";
+  if (s === "wav" || s === "opus" || s === "pcm" || s === "flac") {
+    return s as AppSettings["orpheusTts"]["responseFormat"];
   }
-  return "mp3";
+  return "wav";
 }

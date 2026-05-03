@@ -140,8 +140,10 @@ export default function HomePage() {
   const [readAloudMessages, setReadAloudMessages] = useState(false);
   const readAloudRef = useRef(readAloudMessages);
   const [ttsPlayingTurnId, setTtsPlayingTurnId] = useState<string | null>(null);
+  const [ttsGeneratingTurnId, setTtsGeneratingTurnId] = useState<string | null>(null);
   const chatTtsAudioRef = useRef<HTMLAudioElement | null>(null);
   const chatTtsObjectUrlRef = useRef<string | null>(null);
+  const chatTtsFetchAbortRef = useRef<AbortController | null>(null);
   const [streamPhase, setStreamPhase] = useState<StreamPhase>("thinking");
   const webSearchDepthRef = useRef(0);
   const lastStreamRawRef = useRef("");
@@ -455,6 +457,8 @@ export default function HomePage() {
   }, []);
 
   const stopChatTtsPlayback = useCallback(() => {
+    chatTtsFetchAbortRef.current?.abort();
+    chatTtsFetchAbortRef.current = null;
     const el = chatTtsAudioRef.current;
     if (el) {
       el.pause();
@@ -466,6 +470,7 @@ export default function HomePage() {
       chatTtsObjectUrlRef.current = null;
     }
     setTtsPlayingTurnId(null);
+    setTtsGeneratingTurnId(null);
   }, []);
 
   useEffect(() => () => stopChatTtsPlayback(), [stopChatTtsPlayback]);
@@ -481,13 +486,18 @@ export default function HomePage() {
         return;
       }
       stopChatTtsPlayback();
+      const ac = new AbortController();
+      chatTtsFetchAbortRef.current = ac;
+      setTtsGeneratingTurnId(turnId);
       try {
         const response = await fetch("/api/voice/speak-audio", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: cleaned })
+          body: JSON.stringify({ text: cleaned }),
+          signal: ac.signal
         });
         if (!response.ok) {
+          setTtsGeneratingTurnId(null);
           return;
         }
         const blob = await response.blob();
@@ -497,9 +507,11 @@ export default function HomePage() {
         if (!el) {
           URL.revokeObjectURL(url);
           chatTtsObjectUrlRef.current = null;
+          setTtsGeneratingTurnId(null);
           return;
         }
         el.src = url;
+        setTtsGeneratingTurnId(null);
         setTtsPlayingTurnId(turnId);
         el.onended = () => {
           stopChatTtsPlayback();
@@ -508,8 +520,17 @@ export default function HomePage() {
           stopChatTtsPlayback();
         };
         await el.play().catch(() => stopChatTtsPlayback());
-      } catch {
-        stopChatTtsPlayback();
+      } catch (err) {
+        const aborted = err instanceof DOMException && err.name === "AbortError";
+        if (!aborted) {
+          stopChatTtsPlayback();
+        } else {
+          setTtsGeneratingTurnId(null);
+        }
+      } finally {
+        if (chatTtsFetchAbortRef.current === ac) {
+          chatTtsFetchAbortRef.current = null;
+        }
       }
     },
     [stopChatTtsPlayback]
@@ -580,46 +601,61 @@ export default function HomePage() {
         );
         return;
       }
+      /** Coalesce burst token events (many `data:` lines per chunk) into one React update per macrotask — avoids maximum update depth. */
+      let streamPartialFlushQueued = false;
+      let pendingStreamPartialText = "";
+      const applyStreamPartialNow = (partialText: string): void => {
+        if (!emotionRefreshedOnFirstToken && partialText.trim().length > 0) {
+          emotionRefreshedOnFirstToken = true;
+          dispatchNovaEmotionRefresh();
+        }
+        lastStreamRawRef.current = partialText;
+        let nextPhase: StreamPhase = "thinking";
+        if (webSearchDepthRef.current > 0) {
+          nextPhase = "web-search";
+        } else if (isInsideReasoningStream(partialText)) {
+          nextPhase = "reasoning";
+        }
+        setStreamPhase((prev) => (prev === nextPhase ? prev : nextPhase));
+        const { visible, thinking } = extractThinking({ text: partialText });
+        setTurns((prev) =>
+          prev.map((turn) =>
+            turn.id === assistantId
+              ? {
+                  ...turn,
+                  text: visible,
+                  attachments: extractMediaFromText(visible),
+                  thinkingText: thinking || undefined
+                }
+              : turn
+          )
+        );
+      };
+
       const streamResult = await readSseStream(
         response.body,
         streamAbort.signal,
         (partialText) => {
-          if (!emotionRefreshedOnFirstToken && partialText.trim().length > 0) {
-            emotionRefreshedOnFirstToken = true;
-            dispatchNovaEmotionRefresh();
+          pendingStreamPartialText = partialText;
+          if (!streamPartialFlushQueued) {
+            streamPartialFlushQueued = true;
+            queueMicrotask(() => {
+              streamPartialFlushQueued = false;
+              applyStreamPartialNow(pendingStreamPartialText);
+            });
           }
-          lastStreamRawRef.current = partialText;
-          if (webSearchDepthRef.current > 0) {
-            setStreamPhase("web-search");
-          } else if (isInsideReasoningStream(partialText)) {
-            setStreamPhase("reasoning");
-          } else {
-            setStreamPhase("thinking");
-          }
-          const { visible, thinking } = extractThinking({ text: partialText });
-          setTurns((prev) =>
-            prev.map((turn) =>
-              turn.id === assistantId
-                ? {
-                    ...turn,
-                    text: visible,
-                    attachments: extractMediaFromText(visible),
-                    thinkingText: thinking || undefined
-                  }
-                : turn
-            )
-          );
         },
         (evt) => {
           if (evt.kind !== "web-search") return;
           if (evt.phase === "start") {
             webSearchDepthRef.current += 1;
-            setStreamPhase("web-search");
+            setStreamPhase((prev) => (prev === "web-search" ? prev : "web-search"));
           } else {
             webSearchDepthRef.current = Math.max(0, webSearchDepthRef.current - 1);
             if (webSearchDepthRef.current === 0) {
               const raw = lastStreamRawRef.current;
-              setStreamPhase(isInsideReasoningStream(raw) ? "reasoning" : "thinking");
+              const next = isInsideReasoningStream(raw) ? "reasoning" : "thinking";
+              setStreamPhase((prev) => (prev === next ? prev : next));
             }
           }
         }
@@ -1053,22 +1089,45 @@ export default function HomePage() {
                       )}
                     </div>
                   ) : (
-                    <ChatMarkdown
-                      content={turn.text || (turn.role === "assistant" && loading ? "..." : "")}
-                      toneSeed={
-                        turn.role === "assistant"
-                          ? {
-                              textColor: ensureReadableTextColor(assistantTextColorForTheme, isDarkTheme),
-                              bubbleBackground: chatStyle.bubbleBackgroundEnabled
-                                ? withOpacity(assistantBubbleColorForTheme, chatStyle.assistantBackgroundOpacityPct)
-                                : isDarkTheme
-                                  ? "rgb(30, 41, 59)"
-                                  : "rgb(248, 250, 252)",
-                              variant: isDarkTheme ? "dark" : "light"
-                            }
-                          : undefined
-                      }
-                    />
+                    <>
+                      <ChatMarkdown
+                        content={turn.text || (turn.role === "assistant" && loading ? "..." : "")}
+                        toneSeed={
+                          turn.role === "assistant"
+                            ? {
+                                textColor: ensureReadableTextColor(assistantTextColorForTheme, isDarkTheme),
+                                bubbleBackground: chatStyle.bubbleBackgroundEnabled
+                                  ? withOpacity(assistantBubbleColorForTheme, chatStyle.assistantBackgroundOpacityPct)
+                                  : isDarkTheme
+                                    ? "rgb(30, 41, 59)"
+                                    : "rgb(248, 250, 252)",
+                                variant: isDarkTheme ? "dark" : "light"
+                              }
+                            : undefined
+                        }
+                      />
+                      {turn.role === "assistant" && ttsGeneratingTurnId === turn.id ? (
+                        <div className="mt-2 space-y-1">
+                          <div
+                            className={cn(
+                              "flex items-center gap-2 rounded-full border px-3 py-1.5 transition-all",
+                              "border-amber-400/60 bg-amber-500/15"
+                            )}
+                          >
+                            <span className="h-3.5 w-3.5 shrink-0 rounded-full border border-amber-300/80 nova-thinking-orb" />
+                            <span className="text-xs font-medium text-amber-950 dark:text-amber-100">Generating audio…</span>
+                            <span className="flex items-center gap-1.5 pl-0.5">
+                              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 nova-thinking-dot-1" />
+                              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 nova-thinking-dot-2" />
+                              <span className="h-1.5 w-1.5 rounded-full bg-amber-400 nova-thinking-dot-3" />
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-muted">
+                            Orpheus is synthesizing speech. WAV is the default for quickest playback in the browser; switch format under Settings → Voice if needed.
+                          </p>
+                        </div>
+                      ) : null}
+                    </>
                   )}
                 </div>
               )}
@@ -1160,19 +1219,22 @@ export default function HomePage() {
                     className={bubbleIconActionClass}
                     style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
                     disabled={
-                      !turn.text.trim() || Boolean(loading && index === turns.length - 1 && turn.role === "assistant")
+                      !turn.text.trim() ||
+                      Boolean(loading && index === turns.length - 1 && turn.role === "assistant")
                     }
-                    title={ttsPlayingTurnId === turn.id ? "Stop audio" : "Read aloud"}
-                    aria-pressed={ttsPlayingTurnId === turn.id}
+                    title={
+                      ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id ? "Stop audio / cancel generation" : "Read aloud"
+                    }
+                    aria-pressed={ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id}
                     onClick={() => {
-                      if (ttsPlayingTurnId === turn.id) {
+                      if (ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id) {
                         stopChatTtsPlayback();
                       } else {
                         void playChatTts(turn.id, turn.text);
                       }
                     }}
                   >
-                    {ttsPlayingTurnId === turn.id ? (
+                    {ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id ? (
                       <span className="inline-block h-3 w-3 shrink-0 rounded-[2px] bg-current" aria-hidden />
                     ) : (
                       <FaVolumeHigh className="h-3.5 w-3.5" />

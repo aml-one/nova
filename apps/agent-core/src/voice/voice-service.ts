@@ -38,7 +38,7 @@ export class VoiceService {
   async speak(text: string, outputPath?: string): Promise<string> {
     const tts = this.getSettings?.().orpheusTts;
     if (tts?.enabled && tts.baseUrl.trim()) {
-      const fmt = tts.responseFormat ?? "mp3";
+      const fmt = tts.responseFormat ?? "wav";
       const dir = resolve(process.cwd(), "data", "voice");
       mkdirSync(dir, { recursive: true });
       const target = outputPath ?? resolve(dir, `tts-${Date.now()}.${fmt}`);
@@ -83,7 +83,7 @@ export class VoiceService {
     const url = `${base}/v1/audio/speech`;
     const body: Record<string, unknown> = {
       input: text,
-      response_format: tts.responseFormat ?? "mp3"
+      response_format: tts.responseFormat ?? "wav"
     };
     const voice = tts.voice.trim();
     if (voice) {
@@ -118,7 +118,7 @@ export class VoiceService {
   }
 
   mimeTypeForCurrentFormat(): string {
-    const fmt = this.getSettings?.().orpheusTts?.responseFormat ?? "mp3";
-    return MIME_BY_FORMAT[fmt] ?? "audio/mpeg";
+    const fmt = this.getSettings?.().orpheusTts?.responseFormat ?? "wav";
+    return MIME_BY_FORMAT[fmt] ?? "audio/wav";
   }
 }

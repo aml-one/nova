@@ -1262,6 +1262,51 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         getDatabase().prepare("DELETE FROM memory_cards WHERE id = ?").run(payload.id);
         return sendJson(response, 200, { ok: true, correlationId });
       }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/memory/autonomous-facts") {
+        const userIdParam = parsedUrl.searchParams.get("userId")?.trim();
+        const limitRaw = Number(parsedUrl.searchParams.get("limit") ?? "150");
+        const limit = Number.isFinite(limitRaw) ? Math.min(400, Math.max(1, Math.floor(limitRaw))) : 150;
+        const rows = userIdParam
+          ? (getDatabase()
+              .prepare(
+                `SELECT id, user_id, kind, content, created_at
+                 FROM long_term_memory
+                 WHERE user_id = ?
+                 ORDER BY datetime(created_at) DESC
+                 LIMIT ?`
+              )
+              .all(userIdParam, limit) as Array<{
+              id?: number;
+              user_id?: string;
+              kind?: string;
+              content?: string;
+              created_at?: string;
+            }>)
+          : (getDatabase()
+              .prepare(
+                `SELECT id, user_id, kind, content, created_at
+                 FROM long_term_memory
+                 ORDER BY datetime(created_at) DESC
+                 LIMIT ?`
+              )
+              .all(limit) as Array<{
+              id?: number;
+              user_id?: string;
+              kind?: string;
+              content?: string;
+              created_at?: string;
+            }>);
+        return sendJson(response, 200, {
+          items: rows.map((row) => ({
+            id: Number(row.id ?? 0),
+            userId: String(row.user_id ?? ""),
+            kind: String(row.kind ?? ""),
+            content: String(row.content ?? ""),
+            createdAt: String(row.created_at ?? "")
+          })),
+          correlationId
+        });
+      }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/reports/learning/weekly") {
         const raw = options.improvement.getLearningHistory();
         const now = Date.now();

@@ -214,7 +214,7 @@ const DEFAULT_SETTINGS: SettingsState = {
     apiKey: "",
     voice: "",
     model: "",
-    responseFormat: "mp3"
+    responseFormat: "wav"
   },
   messagingAccess: { novaPhoneNumber: "", denyUnknownNumbers: true, systemAdmins: [], guests: [] },
   shell: { timeoutMs: 30000, maxOutputBytes: 1024 * 1024 },
@@ -2209,10 +2209,10 @@ export default function SettingsPage() {
                     }))
                   }
                 >
-                  <option value="mp3">mp3</option>
-                  <option value="wav">wav</option>
+                  <option value="wav">wav (fastest start in browser)</option>
                   <option value="opus">opus</option>
                   <option value="pcm">pcm</option>
+                  <option value="mp3">mp3</option>
                   <option value="flac">flac</option>
                 </Select>
               </label>
@@ -3000,6 +3000,7 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
       voice: value?.orpheusTts?.voice ?? DEFAULT_SETTINGS.orpheusTts.voice,
       model: value?.orpheusTts?.model ?? DEFAULT_SETTINGS.orpheusTts.model,
       responseFormat:
+        value?.orpheusTts?.responseFormat === "mp3" ||
         value?.orpheusTts?.responseFormat === "wav" ||
         value?.orpheusTts?.responseFormat === "opus" ||
         value?.orpheusTts?.responseFormat === "pcm" ||

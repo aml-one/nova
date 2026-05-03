@@ -30,6 +30,11 @@ const ENDPOINTS: EndpointItem[] = [
     path: "/api/emotion/history?limit=200",
     note: "Unified Nova mood timeline (all channels/users); optional userId query ignored."
   },
+  {
+    method: "GET",
+    path: "/api/memory/autonomous-facts?limit=200",
+    note: "Autonomous long-term facts (MemoryService); optional userId filters to one profile."
+  },
   { method: "GET", path: "/api/improvement/inspect?limit=200", note: "Autonomy/loop diagnostics snapshot." },
   { method: "GET", path: "/api/improvement/history", note: "Learning history grouped by date." },
   { method: "GET", path: "/api/persona/default", note: "Current base persona file." },
