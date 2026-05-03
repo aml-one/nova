@@ -353,8 +353,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           return sendJson(response, 200, { ok: true, restarted: service, correlationId });
         }
         if (service === "agent-core") {
-          // Non-zero exit so dev watchers (e.g. tsx watch) respawn; systemd/launchd Restart=always still restarts too.
-          setTimeout(() => process.exit(1), 150);
+          setTimeout(() => process.exit(0), 150);
           return sendJson(response, 200, { ok: true, restarted: service, correlationId });
         }
         return sendJson(response, 400, { error: "service must be dispatcher|scheduler|agent-core", correlationId });

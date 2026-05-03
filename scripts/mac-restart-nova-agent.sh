@@ -20,6 +20,9 @@ curl -fsS -X POST "${AGENT_URL}/v1/system/restart" \
   -H "Content-Type: application/json" \
   -d '{"service":"agent-core"}'
 echo
+# tsx watch does not respawn the child after process.exit from the API; nudge it once files settle.
+sleep 2
+touch "$NOVA_ROOT/apps/agent-core/src/index.ts" 2>/dev/null || true
 ok=0
 for ((i = 1; i <= 30; i++)); do
   if curl -fsS -m 5 "${AGENT_URL}/health" >/dev/null 2>&1; then
