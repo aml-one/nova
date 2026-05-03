@@ -319,8 +319,8 @@ html[data-text-scale="big"] {
 }
 
 .nova-speaking-entity__ribbon--c {
-  inset: 18%;
-  opacity: 0.55;
+  inset: 10%;
+  opacity: 0.5;
   mix-blend-mode: lighten;
   background: radial-gradient(
     ellipse 80% 70% at 50% 45%,
@@ -334,8 +334,8 @@ html[data-text-scale="big"] {
 
 .nova-speaking-entity__void {
   position: absolute;
-  /* ~2× diameter vs previous 38% inset (~24% wide) → ~48% wide → 26% inset */
-  inset: 26%;
+  /* Doubled again vs 26% inset (~48% wide) → ~96% wide → ~2% inset */
+  inset: 2%;
   border-radius: 50%;
   background: radial-gradient(circle at 50% 45%, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.55) 72%, transparent 100%);
   border: 1px solid rgba(148, 163, 184, 0.28);

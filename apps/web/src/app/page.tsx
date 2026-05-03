@@ -484,7 +484,8 @@ export default function HomePage() {
   const chatTtsMediaSourceRef = useRef<MediaElementAudioSourceNode | null>(null);
   const chatTtsAnalyserRef = useRef<AnalyserNode | null>(null);
   const chatTtsOrbRafRef = useRef<number | null>(null);
-  const novaOrbMeterSmoothedRef = useRef(0);
+  /** Voice-reactive level (0–1), asymmetric attack/release. */
+  const novaOrbVoiceLevelRef = useRef(0);
   const chatTtsObjectUrlRef = useRef<string | null>(null);
   const chatTtsFetchAbortRef = useRef<AbortController | null>(null);
   const chatSttRecorderRef = useRef<MediaRecorder | null>(null);
@@ -883,7 +884,7 @@ export default function HomePage() {
       cancelAnimationFrame(chatTtsOrbRafRef.current);
       chatTtsOrbRafRef.current = null;
     }
-    novaOrbMeterSmoothedRef.current = 0;
+    novaOrbVoiceLevelRef.current = 0;
     const meter = novaTtsOrbMeterRef.current;
     const orb = novaSpeakingOrbRootRef.current;
     if (meter) {
@@ -933,6 +934,7 @@ export default function HomePage() {
       }
 
       const timeDomainBufRef = { current: new Float32Array(0) };
+      const freqByteBufRef = { current: new Uint8Array(0) };
 
       const tick = () => {
         const analyser = chatTtsAnalyserRef.current;
@@ -953,18 +955,57 @@ export default function HomePage() {
         }
         analyser.getFloatTimeDomainData(buf);
         let sumSq = 0;
+        let peak = 0;
         for (let i = 0; i < buf.length; i++) {
           const v = buf[i] ?? 0;
+          const a = Math.abs(v);
+          if (a > peak) peak = a;
           sumSq += v * v;
         }
         const rms = Math.sqrt(sumSq / Math.max(1, buf.length));
-        const alpha = 0.28;
-        novaOrbMeterSmoothedRef.current =
-          alpha * rms + (1 - alpha) * novaOrbMeterSmoothedRef.current;
-        const s = Math.min(0.55, Math.max(0, novaOrbMeterSmoothedRef.current));
-        const scale = 1 + s * 0.42;
-        m.style.transform = `scale(${scale.toFixed(4)})`;
-        const wobbleSec = Math.max(2.4, 6.4 - s * 7.5);
+        const instant = Math.min(1, 0.55 * rms + 0.45 * peak);
+
+        let freqBand = 0;
+        const binCount = analyser.frequencyBinCount;
+        let fbuf = freqByteBufRef.current;
+        if (fbuf.length !== binCount) {
+          fbuf = new Uint8Array(binCount);
+          freqByteBufRef.current = fbuf;
+        }
+        analyser.getByteFrequencyData(fbuf);
+        const sr = analyser.context.sampleRate;
+        const nyquist = sr / 2;
+        const binHz = nyquist / Math.max(1, binCount);
+        let lo = Math.floor(180 / binHz);
+        let hi = Math.ceil(3400 / binHz);
+        lo = Math.max(1, Math.min(lo, binCount - 2));
+        hi = Math.max(lo + 1, Math.min(hi, binCount - 1));
+        let sum = 0;
+        let count = 0;
+        for (let b = lo; b <= hi; b++) {
+          sum += fbuf[b] ?? 0;
+          count++;
+        }
+        freqBand = count ? sum / (count * 255) : 0;
+        const combined = Math.min(1, instant * 0.62 + freqBand * 0.95);
+        const gated = Math.max(0, combined - 0.014);
+
+        let level = novaOrbVoiceLevelRef.current;
+        const attack = 0.62;
+        const release = 0.09;
+        if (gated > level) {
+          level += (gated - level) * attack;
+        } else {
+          level += (gated - level) * release;
+        }
+        novaOrbVoiceLevelRef.current = level;
+
+        const s = Math.min(1, Math.max(0, level));
+        const calm = s < 0.035;
+        const sx = calm ? 1 : 1 + s * 0.14;
+        const sy = calm ? 1 : 1 + s * 0.58;
+        m.style.transform = `scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`;
+        const wobbleSec = calm ? 6.8 : Math.max(1.65, 5.9 - s * 5.8);
         o.style.animationDuration = `${wobbleSec.toFixed(2)}s`;
 
         chatTtsOrbRafRef.current = requestAnimationFrame(tick);
@@ -983,8 +1024,8 @@ export default function HomePage() {
         let analyser = chatTtsAnalyserRef.current;
         if (!analyser) {
           analyser = ctx.createAnalyser();
-          analyser.fftSize = 1024;
-          analyser.smoothingTimeConstant = 0.72;
+          analyser.fftSize = 2048;
+          analyser.smoothingTimeConstant = 0.38;
           chatTtsAnalyserRef.current = analyser;
         }
 
@@ -1178,6 +1219,19 @@ export default function HomePage() {
     chatTtsBlobCacheRef.current.clear();
     chatTtsCacheOrderRef.current.length = 0;
   }, [activeSessionId, stopChatTtsPlayback]);
+
+  /** Extra message padding while the TTS orb shows; nudge scroll so the tail of the reply stays readable. */
+  useEffect(() => {
+    if (!ttsPlaybackActive || ttsPlayingTurnId === null) return;
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (gap < 280) {
+      requestAnimationFrame(() => {
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      });
+    }
+  }, [ttsPlaybackActive, ttsPlayingTurnId]);
 
   const playChatTts = useCallback(
     async (turnId: string, rawText: string): Promise<void> => {
@@ -2022,7 +2076,8 @@ export default function HomePage() {
         <div
           className={cn(
             "space-y-2 px-6 pb-6 sm:px-7",
-            chatStyleReady && turns.length > 0 ? "pt-[30px]" : "pt-2"
+            chatStyleReady && turns.length > 0 ? "pt-[30px]" : "pt-2",
+            ttsPlaybackActive && ttsPlayingTurnId !== null && "pb-[min(44vh,28rem)]"
           )}
         >
           {!chatStyleReady ? <div className="text-sm text-muted">Loading chat style…</div> : null}
