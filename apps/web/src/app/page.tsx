@@ -132,6 +132,62 @@ function rememberChatTtsBlob(
   }
 }
 
+function VoiceSpeakingOrb() {
+  return (
+    <span className="relative inline-flex h-5 w-5 items-center justify-center" aria-hidden>
+      <span
+        className="absolute inset-0 rounded-full opacity-80"
+        style={{
+          background:
+            "conic-gradient(from 0deg, rgba(103,232,249,.95), rgba(167,139,250,.95), rgba(251,113,133,.9), rgba(253,224,71,.85), rgba(103,232,249,.95))",
+          animation: "spin 2.4s linear infinite"
+        }}
+      />
+      <span
+        className="absolute inset-[2px] rounded-full"
+        style={{
+          border: "1px solid rgba(148, 163, 184, .55)",
+          animation: "pulse 1.5s ease-in-out infinite"
+        }}
+      />
+      <span
+        className="absolute inset-[6px] rounded-full"
+        style={{
+          background: "rgba(15, 23, 42, .72)",
+          border: "1px solid rgba(148, 163, 184, .35)"
+        }}
+      />
+      <FaMicrophone className="relative z-10 h-2.5 w-2.5 text-cyan-200 drop-shadow-[0_0_6px_rgba(125,211,252,.8)]" />
+    </span>
+  );
+}
+
+function getMicCapabilityError(): string | null {
+  if (typeof window === "undefined") return null;
+  if (!window.isSecureContext) {
+    return "Microphone requires a secure origin. Use HTTPS (or localhost) for Nova Web UI.";
+  }
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
+    return "This browser does not support microphone capture (getUserMedia).";
+  }
+  return null;
+}
+
+function describeMicStartError(error: unknown): string {
+  if (error instanceof DOMException) {
+    if (error.name === "NotAllowedError" || error.name === "SecurityError") {
+      return "Microphone permission denied. Allow mic access in browser/site settings and try again.";
+    }
+    if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
+      return "No microphone detected. Connect/select a mic and try again.";
+    }
+    if (error.name === "NotReadableError" || error.name === "TrackStartError") {
+      return "Microphone is busy or unavailable. Close other apps using the mic and retry.";
+    }
+  }
+  return "Microphone permission denied or unavailable.";
+}
+
 export default function HomePage() {
   const { resolvedTheme } = useTheme();
   const [message, setMessage] = useState("");
@@ -182,6 +238,7 @@ export default function HomePage() {
   const [sttRecording, setSttRecording] = useState(false);
   const [sttTranscribing, setSttTranscribing] = useState(false);
   const [sttError, setSttError] = useState<string | null>(null);
+  const [sttCapabilityError, setSttCapabilityError] = useState<string | null>(null);
   const chatTtsAudioRef = useRef<HTMLAudioElement | null>(null);
   const chatTtsObjectUrlRef = useRef<string | null>(null);
   const chatTtsFetchAbortRef = useRef<AbortController | null>(null);
@@ -521,6 +578,10 @@ export default function HomePage() {
 
   useEffect(() => () => stopChatTtsPlayback(), [stopChatTtsPlayback]);
 
+  useEffect(() => {
+    setSttCapabilityError(getMicCapabilityError());
+  }, []);
+
   useEffect(
     () => () => {
       try {
@@ -681,9 +742,26 @@ export default function HomePage() {
     if (sttRecording || sttTranscribing) return;
     setSttError(null);
     try {
-      if (typeof MediaRecorder === "undefined") {
-        setSttError("This browser does not support microphone recording.");
+      const capabilityError = getMicCapabilityError();
+      setSttCapabilityError(capabilityError);
+      if (capabilityError) {
+        setSttError(capabilityError);
         return;
+      }
+      if (typeof MediaRecorder === "undefined") {
+        setSttError("This browser does not support MediaRecorder microphone capture.");
+        return;
+      }
+      try {
+        if (navigator.permissions?.query) {
+          const status = await navigator.permissions.query({ name: "microphone" as PermissionName });
+          if (status.state === "denied") {
+            setSttError("Microphone permission is blocked for this site. Allow it in browser settings.");
+            return;
+          }
+        }
+      } catch {
+        // Permission API can fail on some browsers; continue to getUserMedia.
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const recorder = new MediaRecorder(stream);
@@ -706,8 +784,8 @@ export default function HomePage() {
       };
       recorder.start();
       setSttRecording(true);
-    } catch {
-      setSttError("Microphone permission denied or unavailable.");
+    } catch (error) {
+      setSttError(describeMicStartError(error));
     }
   }
 
@@ -1484,7 +1562,9 @@ export default function HomePage() {
                           }
                         }}
                       >
-                        {ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id ? (
+                        {ttsPlayingTurnId === turn.id ? (
+                          <VoiceSpeakingOrb />
+                        ) : ttsGeneratingTurnId === turn.id ? (
                           <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-[2px] bg-current" aria-hidden />
                         ) : (
                           <FaVolumeHigh className="h-3.5 w-3.5" />
@@ -1669,7 +1749,9 @@ export default function HomePage() {
             rows={4}
             placeholder="Ask Nova to do something..."
           />
-          {sttError ? <div className="text-xs text-rose-400">{sttError}</div> : null}
+          {sttError || sttCapabilityError ? (
+            <div className="text-xs text-rose-400">{sttError ?? sttCapabilityError}</div>
+          ) : null}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
               <span className="min-w-0 text-xs text-muted">
@@ -1722,10 +1804,15 @@ export default function HomePage() {
                 />
                 Read aloud messages
               </label>
-              <Button
+              <button
                 type="button"
-                tone={sttRecording ? "red" : "blue"}
-                className="h-7 px-2 text-xs"
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition",
+                  sttRecording
+                    ? "border-rose-400/60 bg-rose-500/20 text-rose-100"
+                    : "border-sky-400/45 bg-sky-500/15 text-sky-100 hover:bg-sky-500/25",
+                  (sttTranscribing || Boolean(sttCapabilityError)) && "cursor-not-allowed opacity-55"
+                )}
                 onClick={() => {
                   if (sttRecording) {
                     stopMicTranscription();
@@ -1733,12 +1820,27 @@ export default function HomePage() {
                     void startMicTranscription();
                   }
                 }}
-                disabled={sttTranscribing}
-                title={sttRecording ? "Stop recording and transcribe" : "Record voice and transcribe into message"}
+                disabled={sttTranscribing || Boolean(sttCapabilityError)}
+                title={
+                  sttCapabilityError
+                    ? sttCapabilityError
+                    : sttRecording
+                      ? "Stop recording and transcribe"
+                      : "Record voice and transcribe into message"
+                }
               >
-                <FaMicrophone className="mr-1 h-3.5 w-3.5" />
-                {sttRecording ? "Stop mic" : sttTranscribing ? "Transcribing..." : "Speak"}
-              </Button>
+                <span
+                  className={cn(
+                    "inline-flex h-5 w-5 items-center justify-center rounded-full border",
+                    sttRecording
+                      ? "border-rose-300/70 bg-rose-400/20"
+                      : "border-sky-300/60 bg-sky-400/20"
+                  )}
+                >
+                  <FaMicrophone className={cn("h-3 w-3", sttRecording && "animate-pulse")} />
+                </span>
+                {sttRecording ? "Listening..." : sttTranscribing ? "Transcribing..." : "Voice"}
+              </button>
               <Link href="/thoughts" className="inline-flex items-center text-violet-400 hover:text-violet-300" title="Open Live Thoughts">
                 <FaBrain className="h-3.5 w-3.5" />
               </Link>
