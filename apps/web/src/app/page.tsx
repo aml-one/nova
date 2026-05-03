@@ -168,7 +168,7 @@ function VoiceSpeakingOrb() {
 function getMicCapabilityError(): string | null {
   if (typeof window === "undefined") return null;
   if (!window.isSecureContext) {
-    return "Microphone requires a secure origin. Use HTTPS (or localhost) for Nova Web UI.";
+    return "Microphone needs HTTPS (secure context). Start the stack with NOVA_WEB_HTTPS=true; for LAN mic access use NOVA_WEB_TLS_SAN=IP:YOUR_LAN_IP and optional NOVA_WEB_STANDARD_PORTS=1 (https://host on port 443; binding 80/443 may require sudo).";
   }
   if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== "function") {
     return "This browser does not support microphone capture (getUserMedia).";
@@ -1360,10 +1360,10 @@ export default function HomePage() {
   ]);
 
   return (
-    <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
       <div
         ref={chatScrollRef}
-        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
         onScroll={(event) => {
           const target = event.currentTarget;
           const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
@@ -1371,7 +1371,7 @@ export default function HomePage() {
           setAutoScrollEnabled(nearBottom);
         }}
       >
-        <div className="space-y-2 px-6 pb-80 pt-2 sm:px-7">
+        <div className="space-y-2 px-6 pb-6 pt-2 sm:px-7">
           {!chatStyleReady ? <div className="text-sm text-muted">Loading chat style…</div> : null}
           {chatStyleReady && turns.length === 0 ? (
             <div className="flex min-h-[min(48vh,26rem)] flex-col items-center justify-center py-10 text-center">
@@ -1719,8 +1719,8 @@ export default function HomePage() {
         </div>
       </div>
       <audio ref={chatTtsAudioRef} className="hidden" playsInline preload="none" />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex flex-col bg-gradient-to-t from-surface from-60% via-surface/95 to-transparent pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-10">
-        <form onSubmit={onSubmit} className="pointer-events-auto flex w-full flex-col gap-2">
+      <div className="relative z-10 -mt-8 shrink-0 bg-gradient-to-t from-surface from-15% via-surface/90 to-transparent pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-10">
+        <form onSubmit={onSubmit} className="flex w-full flex-col gap-2">
           {loading ? (
             <div className="flex w-full min-h-9 items-center justify-between gap-3 border-t border-rose-500/50 bg-pastelRed/40 py-2 pl-6 pr-4 dark:bg-rose-950/35">
               <span className="min-w-0 text-sm font-medium text-slate-900 dark:text-slate-100">Nova is generating a reply…</span>
@@ -1775,8 +1775,8 @@ export default function HomePage() {
           <div className="px-6">
           <div
             className={cn(
-              "flex w-full items-center gap-1.5 rounded-[22px] border border-border bg-surface2 px-2 py-1 shadow-sm transition sm:gap-2 sm:px-2.5",
-              dragging && "ring-2 ring-sky-500/45 ring-offset-2 ring-offset-surface"
+              "flex w-full items-center gap-1.5 rounded-[22px] border bg-surface2 px-2 py-1 transition sm:gap-2 sm:px-2.5",
+              dragging ? "border-sky-500/55" : "border-border"
             )}
             onDragOver={(event) => {
               event.preventDefault();
@@ -1812,7 +1812,7 @@ export default function HomePage() {
             >
               <FaPlus className="h-3.5 w-3.5" />
             </button>
-            <Textarea
+            <textarea
               value={message}
               onChange={(event) => setMessage(event.target.value)}
               onKeyDown={(event) => {
@@ -1826,7 +1826,7 @@ export default function HomePage() {
               }}
               rows={1}
               placeholder="Ask anything"
-              className="min-h-[36px] max-h-[180px] flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-snug text-text shadow-none ring-0 placeholder:text-muted focus:ring-0"
+              className="min-h-[36px] max-h-[180px] w-full flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-snug text-text shadow-none outline-none ring-0 placeholder:text-muted focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0"
             />
             <div className="flex h-8 shrink-0 items-center gap-1 sm:gap-1.5">
               <Link
@@ -1876,7 +1876,7 @@ export default function HomePage() {
                 className={cn(
                   "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition",
                   !loading && message.trim().length > 0
-                    ? "bg-slate-900 text-white shadow-sm hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
+                    ? "bg-slate-900 text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
                     : "cursor-not-allowed bg-border/50 text-muted dark:bg-white/10 dark:text-slate-500"
                 )}
               >

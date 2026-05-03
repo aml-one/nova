@@ -3,7 +3,6 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 RESTART_DELAY_SECONDS=2
-WEB_PORT="${NOVA_WEB_PORT:-3000}"
 WEB_HOST="${NOVA_WEB_HOST:-0.0.0.0}"
 ENABLE_HTTPS="${NOVA_WEB_HTTPS:-false}"
 HTTPS_CERT_PATH="${NOVA_WEB_HTTPS_CERT:-${ROOT_DIR}/tmp/dev-cert.pem}"
@@ -16,6 +15,23 @@ https_enabled() {
     *) return 1 ;;
   esac
 }
+
+# NOVA_WEB_PORT overrides everything. Else NOVA_WEB_STANDARD_PORTS=1 uses 80 (HTTP) or 443 (HTTPS) for default browser ports.
+if [[ -n "${NOVA_WEB_PORT:-}" ]]; then
+  WEB_PORT="${NOVA_WEB_PORT}"
+elif [[ "${NOVA_WEB_STANDARD_PORTS:-}" == "1" ]]; then
+  if https_enabled; then
+    WEB_PORT="443"
+  else
+    WEB_PORT="80"
+  fi
+else
+  WEB_PORT="3000"
+fi
+
+if [[ "${WEB_PORT}" =~ ^[0-9]+$ ]] && [[ "${WEB_PORT}" -lt 1024 ]]; then
+  echo "Note: web port ${WEB_PORT} is privileged on macOS/Linux; if bind fails, run with sudo or set NOVA_WEB_PORT=3000."
+fi
 
 AGENT_PID=""
 WEB_PID=""
@@ -73,14 +89,21 @@ if https_enabled; then
       echo "Install OpenSSL, or provide NOVA_WEB_HTTPS_CERT and NOVA_WEB_HTTPS_KEY paths."
       exit 1
     fi
+    NOVA_TLS_SAN_BASE="DNS:localhost,IP:127.0.0.1"
+    if [[ -n "${NOVA_WEB_TLS_SAN:-}" ]]; then
+      NOVA_TLS_SAN="${NOVA_TLS_SAN_BASE},${NOVA_WEB_TLS_SAN}"
+    else
+      NOVA_TLS_SAN="${NOVA_TLS_SAN_BASE}"
+    fi
     openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 365 \
       -keyout "${HTTPS_KEY_PATH}" \
       -out "${HTTPS_CERT_PATH}" \
       -subj "/CN=Nova Local Dev" \
-      -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:0.0.0.0" >/dev/null 2>&1
+      -addext "subjectAltName=${NOVA_TLS_SAN}" >/dev/null 2>&1
   fi
   echo "Web UI HTTPS enabled on https://${WEB_HOST}:${WEB_PORT}"
   echo "Cert: ${HTTPS_CERT_PATH}"
+  echo "If browsers reject the cert on LAN, set NOVA_WEB_TLS_SAN=IP:<this-host-ip>[,DNS:<hostname>], delete the cert/key files above, and restart so a new cert is generated."
 fi
 
 while true; do
