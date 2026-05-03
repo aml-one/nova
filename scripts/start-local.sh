@@ -9,6 +9,14 @@ ENABLE_HTTPS="${NOVA_WEB_HTTPS:-false}"
 HTTPS_CERT_PATH="${NOVA_WEB_HTTPS_CERT:-${ROOT_DIR}/tmp/dev-cert.pem}"
 HTTPS_KEY_PATH="${NOVA_WEB_HTTPS_KEY:-${ROOT_DIR}/tmp/dev-key.pem}"
 
+# macOS ships Bash 3.2 — avoid Bash 4+ features like ${var,,}
+https_enabled() {
+  case "${ENABLE_HTTPS}" in
+    [Tt][Rr][Uu][Ee] | 1 | [Yy][Ee][Ss]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 AGENT_PID=""
 WEB_PID=""
 
@@ -26,7 +34,7 @@ trap 'echo "Stopping Nova local stack..."; cleanup; exit 0' INT TERM
 echo "Starting Nova local stack supervisor..."
 echo "This script now auto-restarts services after update-triggered exits."
 
-if [[ "${ENABLE_HTTPS,,}" == "true" ]]; then
+if https_enabled; then
   mkdir -p "$(dirname "${HTTPS_CERT_PATH}")"
   mkdir -p "$(dirname "${HTTPS_KEY_PATH}")"
   if [[ ! -f "${HTTPS_CERT_PATH}" || ! -f "${HTTPS_KEY_PATH}" ]]; then
@@ -63,7 +71,7 @@ while true; do
 
   (
     cd "${ROOT_DIR}"
-    if [[ "${ENABLE_HTTPS,,}" == "true" ]]; then
+    if https_enabled; then
       PORT="${WEB_PORT}" HOSTNAME="${WEB_HOST}" corepack pnpm --filter @nova/web dev -- \
         --hostname "${WEB_HOST}" \
         --port "${WEB_PORT}" \
