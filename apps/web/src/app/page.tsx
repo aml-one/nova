@@ -134,36 +134,16 @@ function rememberChatTtsBlob(
   }
 }
 
-function VoiceSpeakingOrb() {
+/** 3D-style energy orb while TTS audio is actually playing (transparent background). */
+function NovaSpeakingEntity() {
   return (
-    <span
-      className="relative inline-flex h-[175px] w-[175px] shrink-0 items-center justify-center"
-      aria-hidden
-    >
-      <span
-        className="absolute inset-0 rounded-full opacity-80"
-        style={{
-          background:
-            "conic-gradient(from 0deg, rgba(103,232,249,.95), rgba(167,139,250,.95), rgba(251,113,133,.9), rgba(253,224,71,.85), rgba(103,232,249,.95))",
-          animation: "spin 2.4s linear infinite"
-        }}
-      />
-      <span
-        className="absolute inset-[14px] rounded-full"
-        style={{
-          border: "1px solid rgba(148, 163, 184, .55)",
-          animation: "pulse 1.5s ease-in-out infinite"
-        }}
-      />
-      <span
-        className="absolute inset-[52px] rounded-full"
-        style={{
-          background: "rgba(15, 23, 42, .72)",
-          border: "1px solid rgba(148, 163, 184, .35)"
-        }}
-      />
-      <FaMicrophone className="relative z-10 h-11 w-11 text-cyan-200 drop-shadow-[0_0_12px_rgba(125,211,252,.85)]" />
-    </span>
+    <div className="nova-speaking-entity" aria-hidden>
+      <div className="nova-speaking-entity__halo" />
+      <div className="nova-speaking-entity__ribbon nova-speaking-entity__ribbon--a" />
+      <div className="nova-speaking-entity__ribbon nova-speaking-entity__ribbon--b" />
+      <div className="nova-speaking-entity__ribbon nova-speaking-entity__ribbon--c" />
+      <div className="nova-speaking-entity__void" />
+    </div>
   );
 }
 
@@ -249,6 +229,8 @@ type ChatSessionHeaderControlsProps = {
   setChatOptionsOpen: (open: boolean) => void;
   voiceDictationAutoSend: boolean;
   onVoiceDictationAutoSendChange: (next: boolean) => void;
+  voiceContinuousConversation: boolean;
+  onVoiceContinuousConversationChange: (next: boolean) => void;
   sendOnEnter: boolean;
   onSendOnEnterChange: (next: boolean) => void;
   showThinkingInChat: boolean;
@@ -274,6 +256,8 @@ function ChatSessionHeaderControls({
   setChatOptionsOpen,
   voiceDictationAutoSend,
   onVoiceDictationAutoSendChange,
+  voiceContinuousConversation,
+  onVoiceContinuousConversationChange,
   sendOnEnter,
   onSendOnEnterChange,
   showThinkingInChat,
@@ -391,6 +375,21 @@ function ChatSessionHeaderControls({
                 }}
               />
             </div>
+            <div className="flex items-center justify-between gap-3 border-b border-border/80 px-2 py-2.5">
+              <div className="min-w-0 pr-1">
+                <span className="text-xs text-text">Continuous conversation (voice)</span>
+                <p className="mt-0.5 text-[10px] leading-snug text-muted">
+                  After Nova finishes read-aloud, start listening automatically so you can reply without tapping Voice again.
+                </p>
+              </div>
+              <IosSwitch
+                id="opt-voice-continuous"
+                checked={voiceContinuousConversation}
+                onChange={(next) => {
+                  void onVoiceContinuousConversationChange(next);
+                }}
+              />
+            </div>
             <div className="flex items-center justify-between gap-3 border-b border-border/80 px-2 py-2.5 last:border-0">
               <span className="text-xs text-text">Send on Enter</span>
               <IosSwitch
@@ -463,11 +462,14 @@ export default function HomePage() {
   const [editingText, setEditingText] = useState("");
   const [sendOnEnter, setSendOnEnter] = useState(false);
   const [voiceDictationAutoSend, setVoiceDictationAutoSend] = useState(false);
+  const [voiceContinuousConversation, setVoiceContinuousConversation] = useState(false);
   const [voiceDictationSilenceSec, setVoiceDictationSilenceSec] = useState(2);
   const [readAloudMessages, setReadAloudMessages] = useState(false);
   const readAloudRef = useRef(readAloudMessages);
   const [ttsPlayingTurnId, setTtsPlayingTurnId] = useState<string | null>(null);
   const [ttsGeneratingTurnId, setTtsGeneratingTurnId] = useState<string | null>(null);
+  /** True only while the chat audio element is in `playing` (not during fetch/generate). */
+  const [ttsPlaybackActive, setTtsPlaybackActive] = useState(false);
   const [sttRecording, setSttRecording] = useState(false);
   const [sttTranscribing, setSttTranscribing] = useState(false);
   const [sttError, setSttError] = useState<string | null>(null);
@@ -493,6 +495,9 @@ export default function HomePage() {
   const voiceDictationAutoSendRef = useRef(false);
   const voiceDictationSilenceSecRef = useRef(2);
   const sttTranscribingRef = useRef(false);
+  const sttRecordingRef = useRef(false);
+  const voiceContinuousConversationRef = useRef(false);
+  const startMicTranscriptionRef = useRef<(() => Promise<void>) | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [lastCopiedTurnId, setLastCopiedTurnId] = useState<string | null>(null);
@@ -654,6 +659,7 @@ export default function HomePage() {
               sendOnEnter?: boolean;
               voiceDictationAutoSend?: boolean;
               voiceDictationSilenceSec?: number;
+              voiceContinuousConversation?: boolean;
               chatStyle?: {
                 userBubbleColor?: string;
                 assistantBubbleColor?: string;
@@ -686,6 +692,7 @@ export default function HomePage() {
           setHideProviderModelInStats(data.settings?.web?.hideProviderModelInStats === true);
           setSendOnEnter(data.settings?.web?.sendOnEnter === true);
           setVoiceDictationAutoSend(data.settings?.web?.voiceDictationAutoSend === true);
+          setVoiceContinuousConversation(data.settings?.web?.voiceContinuousConversation === true);
           {
             const s = Number(data.settings?.web?.voiceDictationSilenceSec);
             setVoiceDictationSilenceSec(
@@ -861,11 +868,13 @@ export default function HomePage() {
     }
   }, []);
 
-  const stopChatTtsPlayback = useCallback(() => {
+  const stopChatTtsPlayback = useCallback((opts?: { naturalTtsEnd?: boolean }) => {
     chatTtsFetchAbortRef.current?.abort();
     chatTtsFetchAbortRef.current = null;
     const el = chatTtsAudioRef.current;
     if (el) {
+      el.onplaying = null;
+      el.onended = null;
       el.pause();
       el.removeAttribute("src");
       void el.load();
@@ -874,8 +883,17 @@ export default function HomePage() {
       URL.revokeObjectURL(chatTtsObjectUrlRef.current);
       chatTtsObjectUrlRef.current = null;
     }
+    setTtsPlaybackActive(false);
     setTtsPlayingTurnId(null);
     setTtsGeneratingTurnId(null);
+    if (opts?.naturalTtsEnd) {
+      window.setTimeout(() => {
+        if (!voiceContinuousConversationRef.current) return;
+        if (loadingRef.current || sttTranscribingRef.current || sttRecordingRef.current) return;
+        if (getMicCapabilityError()) return;
+        void startMicTranscriptionRef.current?.();
+      }, 450);
+    }
   }, []);
 
   const persistSendOnEnter = useCallback(async (next: boolean) => {
@@ -904,6 +922,19 @@ export default function HomePage() {
     }
   }, []);
 
+  const persistVoiceContinuousConversation = useCallback(async (next: boolean) => {
+    setVoiceContinuousConversation(next);
+    try {
+      await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ web: { voiceContinuousConversation: next } })
+      });
+    } catch {
+      // Ignore save failures for this optional UX preference.
+    }
+  }, []);
+
   useEffect(() => {
     messageRef.current = message;
   }, [message]);
@@ -919,6 +950,12 @@ export default function HomePage() {
   useEffect(() => {
     sttTranscribingRef.current = sttTranscribing;
   }, [sttTranscribing]);
+  useEffect(() => {
+    sttRecordingRef.current = sttRecording;
+  }, [sttRecording]);
+  useEffect(() => {
+    voiceContinuousConversationRef.current = voiceContinuousConversation;
+  }, [voiceContinuousConversation]);
 
   useEffect(() => {
     if (!voiceDictationAutoSend || loading || sttTranscribing) {
@@ -1022,8 +1059,9 @@ export default function HomePage() {
         }
         el.src = url;
         setTtsPlayingTurnId(turnId);
+        el.onplaying = () => setTtsPlaybackActive(true);
         el.onended = () => {
-          stopChatTtsPlayback();
+          stopChatTtsPlayback({ naturalTtsEnd: true });
         };
         el.onerror = () => {
           stopChatTtsPlayback();
@@ -1050,8 +1088,9 @@ export default function HomePage() {
           setTtsGeneratingTurnId(null);
           return;
         }
+        el.onplaying = () => setTtsPlaybackActive(true);
         el.onended = () => {
-          stopChatTtsPlayback();
+          stopChatTtsPlayback({ naturalTtsEnd: true });
         };
         el.onerror = () => {
           stopChatTtsPlayback();
@@ -1726,6 +1765,10 @@ export default function HomePage() {
         onVoiceDictationAutoSendChange={(next) => {
           void persistVoiceDictationAutoSend(next);
         }}
+        voiceContinuousConversation={voiceContinuousConversation}
+        onVoiceContinuousConversationChange={(next) => {
+          void persistVoiceContinuousConversation(next);
+        }}
         sendOnEnter={sendOnEnter}
         onSendOnEnterChange={(next) => {
           void persistSendOnEnter(next);
@@ -1774,9 +1817,11 @@ export default function HomePage() {
     chatOptionsOpen,
     deleteActiveSession,
     persistSendOnEnter,
+    persistVoiceContinuousConversation,
     persistVoiceDictationAutoSend,
     readAloudMessages,
     sendOnEnter,
+    voiceContinuousConversation,
     voiceDictationAutoSend,
     sessionDeleteConfirmOpen,
     sessions,
@@ -1784,6 +1829,8 @@ export default function HomePage() {
     showThinkingInChat,
     toggleReadAloudHeader
   ]);
+
+  startMicTranscriptionRef.current = startMicTranscription;
 
   return (
     <div
@@ -2225,10 +2272,10 @@ export default function HomePage() {
               </div>
             </div>
           ) : null}
-          {ttsPlayingTurnId !== null || ttsGeneratingTurnId !== null ? (
+          {ttsPlaybackActive && ttsPlayingTurnId !== null ? (
             <div className="pointer-events-none flex justify-end px-6">
               <div className="mb-[35px]">
-                <VoiceSpeakingOrb />
+                <NovaSpeakingEntity />
               </div>
             </div>
           ) : null}

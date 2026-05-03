@@ -47,7 +47,8 @@ const DEFAULT_SETTINGS: AppSettings = {
     },
     sendOnEnter: false,
     voiceDictationAutoSend: false,
-    voiceDictationSilenceSec: 2
+    voiceDictationSilenceSec: 2,
+    voiceContinuousConversation: false
   },
   learning: {
     enabled: process.env.NOVA_LEARNING_ENABLED === "true" || process.env.NOVA_LEARNING_ENABLED === undefined,
@@ -289,7 +290,11 @@ export class SettingsService {
         voiceDictationSilenceSec:
           typeof update.web?.voiceDictationSilenceSec === "number" && Number.isFinite(update.web.voiceDictationSilenceSec)
             ? clampInt(Math.round(update.web.voiceDictationSilenceSec), 1, 4, current.web.voiceDictationSilenceSec)
-            : current.web.voiceDictationSilenceSec
+            : current.web.voiceDictationSilenceSec,
+        voiceContinuousConversation:
+          typeof update.web?.voiceContinuousConversation === "boolean"
+            ? update.web.voiceContinuousConversation
+            : current.web.voiceContinuousConversation
       },
       learning: {
         enabled: update.learning?.enabled ?? current.learning.enabled,
@@ -512,7 +517,8 @@ export class SettingsService {
           1,
           4,
           DEFAULT_SETTINGS.web.voiceDictationSilenceSec
-        )
+        ),
+        voiceContinuousConversation: settings.web?.voiceContinuousConversation === true
       },
       learning: {
         enabled: settings.learning?.enabled !== false,

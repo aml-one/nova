@@ -35,6 +35,7 @@ type AppSettingsPayload = {
     sendOnEnter?: boolean;
     voiceDictationAutoSend?: boolean;
     voiceDictationSilenceSec?: number;
+    voiceContinuousConversation?: boolean;
     chatStyle?: {
       userBubbleColor?: string;
       assistantBubbleColor?: string;

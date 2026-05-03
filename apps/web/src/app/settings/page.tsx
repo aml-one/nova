@@ -68,6 +68,7 @@ type SettingsState = {
     sendOnEnter: boolean;
     voiceDictationAutoSend: boolean;
     voiceDictationSilenceSec: number;
+    voiceContinuousConversation: boolean;
     chatStyle: {
       userBubbleColor: string;
       assistantBubbleColor: string;
@@ -170,6 +171,7 @@ const DEFAULT_SETTINGS: SettingsState = {
     sendOnEnter: false,
     voiceDictationAutoSend: false,
     voiceDictationSilenceSec: 2,
+    voiceContinuousConversation: false,
     chatStyle: {
       userBubbleColor: "#dbeafe",
       assistantBubbleColor: "#e9d5ff",
@@ -3061,6 +3063,8 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
         if (!Number.isFinite(n)) return DEFAULT_SETTINGS.web.voiceDictationSilenceSec;
         return Math.min(4, Math.max(1, Math.round(n)));
       })(),
+      voiceContinuousConversation:
+        value?.web?.voiceContinuousConversation ?? DEFAULT_SETTINGS.web.voiceContinuousConversation,
       chatStyle: {
         userBubbleColor: value?.web?.chatStyle?.userBubbleColor ?? DEFAULT_SETTINGS.web.chatStyle.userBubbleColor,
         assistantBubbleColor: value?.web?.chatStyle?.assistantBubbleColor ?? DEFAULT_SETTINGS.web.chatStyle.assistantBubbleColor,

@@ -51,6 +51,8 @@ export type AppSettings = {
     voiceDictationAutoSend: boolean;
     /** Silence window before auto-send, seconds (1–4). */
     voiceDictationSilenceSec: number;
+    /** After read-aloud / TTS finishes, start voice input automatically for back-and-forth. */
+    voiceContinuousConversation: boolean;
   };
   learning: {
     enabled: boolean;
@@ -298,7 +300,8 @@ export class SettingsRepository {
             const n = Number(parsed.web?.voiceDictationSilenceSec);
             if (!Number.isFinite(n)) return 2;
             return Math.min(4, Math.max(1, n));
-          })()
+          })(),
+          voiceContinuousConversation: parsed.web?.voiceContinuousConversation === true
         },
         learning: {
           enabled: parsed.learning?.enabled === true,

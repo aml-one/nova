@@ -182,3 +182,162 @@ html[data-text-scale="big"] {
   border: 1px solid rgb(100 116 139 / 0.45);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
 }
+
+/* Chat: Nova read-aloud “energy” orb (transparent; 175×175 logical px) */
+@keyframes nova-entity-wobble {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) rotate(0deg) scale(1);
+  }
+  20% {
+    transform: translate3d(4px, -5px, 0) rotate(-2.5deg) scale(1.04);
+  }
+  45% {
+    transform: translate3d(-3px, 3px, 0) rotate(2deg) scale(0.97);
+  }
+  70% {
+    transform: translate3d(3px, 4px, 0) rotate(-1.2deg) scale(1.02);
+  }
+}
+
+@keyframes nova-entity-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes nova-entity-spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@keyframes nova-entity-morph-a {
+  0%,
+  100% {
+    border-radius: 58% 42% 48% 52% / 52% 48% 51% 49%;
+    filter: blur(0px);
+  }
+  50% {
+    border-radius: 44% 56% 54% 46% / 46% 54% 48% 52%;
+    filter: blur(0.5px);
+  }
+}
+
+@keyframes nova-entity-morph-b {
+  0%,
+  100% {
+    border-radius: 48% 52% 42% 58% / 49% 51% 54% 46%;
+  }
+  50% {
+    border-radius: 52% 48% 56% 44% / 53% 47% 45% 55%;
+  }
+}
+
+@keyframes nova-entity-pulse-glow {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.85;
+    transform: scale(1.08);
+  }
+}
+
+.nova-speaking-entity {
+  position: relative;
+  width: 175px;
+  height: 175px;
+  isolation: isolate;
+  perspective: 520px;
+  animation: nova-entity-wobble 5.5s ease-in-out infinite;
+}
+
+.nova-speaking-entity__halo {
+  position: absolute;
+  inset: -12%;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 40% 35%,
+    rgba(103, 232, 249, 0.45) 0%,
+    rgba(56, 189, 248, 0.22) 38%,
+    rgba(99, 102, 241, 0.12) 62%,
+    transparent 78%
+  );
+  animation: nova-entity-pulse-glow 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.nova-speaking-entity__ribbon {
+  position: absolute;
+  inset: 4%;
+  border-radius: 58% 42% 48% 52% / 52% 48% 51% 49%;
+  mix-blend-mode: screen;
+  opacity: 0.88;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 40px rgba(15, 23, 42, 0.35),
+    0 0 28px rgba(34, 211, 238, 0.35);
+}
+
+.nova-speaking-entity__ribbon--a {
+  background: conic-gradient(
+    from 120deg,
+    rgba(103, 232, 249, 0.95),
+    rgba(167, 139, 250, 0.85),
+    rgba(244, 114, 182, 0.75),
+    rgba(253, 224, 71, 0.65),
+    rgba(103, 232, 249, 0.95)
+  );
+  animation:
+    nova-entity-spin 3.2s linear infinite,
+    nova-entity-morph-a 4.5s ease-in-out infinite;
+  transform-style: preserve-3d;
+}
+
+.nova-speaking-entity__ribbon--b {
+  inset: 14%;
+  opacity: 0.72;
+  background: conic-gradient(
+    from -40deg,
+    rgba(56, 189, 248, 0.9),
+    rgba(129, 140, 248, 0.82),
+    rgba(52, 211, 153, 0.7),
+    rgba(56, 189, 248, 0.9)
+  );
+  animation:
+    nova-entity-spin-slow 5.8s linear infinite,
+    nova-entity-morph-b 3.8s ease-in-out infinite;
+}
+
+.nova-speaking-entity__ribbon--c {
+  inset: 26%;
+  opacity: 0.55;
+  mix-blend-mode: lighten;
+  background: radial-gradient(
+    ellipse 80% 70% at 50% 45%,
+    rgba(125, 211, 252, 0.55) 0%,
+    rgba(167, 139, 250, 0.25) 45%,
+    transparent 72%
+  );
+  animation: nova-entity-spin 7.5s linear infinite reverse;
+  border-radius: 50%;
+}
+
+.nova-speaking-entity__void {
+  position: absolute;
+  inset: 38%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 45%, rgba(15, 23, 42, 0.92) 0%, rgba(30, 41, 59, 0.55) 72%, transparent 100%);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+}
