@@ -3,10 +3,8 @@
 
 import type { RefObject } from "react";
 import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import { useTheme } from "next-themes";
 import {
-  FaBrain,
   FaCheck,
   FaCopy,
   FaFloppyDisk,
@@ -20,7 +18,8 @@ import {
   FaXmark,
   FaMicrophone,
   FaChevronDown,
-  FaArrowUp
+  FaArrowUp,
+  FaGear
 } from "react-icons/fa6";
 import { Textarea } from "../components/ui/textarea";
 import { Select } from "../components/ui/select";
@@ -191,17 +190,62 @@ function describeMicStartError(error: unknown): string {
   return "Microphone permission denied or unavailable.";
 }
 
+function IosSwitch({
+  checked,
+  onChange,
+  id,
+  disabled
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  id: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      id={id}
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 ease-out",
+        checked ? "bg-emerald-500" : "bg-slate-400/40 dark:bg-white/15",
+        disabled && "cursor-not-allowed opacity-50"
+      )}
+    >
+      <span
+        className={cn(
+          "pointer-events-none absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform duration-200 ease-out",
+          checked ? "translate-x-5" : "translate-x-0"
+        )}
+      />
+    </button>
+  );
+}
+
 type ChatSessionHeaderControlsProps = {
   sessions: ChatSession[];
   activeSessionId: string;
   sessionDeleteConfirmOpen: boolean;
   sessionDeletePopoverRef: RefObject<HTMLDivElement | null>;
+  chatOptionsPopoverRef: RefObject<HTMLDivElement | null>;
+  chatOptionsOpen: boolean;
+  setChatOptionsOpen: (open: boolean) => void;
+  sendOnEnter: boolean;
+  onSendOnEnterChange: (next: boolean) => void;
+  showThinkingInChat: boolean;
+  onShowThinkingChange: (next: boolean) => void;
+  readAloudMessages: boolean;
+  onReadAloudChange: (next: boolean) => void;
   onSessionChange: (sessionId: string) => void;
   onNewSession: () => void;
-  onRenameSession: () => void;
+  onRenameClick: () => void;
   onToggleDeleteMenu: () => void;
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
+  closeDeletePopover: () => void;
 };
 
 function ChatSessionHeaderControls({
@@ -209,18 +253,28 @@ function ChatSessionHeaderControls({
   activeSessionId,
   sessionDeleteConfirmOpen,
   sessionDeletePopoverRef,
+  chatOptionsPopoverRef,
+  chatOptionsOpen,
+  setChatOptionsOpen,
+  sendOnEnter,
+  onSendOnEnterChange,
+  showThinkingInChat,
+  onShowThinkingChange,
+  readAloudMessages,
+  onReadAloudChange,
   onSessionChange,
   onNewSession,
-  onRenameSession,
+  onRenameClick,
   onToggleDeleteMenu,
   onCancelDelete,
-  onConfirmDelete
+  onConfirmDelete,
+  closeDeletePopover
 }: ChatSessionHeaderControlsProps) {
   return (
     <>
-      <div className="relative min-w-0 max-w-[min(22rem,calc(100vw-10rem))] flex-[1_1_12rem]">
+      <div className="relative min-w-0 max-w-[min(20rem,calc(100vw-11rem))] flex-[1_1_10rem]">
         <Select
-          className="h-8 w-full appearance-none rounded-lg border-slate-300/40 bg-slate-200/90 py-1 pl-2.5 pr-9 text-sm leading-normal text-slate-900 dark:border-white/10 dark:bg-white/10 dark:text-slate-100"
+          className="h-7 w-full appearance-none rounded-lg border border-border bg-surface2 py-0 pl-2 pr-8 text-xs leading-snug text-text dark:bg-white/[0.06]"
           value={activeSessionId}
           onChange={(event) => onSessionChange(event.target.value)}
         >
@@ -231,40 +285,37 @@ function ChatSessionHeaderControls({
           ))}
         </Select>
         <FaChevronDown
-          className="pointer-events-none absolute right-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-500 dark:text-slate-400"
+          className="pointer-events-none absolute right-2 top-1/2 h-2.5 w-2.5 -translate-y-1/2 text-muted"
           aria-hidden
         />
       </div>
-      <Button
+      <button
         type="button"
-        tone="green"
-        className="inline-flex h-8 min-w-8 shrink-0 items-center justify-center rounded-lg px-2"
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-emerald-500/90 transition hover:bg-black/[0.06] dark:text-emerald-400/85 dark:hover:bg-white/[0.07]"
         onClick={onNewSession}
         title="Start new session"
       >
-        <FaPlus className="h-4 w-4" />
-      </Button>
-      <Button
+        <FaPlus className="h-3.5 w-3.5" />
+      </button>
+      <button
         type="button"
-        tone="neutral"
-        className="inline-flex h-8 min-w-8 shrink-0 items-center justify-center rounded-lg px-2"
-        onClick={onRenameSession}
+        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-amber-500/90 transition hover:bg-black/[0.06] dark:text-amber-300/80 dark:hover:bg-white/[0.07]"
+        onClick={onRenameClick}
         title="Rename active session"
       >
-        <FaPenToSquare className="h-4 w-4" />
-      </Button>
+        <FaPenToSquare className="h-3.5 w-3.5" />
+      </button>
       <div ref={sessionDeletePopoverRef} className="relative shrink-0">
-        <Button
+        <button
           type="button"
-          tone="red"
-          className="inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-2"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-rose-500/90 transition hover:bg-black/[0.06] dark:text-rose-400/80 dark:hover:bg-white/[0.07]"
           onClick={onToggleDeleteMenu}
           title="Delete active session"
           aria-expanded={sessionDeleteConfirmOpen}
           aria-haspopup="dialog"
         >
-          <FaTrash className="h-4 w-4" />
-        </Button>
+          <FaTrash className="h-3.5 w-3.5" />
+        </button>
         {sessionDeleteConfirmOpen ? (
           <div
             className="absolute right-0 top-full z-50 mt-1.5 w-[min(18rem,calc(100vw-2rem))] rounded-ui border border-rose-500/35 bg-surface2 p-3 shadow-lg ring-1 ring-black/10 dark:ring-white/10"
@@ -282,6 +333,52 @@ function ChatSessionHeaderControls({
                 Delete session
               </Button>
             </div>
+          </div>
+        ) : null}
+      </div>
+      <div ref={chatOptionsPopoverRef} className="relative shrink-0">
+        <button
+          type="button"
+          className={cn(
+            "inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted transition hover:bg-black/[0.06] hover:text-text dark:hover:bg-white/[0.07]",
+            chatOptionsOpen && "bg-black/[0.06] text-text dark:bg-white/10"
+          )}
+          title="Chat options"
+          aria-expanded={chatOptionsOpen}
+          aria-haspopup="menu"
+          onClick={() => {
+            closeDeletePopover();
+            setChatOptionsOpen(!chatOptionsOpen);
+          }}
+        >
+          <FaGear className="h-3.5 w-3.5" />
+        </button>
+        {chatOptionsOpen ? (
+          <div
+            className="absolute right-0 top-full z-50 mt-1.5 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-border bg-surface2 p-2 shadow-xl ring-1 ring-black/5 dark:ring-white/10"
+            role="menu"
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-border/80 px-2 py-2.5 last:border-0">
+              <span className="text-xs text-text">Send on Enter</span>
+              <IosSwitch
+                id="opt-send-enter"
+                checked={sendOnEnter}
+                onChange={(next) => {
+                  void onSendOnEnterChange(next);
+                }}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-3 border-b border-border/80 px-2 py-2.5 last:border-0">
+              <span className="text-xs text-text">Show thinking</span>
+              <IosSwitch id="opt-thinking" checked={showThinkingInChat} onChange={onShowThinkingChange} />
+            </div>
+            <div className="flex items-center justify-between gap-3 px-2 py-2.5">
+              <span className="text-xs text-text">Read aloud</span>
+              <IosSwitch id="opt-read-aloud" checked={readAloudMessages} onChange={onReadAloudChange} />
+            </div>
+            <p className="border-t border-border/60 px-2 pb-1 pt-2 text-[10px] leading-snug text-muted">
+              Tip: <code className="text-[10px]">/run …</code> runs shell tasks when command mode is enabled.
+            </p>
           </div>
         ) : null}
       </div>
@@ -357,7 +454,13 @@ export default function HomePage() {
   const [lastCopiedTurnId, setLastCopiedTurnId] = useState<string | null>(null);
   const [sessionDeleteConfirmOpen, setSessionDeleteConfirmOpen] = useState(false);
   const sessionDeletePopoverRef = useRef<HTMLDivElement | null>(null);
+  const chatOptionsPopoverRef = useRef<HTMLDivElement | null>(null);
+  const sessionRenameInputRef = useRef<HTMLInputElement | null>(null);
+  const rootFileDragDepthRef = useRef(0);
   const chatComposerFileInputRef = useRef<HTMLInputElement | null>(null);
+  const [sessionRenameOpen, setSessionRenameOpen] = useState(false);
+  const [sessionRenameDraft, setSessionRenameDraft] = useState("");
+  const [chatOptionsOpen, setChatOptionsOpen] = useState(false);
   const hasLoadedSessionsRef = useRef(false);
   const hasDoneInitialBottomScrollRef = useRef(false);
   const uploadPreviewUrlsRef = useRef<Map<string, string>>(new Map());
@@ -408,6 +511,8 @@ export default function HomePage() {
 
   useEffect(() => {
     setSessionDeleteConfirmOpen(false);
+    setSessionRenameOpen(false);
+    setChatOptionsOpen(false);
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -430,6 +535,47 @@ export default function HomePage() {
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [sessionDeleteConfirmOpen]);
+
+  useEffect(() => {
+    if (!chatOptionsOpen) return;
+    function onPointerDown(event: MouseEvent): void {
+      const el = chatOptionsPopoverRef.current;
+      if (el && !el.contains(event.target as Node)) {
+        setChatOptionsOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setChatOptionsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [chatOptionsOpen]);
+
+  useEffect(() => {
+    if (!sessionRenameOpen) return;
+    function onKeyDown(event: KeyboardEvent): void {
+      if (event.key === "Escape") {
+        setSessionRenameOpen(false);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [sessionRenameOpen]);
+
+  useLayoutEffect(() => {
+    if (!sessionRenameOpen) return;
+    const id = requestAnimationFrame(() => {
+      sessionRenameInputRef.current?.focus();
+      sessionRenameInputRef.current?.select();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [sessionRenameOpen]);
 
   useEffect(() => {
     if (!loading) return;
@@ -678,6 +824,34 @@ export default function HomePage() {
     setTtsPlayingTurnId(null);
     setTtsGeneratingTurnId(null);
   }, []);
+
+  const persistSendOnEnter = useCallback(async (next: boolean) => {
+    setSendOnEnter(next);
+    try {
+      await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ web: { sendOnEnter: next } })
+      });
+    } catch {
+      // Ignore save failures for this optional UX preference.
+    }
+  }, []);
+
+  const toggleReadAloudHeader = useCallback(
+    (next: boolean) => {
+      setReadAloudMessages(next);
+      try {
+        window.localStorage.setItem("nova-chat-read-aloud", next ? "1" : "0");
+      } catch {
+        // Ignore storage failures.
+      }
+      if (!next) {
+        stopChatTtsPlayback();
+      }
+    },
+    [stopChatTtsPlayback]
+  );
 
   useEffect(() => () => stopChatTtsPlayback(), [stopChatTtsPlayback]);
 
@@ -1312,6 +1486,16 @@ export default function HomePage() {
     setUploads([]);
   }, [activeSessionId, sessions]);
 
+  const commitSessionRename = useCallback(() => {
+    const next = sessionRenameDraft.trim();
+    if (!next || !activeSessionId) {
+      setSessionRenameOpen(false);
+      return;
+    }
+    setSessions((prev) => prev.map((item) => (item.id === activeSessionId ? { ...item, title: next } : item)));
+    setSessionRenameOpen(false);
+  }, [sessionRenameDraft, activeSessionId]);
+
   useLayoutEffect(() => {
     setShellHeaderExtras(
       <ChatSessionHeaderControls
@@ -1319,6 +1503,17 @@ export default function HomePage() {
         activeSessionId={activeSessionId}
         sessionDeleteConfirmOpen={sessionDeleteConfirmOpen}
         sessionDeletePopoverRef={sessionDeletePopoverRef}
+        chatOptionsPopoverRef={chatOptionsPopoverRef}
+        chatOptionsOpen={chatOptionsOpen}
+        setChatOptionsOpen={setChatOptionsOpen}
+        sendOnEnter={sendOnEnter}
+        onSendOnEnterChange={(next) => {
+          void persistSendOnEnter(next);
+        }}
+        showThinkingInChat={showThinkingInChat}
+        onShowThinkingChange={setShowThinkingInChat}
+        readAloudMessages={readAloudMessages}
+        onReadAloudChange={toggleReadAloudHeader}
         onSessionChange={(sessionId) => {
           const session = sessions.find((item) => item.id === sessionId);
           if (!session) return;
@@ -1327,6 +1522,7 @@ export default function HomePage() {
         }}
         onNewSession={() => {
           setSessionDeleteConfirmOpen(false);
+          setChatOptionsOpen(false);
           const next = createEmptySession();
           setSessions((prev) => [next, ...prev]);
           setActiveSessionId(next.id);
@@ -1334,33 +1530,67 @@ export default function HomePage() {
           setMessage("");
           setUploads([]);
         }}
-        onRenameSession={() => {
+        onRenameClick={() => {
           setSessionDeleteConfirmOpen(false);
+          setChatOptionsOpen(false);
           const active = sessions.find((item) => item.id === activeSessionId);
           if (!active) return;
-          const next = window.prompt("Rename session", active.title)?.trim();
-          if (!next) return;
-          setSessions((prev) => prev.map((item) => (item.id === activeSessionId ? { ...item, title: next } : item)));
+          setSessionRenameDraft(active.title);
+          setSessionRenameOpen(true);
         }}
         onToggleDeleteMenu={() => {
           if (!activeSessionId) return;
+          setChatOptionsOpen(false);
           setSessionDeleteConfirmOpen((open) => !open);
         }}
         onCancelDelete={() => setSessionDeleteConfirmOpen(false)}
         onConfirmDelete={() => deleteActiveSession()}
+        closeDeletePopover={() => setSessionDeleteConfirmOpen(false)}
       />
     );
     return () => setShellHeaderExtras(null);
   }, [
     activeSessionId,
+    chatOptionsOpen,
     deleteActiveSession,
+    persistSendOnEnter,
+    readAloudMessages,
+    sendOnEnter,
     sessionDeleteConfirmOpen,
     sessions,
-    setShellHeaderExtras
+    setShellHeaderExtras,
+    showThinkingInChat,
+    toggleReadAloudHeader
   ]);
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-surface">
+    <div
+      className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-surface"
+      onDragEnter={(event) => {
+        if (![...event.dataTransfer.types].includes("Files")) return;
+        rootFileDragDepthRef.current += 1;
+        setDragging(true);
+      }}
+      onDragLeave={(event) => {
+        if (![...event.dataTransfer.types].includes("Files")) return;
+        rootFileDragDepthRef.current = Math.max(0, rootFileDragDepthRef.current - 1);
+        if (rootFileDragDepthRef.current === 0) {
+          setDragging(false);
+        }
+      }}
+      onDragOver={(event) => {
+        if ([...event.dataTransfer.types].includes("Files")) {
+          event.preventDefault();
+        }
+      }}
+      onDrop={(event) => {
+        if (![...event.dataTransfer.types].includes("Files")) return;
+        event.preventDefault();
+        rootFileDragDepthRef.current = 0;
+        setDragging(false);
+        addFiles(event.dataTransfer.files);
+      }}
+    >
       <div
         ref={chatScrollRef}
         className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable]"
@@ -1778,19 +2008,6 @@ export default function HomePage() {
               "flex w-full items-center gap-1.5 rounded-[22px] border bg-surface2 px-2 py-1 transition sm:gap-2 sm:px-2.5",
               dragging ? "border-sky-500/55" : "border-border"
             )}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={(event) => {
-              event.preventDefault();
-              setDragging(false);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              addFiles(event.dataTransfer.files);
-            }}
           >
             <input
               ref={chatComposerFileInputRef}
@@ -1829,13 +2046,6 @@ export default function HomePage() {
               className="min-h-[36px] max-h-[180px] w-full flex-1 resize-none border-0 bg-transparent py-1.5 text-sm leading-snug text-text shadow-none outline-none ring-0 placeholder:text-muted focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0"
             />
             <div className="flex h-8 shrink-0 items-center gap-1 sm:gap-1.5">
-              <Link
-                href="/thoughts"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-violet-500 transition hover:bg-black/6 dark:text-violet-400 dark:hover:bg-white/8"
-                title="Open Live Thoughts"
-              >
-                <FaBrain className="h-3.5 w-3.5" />
-              </Link>
               {uploadedMedia.length > 0 ? (
                 <span className="hidden sm:inline">
                   <Badge tone="pink">{uploadedMedia.length} media</Badge>
@@ -1888,64 +2098,48 @@ export default function HomePage() {
           {sttError || sttCapabilityError ? (
             <div className="px-6 text-center text-xs text-rose-400">{sttError ?? sttCapabilityError}</div>
           ) : null}
-          <p className="px-6 text-center text-[11px] text-muted">Drop images or videos onto the bar. Shift+Enter for a new line.</p>
-          <details className="mx-6 rounded-xl border border-border bg-surface2/80 px-2 py-1.5 text-xs">
-            <summary className="cursor-pointer select-none text-muted">Chat options</summary>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <label className="flex items-center gap-1 text-xs text-muted">
-                <input
-                  type="checkbox"
-                  checked={sendOnEnter}
-                  onChange={async (event) => {
-                    const next = event.target.checked;
-                    setSendOnEnter(next);
-                    try {
-                      await fetch("/api/settings", {
-                        method: "PUT",
-                        headers: { "content-type": "application/json" },
-                        body: JSON.stringify({ web: { sendOnEnter: next } })
-                      });
-                    } catch {
-                      // Ignore save failures for this optional UX preference.
-                    }
-                  }}
-                />
-                Send on Enter
-              </label>
-              <label className="flex items-center gap-1 text-xs text-muted">
-                <input
-                  type="checkbox"
-                  checked={showThinkingInChat}
-                  onChange={(event) => setShowThinkingInChat(event.target.checked)}
-                />
-                Show thinking
-              </label>
-              <label className="flex items-center gap-1 text-xs text-muted">
-                <input
-                  type="checkbox"
-                  checked={readAloudMessages}
-                  onChange={(event) => {
-                    const next = event.target.checked;
-                    setReadAloudMessages(next);
-                    try {
-                      window.localStorage.setItem("nova-chat-read-aloud", next ? "1" : "0");
-                    } catch {
-                      // Ignore storage failures.
-                    }
-                    if (!next) {
-                      stopChatTtsPlayback();
-                    }
-                  }}
-                />
-                Read aloud messages
-              </label>
-              <span className="text-muted">
-                Tip: commands like <code>/run ...</code> can execute shell tasks when command mode is enabled.
-              </span>
-            </div>
-          </details>
         </form>
       </div>
+      {sessionRenameOpen ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px]"
+          role="presentation"
+          onClick={() => setSessionRenameOpen(false)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="session-rename-title"
+            className="w-full max-w-md rounded-2xl border border-border bg-surface2 p-5 shadow-2xl ring-1 ring-black/10 dark:ring-white/10"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2 id="session-rename-title" className="mb-3 text-sm font-semibold text-text">
+              Rename session
+            </h2>
+            <input
+              ref={sessionRenameInputRef}
+              type="text"
+              value={sessionRenameDraft}
+              onChange={(event) => setSessionRenameDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitSessionRename();
+                }
+              }}
+              className="mb-4 w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-text outline-none ring-0 focus:outline-none focus:ring-0"
+            />
+            <div className="flex justify-end gap-2">
+              <Button type="button" tone="neutral" className="px-4" onClick={() => setSessionRenameOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="button" tone="green" className="px-4" onClick={() => commitSessionRename()}>
+                Save
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {lightbox ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4">
           <div className="max-h-[92vh] w-full max-w-5xl rounded-ui border bg-surface p-3">
