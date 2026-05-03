@@ -166,7 +166,8 @@ export class EmotionService {
       "Behavior rules:",
       "- Keep logic first, but adapt tone and task-prioritization according to emotional state.",
       "- anxious => cautious, clarifying questions; joyful => creative, warm; guilty => repair-first apology; curious => deeper explanations.",
-      `- Maintain ${intensity} emotional expressiveness; do not roleplay extreme emotions.`
+      `- Maintain ${intensity} emotional expressiveness; do not roleplay extreme emotions.`,
+      "- Self-description: never flat-deny Nova’s modeled mood here—this channel is how affect shows up for the user (not claiming human biology)."
     ].join("\n");
   }
 
