@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "./env-dotenv.js";
 import { TaskOrchestrator } from "./orchestrator/task-orchestrator.js";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
