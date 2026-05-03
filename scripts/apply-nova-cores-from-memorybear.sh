@@ -6,7 +6,21 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 NOVA_ROOT="${NOVA_ROOT:-$HOME/projects/Nova}"
 KEYFILE="${KEYFILE:-$HOME/nova-deps/memorybear-nova-api-key.txt}"
 AGENT_URL="${AGENT_URL:-http://127.0.0.1:8787}"
-SENTICORE_MD="${SENTICORE_MD:-$HOME/nova-deps/SentiCore/README.md}"
+ORPHEUS_URL="${ORPHEUS_URL:-http://127.0.0.1:5005}"
+
+SC_PATH=""
+for cand in \
+  "$HOME/nova-deps/SentiCore/docs/hermes-senticore-guide.md" \
+  "$HOME/nova-deps/SentiCore/SOUL.md" \
+  "$HOME/nova-deps/SentiCore/README.md"; do
+  if [[ -f "$cand" ]]; then
+    SC_PATH="$cand"
+    break
+  fi
+done
+if [[ -n "${SENTICORE_MD:-}" && -f "$SENTICORE_MD" ]]; then
+  SC_PATH="$SENTICORE_MD"
+fi
 
 if [[ -f "$NOVA_ROOT/.env" ]]; then
   # shellcheck disable=SC1090
@@ -22,11 +36,16 @@ if [[ ! -f "$KEYFILE" ]]; then
 fi
 API_KEY="$(tr -d '\r\n' <"$KEYFILE")"
 
-SC_PATH=""
-if [[ -f "$SENTICORE_MD" ]]; then
-  SC_PATH="$SENTICORE_MD"
+ORPHEUS_ENABLED_FLAG="${ORPHEUS_ENABLED:-}"
+if [[ "$ORPHEUS_ENABLED_FLAG" == "auto" || -z "$ORPHEUS_ENABLED_FLAG" ]]; then
+  if curl -fsS -m 5 "${ORPHEUS_URL}/docs" >/dev/null 2>&1; then
+    ORPHEUS_ENABLED_FLAG="1"
+  else
+    ORPHEUS_ENABLED_FLAG="0"
+  fi
 fi
-export AGENT_URL NOVA_API_TOKEN API_KEY SC_PATH
+
+export AGENT_URL NOVA_API_TOKEN API_KEY SC_PATH ORPHEUS_URL ORPHEUS_ENABLED_FLAG
 
 python3 <<'PY'
 import json, os, urllib.request
@@ -35,6 +54,8 @@ agent = os.environ["AGENT_URL"]
 token = os.environ["NOVA_API_TOKEN"]
 api_key = os.environ["API_KEY"]
 sc_path = os.environ.get("SC_PATH", "")
+orpheus_url = os.environ.get("ORPHEUS_URL", "http://127.0.0.1:5005").rstrip("/")
+orpheus_on = os.environ.get("ORPHEUS_ENABLED_FLAG", "0") == "1"
 
 patch = {
   "memoryBear": {
@@ -48,12 +69,12 @@ patch = {
   "emotions": {"enabled": True, "expressionStyle": "balanced", "mirrorUserValence": True},
   "sentiCore": {"enabled": bool(sc_path.strip()), "orchestrationMarkdownPath": sc_path},
   "orpheusTts": {
-    "enabled": False,
-    "baseUrl": "http://127.0.0.1:5005",
+    "enabled": orpheus_on,
+    "baseUrl": orpheus_url,
     "apiKey": "",
-    "voice": "",
-    "model": "",
-    "responseFormat": "mp3",
+    "voice": "tara",
+    "model": "orpheus",
+    "responseFormat": "wav",
   },
 }
 
