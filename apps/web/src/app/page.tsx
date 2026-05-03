@@ -1034,6 +1034,34 @@ export default function HomePage() {
     }
   }
 
+  async function startMediaRecorderTranscription(): Promise<void> {
+    if (typeof MediaRecorder === "undefined") {
+      setSttError("This browser does not support MediaRecorder microphone capture.");
+      return;
+    }
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const recorder = new MediaRecorder(stream);
+    chatSttRecorderRef.current = recorder;
+    chatSttChunksRef.current = [];
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) chatSttChunksRef.current.push(event.data);
+    };
+    recorder.onstop = () => {
+      const chunks = chatSttChunksRef.current;
+      chatSttChunksRef.current = [];
+      const type = recorder.mimeType || "audio/webm";
+      const blob = new Blob(chunks, { type });
+      recorder.stream.getTracks().forEach((t) => t.stop());
+      chatSttRecorderRef.current = null;
+      setSttRecording(false);
+      if (blob.size > 0) {
+        void transcribeBlobToMessage(blob);
+      }
+    };
+    recorder.start();
+    setSttRecording(true);
+  }
+
   async function startMicTranscription(): Promise<void> {
     if (sttRecording || sttTranscribing) return;
     setSttError(null);
@@ -1088,7 +1116,23 @@ export default function HomePage() {
             setSttRecording(false);
             if (event.error === "not-allowed") {
               setSttError("Microphone permission denied. Allow mic access for this site.");
-            } else if (event.error !== "no-speech") {
+              return;
+            }
+            const tryServerStt =
+              event.error === "network" ||
+              event.error === "service-not-allowed" ||
+              event.error === "disconnected";
+            if (tryServerStt) {
+              void (async () => {
+                try {
+                  await startMediaRecorderTranscription();
+                } catch (err) {
+                  setSttError(describeMicStartError(err));
+                }
+              })();
+              return;
+            }
+            if (event.error !== "no-speech") {
               setSttError(`Voice recognition: ${event.error}`);
             }
           };
@@ -1096,7 +1140,9 @@ export default function HomePage() {
             if (chatSttWebRecognitionRef.current === rec) {
               chatSttWebRecognitionRef.current = null;
             }
-            setSttRecording(false);
+            if (!chatSttRecorderRef.current) {
+              setSttRecording(false);
+            }
           };
           chatSttWebRecognitionRef.current = rec;
           rec.start();
@@ -1112,31 +1158,7 @@ export default function HomePage() {
         }
       }
 
-      if (typeof MediaRecorder === "undefined") {
-        setSttError("This browser does not support MediaRecorder microphone capture.");
-        return;
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      chatSttRecorderRef.current = recorder;
-      chatSttChunksRef.current = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) chatSttChunksRef.current.push(event.data);
-      };
-      recorder.onstop = () => {
-        const chunks = chatSttChunksRef.current;
-        chatSttChunksRef.current = [];
-        const type = recorder.mimeType || "audio/webm";
-        const blob = new Blob(chunks, { type });
-        recorder.stream.getTracks().forEach((t) => t.stop());
-        chatSttRecorderRef.current = null;
-        setSttRecording(false);
-        if (blob.size > 0) {
-          void transcribeBlobToMessage(blob);
-        }
-      };
-      recorder.start();
-      setSttRecording(true);
+      await startMediaRecorderTranscription();
     } catch (error) {
       setSttError(describeMicStartError(error));
     }
