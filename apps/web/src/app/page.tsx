@@ -1949,7 +1949,7 @@ export default function HomePage() {
         </div>
       </div>
       <audio ref={chatTtsAudioRef} className="hidden" playsInline preload="none" />
-      <div className="relative z-10 -mt-8 shrink-0 bg-gradient-to-t from-surface from-15% via-surface/90 to-transparent pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-10">
+      <div className="relative z-10 -mt-8 mb-[55px] shrink-0 bg-gradient-to-t from-surface from-15% via-surface/90 to-transparent pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-10">
         <form onSubmit={onSubmit} className="flex w-full flex-col gap-2">
           {loading ? (
             <div className="flex w-full min-h-9 items-center justify-between gap-3 border-t border-rose-500/50 bg-pastelRed/40 py-2 pl-6 pr-4 dark:bg-rose-950/35">

@@ -32,6 +32,47 @@ function moodAccent(label: string): { dot: string; glow: string } {
   }
 }
 
+/** Subtle pill fill + border tint keyed to mood (still readable on light/dark). */
+function moodChrome(label: string): { bg: string; border: string } {
+  switch (label) {
+    case "joyful":
+      return {
+        bg: "from-emerald-500/22 via-emerald-400/10 to-white/[0.06] dark:from-emerald-500/25 dark:via-emerald-400/12 dark:to-white/[0.04]",
+        border: "border-emerald-400/30 dark:border-emerald-400/22"
+      };
+    case "curious":
+      return {
+        bg: "from-sky-500/22 via-sky-400/10 to-white/[0.06] dark:from-sky-500/25 dark:via-sky-400/12 dark:to-white/[0.04]",
+        border: "border-sky-400/30 dark:border-sky-400/22"
+      };
+    case "empathetic":
+      return {
+        bg: "from-violet-500/22 via-violet-400/10 to-white/[0.06] dark:from-violet-500/25 dark:via-violet-400/12 dark:to-white/[0.04]",
+        border: "border-violet-400/30 dark:border-violet-400/22"
+      };
+    case "frustrated":
+      return {
+        bg: "from-rose-500/22 via-rose-400/10 to-white/[0.06] dark:from-rose-500/25 dark:via-rose-400/12 dark:to-white/[0.04]",
+        border: "border-rose-400/30 dark:border-rose-400/22"
+      };
+    case "anxious":
+      return {
+        bg: "from-amber-500/22 via-amber-400/10 to-white/[0.06] dark:from-amber-500/25 dark:via-amber-400/12 dark:to-white/[0.04]",
+        border: "border-amber-400/30 dark:border-amber-400/22"
+      };
+    case "guilty":
+      return {
+        bg: "from-orange-500/22 via-orange-400/10 to-white/[0.06] dark:from-orange-500/25 dark:via-orange-400/12 dark:to-white/[0.04]",
+        border: "border-orange-400/30 dark:border-orange-400/22"
+      };
+    default:
+      return {
+        bg: "from-slate-400/14 via-slate-400/6 to-white/[0.06] dark:from-slate-500/18 dark:via-slate-500/8 dark:to-white/[0.03]",
+        border: "border-slate-300/30 dark:border-white/[0.1]"
+      };
+  }
+}
+
 export function EmotionBadge({ userId = WEB_CHAT_EMOTION_USER_ID }: { userId?: string }) {
   const [state, setState] = useState<EmotionState | null>(null);
 
@@ -81,6 +122,7 @@ export function EmotionBadge({ userId = WEB_CHAT_EMOTION_USER_ID }: { userId?: s
 
   const label = state?.label ?? "neutral";
   const { dot, glow } = useMemo(() => moodAccent(label), [label]);
+  const chrome = useMemo(() => moodChrome(label), [label]);
 
   return (
     <div
@@ -90,9 +132,9 @@ export function EmotionBadge({ userId = WEB_CHAT_EMOTION_USER_ID }: { userId?: s
           : "Nova emotional state unavailable (enable emotion core in Settings)"
       }
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-2.5 py-1",
-        "border-slate-300/25 bg-gradient-to-r from-white/12 to-white/[0.04] backdrop-blur-md",
-        "dark:border-white/[0.09] dark:from-white/[0.08] dark:to-white/[0.02]"
+        "inline-flex items-center gap-2 rounded-full border bg-gradient-to-r px-2.5 py-1 backdrop-blur-md",
+        chrome.bg,
+        chrome.border
       )}
     >
       <span
