@@ -47,6 +47,10 @@ export type AppSettings = {
       showNames: boolean;
     };
     sendOnEnter: boolean;
+    /** When true, chat sends the composer after this many seconds with no new dictated text (voice). */
+    voiceDictationAutoSend: boolean;
+    /** Silence window before auto-send, seconds (1–4). */
+    voiceDictationSilenceSec: number;
   };
   learning: {
     enabled: boolean;
@@ -288,7 +292,13 @@ export class SettingsRepository {
             bubbleRadiusPx: Number(parsed.web?.chatStyle?.bubbleRadiusPx ?? 16),
             showNames: parsed.web?.chatStyle?.showNames !== false
           },
-          sendOnEnter: parsed.web?.sendOnEnter === true
+          sendOnEnter: parsed.web?.sendOnEnter === true,
+          voiceDictationAutoSend: parsed.web?.voiceDictationAutoSend === true,
+          voiceDictationSilenceSec: (() => {
+            const n = Number(parsed.web?.voiceDictationSilenceSec);
+            if (!Number.isFinite(n)) return 2;
+            return Math.min(4, Math.max(1, n));
+          })()
         },
         learning: {
           enabled: parsed.learning?.enabled === true,

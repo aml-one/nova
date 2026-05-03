@@ -33,6 +33,8 @@ type AppSettingsPayload = {
     loginEnabled?: boolean;
     hideProviderModelInStats?: boolean;
     sendOnEnter?: boolean;
+    voiceDictationAutoSend?: boolean;
+    voiceDictationSilenceSec?: number;
     chatStyle?: {
       userBubbleColor?: string;
       assistantBubbleColor?: string;

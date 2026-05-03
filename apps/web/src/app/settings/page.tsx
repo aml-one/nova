@@ -66,6 +66,8 @@ type SettingsState = {
     loginEnabled: boolean;
     hideProviderModelInStats: boolean;
     sendOnEnter: boolean;
+    voiceDictationAutoSend: boolean;
+    voiceDictationSilenceSec: number;
     chatStyle: {
       userBubbleColor: string;
       assistantBubbleColor: string;
@@ -166,6 +168,8 @@ const DEFAULT_SETTINGS: SettingsState = {
     loginEnabled: true,
     hideProviderModelInStats: false,
     sendOnEnter: false,
+    voiceDictationAutoSend: false,
+    voiceDictationSilenceSec: 2,
     chatStyle: {
       userBubbleColor: "#dbeafe",
       assistantBubbleColor: "#e9d5ff",
@@ -383,7 +387,9 @@ export default function SettingsPage() {
   const [channelsSetupMode, setChannelsSetupMode] = useState<"signal" | "whatsapp" | "both">("both");
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
+  const lastSavedVoiceSilenceSecRef = useRef<number>(DEFAULT_SETTINGS.web.voiceDictationSilenceSec);
   const [chatStyleSaveState, setChatStyleSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [voiceSilenceSaveState, setVoiceSilenceSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [sentiCoreModalOpen, setSentiCoreModalOpen] = useState(false);
   const [sentiCoreDraft, setSentiCoreDraft] = useState("");
   const [sentiCoreResolvedPath, setSentiCoreResolvedPath] = useState("");
@@ -498,6 +504,37 @@ export default function SettingsPage() {
   }, [settings.web.chatStyle, loading]);
 
   useEffect(() => {
+    if (loading) return;
+    const sec = settings.web.voiceDictationSilenceSec;
+    if (sec === lastSavedVoiceSilenceSecRef.current) {
+      setVoiceSilenceSaveState("idle");
+      return;
+    }
+    setVoiceSilenceSaveState("saving");
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await fetch("/api/settings", {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ web: { voiceDictationSilenceSec: sec } })
+          });
+          if (response.ok) {
+            lastSavedVoiceSilenceSecRef.current = sec;
+            setVoiceSilenceSaveState("saved");
+            setTimeout(() => setVoiceSilenceSaveState("idle"), 1200);
+          } else {
+            setVoiceSilenceSaveState("error");
+          }
+        } catch {
+          setVoiceSilenceSaveState("error");
+        }
+      })();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [settings.web.voiceDictationSilenceSec, loading]);
+
+  useEffect(() => {
     if (!copilotDeviceLoginSessionId) return;
     let cancelled = false;
     const poll = async (): Promise<void> => {
@@ -537,7 +574,11 @@ export default function SettingsPage() {
   async function loadSettings(): Promise<void> {
     const response = await fetch("/api/settings");
     const data = (await response.json()) as { settings?: Partial<SettingsState> };
-    if (response.ok) setSettings(normalizeSettings(data.settings));
+    if (response.ok) {
+      const normalized = normalizeSettings(data.settings);
+      setSettings(normalized);
+      lastSavedVoiceSilenceSecRef.current = normalized.web.voiceDictationSilenceSec;
+    }
   }
   async function loadHealth(): Promise<void> {
     const response = await fetch("/api/system/health");
@@ -1017,6 +1058,55 @@ export default function SettingsPage() {
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.loginEnabled} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, loginEnabled: e.target.checked } }))} /> Enable Web login</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.hideProviderModelInStats} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, hideProviderModelInStats: e.target.checked } }))} /> Hide provider/model in chat statistics</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.sendOnEnter} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, sendOnEnter: e.target.checked } }))} /> Send message on Enter (Shift+Enter for newline)</label>
+            <div className="rounded-xl border border-border bg-surface/90 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-medium text-text">Voice auto-send silence</div>
+                  <p className="mt-0.5 max-w-md text-[10px] leading-snug text-muted">
+                    When “Auto-send after silence” is on in the chat options menu, Nova waits this long after the composer stops changing, then sends the message.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="tabular-nums text-sm font-semibold text-text">{settings.web.voiceDictationSilenceSec}s</span>
+                  {voiceSilenceSaveState === "saving" ? (
+                    <span className="text-[10px] text-muted">Saving…</span>
+                  ) : voiceSilenceSaveState === "saved" ? (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Saved</span>
+                  ) : voiceSilenceSaveState === "error" ? (
+                    <span className="text-[10px] text-rose-500">Error</span>
+                  ) : null}
+                </div>
+              </div>
+              <div className="mt-3 px-0.5">
+                <input
+                  type="range"
+                  className="voice-silence-slider"
+                  min={1}
+                  max={4}
+                  step={1}
+                  value={settings.web.voiceDictationSilenceSec}
+                  aria-valuemin={1}
+                  aria-valuemax={4}
+                  aria-valuenow={settings.web.voiceDictationSilenceSec}
+                  aria-label="Seconds of silence before auto-sending dictated chat"
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      web: {
+                        ...p.web,
+                        voiceDictationSilenceSec: Math.min(4, Math.max(1, Number(e.target.value) || 2))
+                      }
+                    }))
+                  }
+                />
+                <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted">
+                  <span>1s</span>
+                  <span>2s</span>
+                  <span>3s</span>
+                  <span>4s</span>
+                </div>
+              </div>
+            </div>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.chatStyle.bubbleBackgroundEnabled} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, bubbleBackgroundEnabled: e.target.checked } } }))} /> Enable bubble backgrounds in chat</label>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2 rounded-ui border bg-surface p-3">
@@ -2965,6 +3055,12 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
       loginEnabled: value?.web?.loginEnabled ?? DEFAULT_SETTINGS.web.loginEnabled,
       hideProviderModelInStats: value?.web?.hideProviderModelInStats ?? DEFAULT_SETTINGS.web.hideProviderModelInStats,
       sendOnEnter: value?.web?.sendOnEnter ?? DEFAULT_SETTINGS.web.sendOnEnter,
+      voiceDictationAutoSend: value?.web?.voiceDictationAutoSend ?? DEFAULT_SETTINGS.web.voiceDictationAutoSend,
+      voiceDictationSilenceSec: (() => {
+        const n = Number(value?.web?.voiceDictationSilenceSec);
+        if (!Number.isFinite(n)) return DEFAULT_SETTINGS.web.voiceDictationSilenceSec;
+        return Math.min(4, Math.max(1, Math.round(n)));
+      })(),
       chatStyle: {
         userBubbleColor: value?.web?.chatStyle?.userBubbleColor ?? DEFAULT_SETTINGS.web.chatStyle.userBubbleColor,
         assistantBubbleColor: value?.web?.chatStyle?.assistantBubbleColor ?? DEFAULT_SETTINGS.web.chatStyle.assistantBubbleColor,

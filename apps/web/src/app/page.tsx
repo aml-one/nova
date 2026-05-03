@@ -136,7 +136,10 @@ function rememberChatTtsBlob(
 
 function VoiceSpeakingOrb() {
   return (
-    <span className="relative inline-flex h-8 w-8 items-center justify-center" aria-hidden>
+    <span
+      className="relative inline-flex h-[175px] w-[175px] shrink-0 items-center justify-center"
+      aria-hidden
+    >
       <span
         className="absolute inset-0 rounded-full opacity-80"
         style={{
@@ -146,20 +149,20 @@ function VoiceSpeakingOrb() {
         }}
       />
       <span
-        className="absolute inset-[3px] rounded-full"
+        className="absolute inset-[14px] rounded-full"
         style={{
           border: "1px solid rgba(148, 163, 184, .55)",
           animation: "pulse 1.5s ease-in-out infinite"
         }}
       />
       <span
-        className="absolute inset-[9px] rounded-full"
+        className="absolute inset-[52px] rounded-full"
         style={{
           background: "rgba(15, 23, 42, .72)",
           border: "1px solid rgba(148, 163, 184, .35)"
         }}
       />
-      <FaMicrophone className="relative z-10 h-4 w-4 text-cyan-200 drop-shadow-[0_0_8px_rgba(125,211,252,.85)]" />
+      <FaMicrophone className="relative z-10 h-11 w-11 text-cyan-200 drop-shadow-[0_0_12px_rgba(125,211,252,.85)]" />
     </span>
   );
 }
@@ -244,6 +247,8 @@ type ChatSessionHeaderControlsProps = {
   chatOptionsPopoverRef: RefObject<HTMLDivElement | null>;
   chatOptionsOpen: boolean;
   setChatOptionsOpen: (open: boolean) => void;
+  voiceDictationAutoSend: boolean;
+  onVoiceDictationAutoSendChange: (next: boolean) => void;
   sendOnEnter: boolean;
   onSendOnEnterChange: (next: boolean) => void;
   showThinkingInChat: boolean;
@@ -267,6 +272,8 @@ function ChatSessionHeaderControls({
   chatOptionsPopoverRef,
   chatOptionsOpen,
   setChatOptionsOpen,
+  voiceDictationAutoSend,
+  onVoiceDictationAutoSendChange,
   sendOnEnter,
   onSendOnEnterChange,
   showThinkingInChat,
@@ -369,6 +376,21 @@ function ChatSessionHeaderControls({
             className="absolute right-0 top-full z-50 mt-1.5 w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-border bg-surface2 p-2 shadow-xl ring-1 ring-black/5 dark:ring-white/10"
             role="menu"
           >
+            <div className="flex items-center justify-between gap-3 border-b border-border/80 px-2 py-2.5">
+              <div className="min-w-0 pr-1">
+                <span className="text-xs text-text">Auto-send after silence</span>
+                <p className="mt-0.5 text-[10px] leading-snug text-muted">
+                  Sends the composer when dictation pauses (delay in Settings → General).
+                </p>
+              </div>
+              <IosSwitch
+                id="opt-voice-autosend"
+                checked={voiceDictationAutoSend}
+                onChange={(next) => {
+                  void onVoiceDictationAutoSendChange(next);
+                }}
+              />
+            </div>
             <div className="flex items-center justify-between gap-3 border-b border-border/80 px-2 py-2.5 last:border-0">
               <span className="text-xs text-text">Send on Enter</span>
               <IosSwitch
@@ -440,6 +462,8 @@ export default function HomePage() {
   const [editingTurnId, setEditingTurnId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
   const [sendOnEnter, setSendOnEnter] = useState(false);
+  const [voiceDictationAutoSend, setVoiceDictationAutoSend] = useState(false);
+  const [voiceDictationSilenceSec, setVoiceDictationSilenceSec] = useState(2);
   const [readAloudMessages, setReadAloudMessages] = useState(false);
   const readAloudRef = useRef(readAloudMessages);
   const [ttsPlayingTurnId, setTtsPlayingTurnId] = useState<string | null>(null);
@@ -462,6 +486,13 @@ export default function HomePage() {
   const webSearchDepthRef = useRef(0);
   const lastStreamRawRef = useRef("");
   const streamAbortRef = useRef<AbortController | null>(null);
+  const chatFormRef = useRef<HTMLFormElement | null>(null);
+  const dictationAutoSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messageRef = useRef("");
+  const loadingRef = useRef(false);
+  const voiceDictationAutoSendRef = useRef(false);
+  const voiceDictationSilenceSecRef = useRef(2);
+  const sttTranscribingRef = useRef(false);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
   const [lastCopiedTurnId, setLastCopiedTurnId] = useState<string | null>(null);
@@ -621,6 +652,8 @@ export default function HomePage() {
             web?: {
               hideProviderModelInStats?: boolean;
               sendOnEnter?: boolean;
+              voiceDictationAutoSend?: boolean;
+              voiceDictationSilenceSec?: number;
               chatStyle?: {
                 userBubbleColor?: string;
                 assistantBubbleColor?: string;
@@ -652,6 +685,13 @@ export default function HomePage() {
         if (response.ok) {
           setHideProviderModelInStats(data.settings?.web?.hideProviderModelInStats === true);
           setSendOnEnter(data.settings?.web?.sendOnEnter === true);
+          setVoiceDictationAutoSend(data.settings?.web?.voiceDictationAutoSend === true);
+          {
+            const s = Number(data.settings?.web?.voiceDictationSilenceSec);
+            setVoiceDictationSilenceSec(
+              Number.isFinite(s) ? Math.min(4, Math.max(1, Math.round(s))) : 2
+            );
+          }
           setChatStyle((prev) => ({
             userBubbleColor: data.settings?.web?.chatStyle?.userBubbleColor ?? prev.userBubbleColor,
             assistantBubbleColor: data.settings?.web?.chatStyle?.assistantBubbleColor ?? prev.assistantBubbleColor,
@@ -850,6 +890,70 @@ export default function HomePage() {
       // Ignore save failures for this optional UX preference.
     }
   }, []);
+
+  const persistVoiceDictationAutoSend = useCallback(async (next: boolean) => {
+    setVoiceDictationAutoSend(next);
+    try {
+      await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ web: { voiceDictationAutoSend: next } })
+      });
+    } catch {
+      // Ignore save failures for this optional UX preference.
+    }
+  }, []);
+
+  useEffect(() => {
+    messageRef.current = message;
+  }, [message]);
+  useEffect(() => {
+    loadingRef.current = loading;
+  }, [loading]);
+  useEffect(() => {
+    voiceDictationAutoSendRef.current = voiceDictationAutoSend;
+  }, [voiceDictationAutoSend]);
+  useEffect(() => {
+    voiceDictationSilenceSecRef.current = voiceDictationSilenceSec;
+  }, [voiceDictationSilenceSec]);
+  useEffect(() => {
+    sttTranscribingRef.current = sttTranscribing;
+  }, [sttTranscribing]);
+
+  useEffect(() => {
+    if (!voiceDictationAutoSend || loading || sttTranscribing) {
+      if (dictationAutoSendTimerRef.current) {
+        clearTimeout(dictationAutoSendTimerRef.current);
+        dictationAutoSendTimerRef.current = null;
+      }
+      return;
+    }
+    const trimmed = message.trim();
+    if (!trimmed) {
+      if (dictationAutoSendTimerRef.current) {
+        clearTimeout(dictationAutoSendTimerRef.current);
+        dictationAutoSendTimerRef.current = null;
+      }
+      return;
+    }
+    const ms = Math.round(Math.min(4, Math.max(1, voiceDictationSilenceSec)) * 1000);
+    if (dictationAutoSendTimerRef.current) {
+      clearTimeout(dictationAutoSendTimerRef.current);
+    }
+    dictationAutoSendTimerRef.current = setTimeout(() => {
+      dictationAutoSendTimerRef.current = null;
+      if (!voiceDictationAutoSendRef.current || loadingRef.current || sttTranscribingRef.current) return;
+      const m = messageRef.current.trim();
+      if (!m) return;
+      chatFormRef.current?.requestSubmit();
+    }, ms);
+    return () => {
+      if (dictationAutoSendTimerRef.current) {
+        clearTimeout(dictationAutoSendTimerRef.current);
+        dictationAutoSendTimerRef.current = null;
+      }
+    };
+  }, [message, voiceDictationAutoSend, voiceDictationSilenceSec, loading, sttTranscribing]);
 
   const toggleReadAloudHeader = useCallback(
     (next: boolean) => {
@@ -1185,6 +1289,11 @@ export default function HomePage() {
 
   async function onSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    if (dictationAutoSendTimerRef.current) {
+      clearTimeout(dictationAutoSendTimerRef.current);
+      dictationAutoSendTimerRef.current = null;
+    }
+    stopMicTranscription();
     const trimmed = message.trim();
     if (!trimmed || loading) return;
     const streamAbort = new AbortController();
@@ -1613,6 +1722,10 @@ export default function HomePage() {
         chatOptionsPopoverRef={chatOptionsPopoverRef}
         chatOptionsOpen={chatOptionsOpen}
         setChatOptionsOpen={setChatOptionsOpen}
+        voiceDictationAutoSend={voiceDictationAutoSend}
+        onVoiceDictationAutoSendChange={(next) => {
+          void persistVoiceDictationAutoSend(next);
+        }}
         sendOnEnter={sendOnEnter}
         onSendOnEnterChange={(next) => {
           void persistSendOnEnter(next);
@@ -1661,8 +1774,10 @@ export default function HomePage() {
     chatOptionsOpen,
     deleteActiveSession,
     persistSendOnEnter,
+    persistVoiceDictationAutoSend,
     readAloudMessages,
     sendOnEnter,
+    voiceDictationAutoSend,
     sessionDeleteConfirmOpen,
     sessions,
     setShellHeaderExtras,
@@ -1950,8 +2065,9 @@ export default function HomePage() {
                         type="button"
                         className={cn(
                           bubbleIconActionClass,
-                          ttsPlayingTurnId === turn.id &&
-                            "h-8 w-auto gap-1.5 rounded-full border border-cyan-400/45 bg-cyan-500/10 px-1.5"
+                          (ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id) &&
+                            "rounded-full border border-cyan-400/45 bg-cyan-500/10",
+                          ttsPlayingTurnId === turn.id && "h-7 w-auto min-w-[4.75rem] px-2"
                         )}
                         style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
                         disabled={
@@ -1973,10 +2089,7 @@ export default function HomePage() {
                         }}
                       >
                         {ttsPlayingTurnId === turn.id ? (
-                          <>
-                            <VoiceSpeakingOrb />
-                            <span className="pr-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-200">Speaking</span>
-                          </>
+                          <span className="text-[10px] font-semibold uppercase tracking-wide text-cyan-200">Speaking</span>
                         ) : ttsGeneratingTurnId === turn.id ? (
                           <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-[2px] bg-current" aria-hidden />
                         ) : (
@@ -2061,7 +2174,7 @@ export default function HomePage() {
       </div>
       <audio ref={chatTtsAudioRef} className="hidden" playsInline preload="none" />
       <div className="relative z-10 -mt-8 mb-[55px] shrink-0 bg-gradient-to-t from-surface from-15% via-surface/90 to-transparent pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-10">
-        <form onSubmit={onSubmit} className="flex w-full flex-col gap-2">
+        <form ref={chatFormRef} onSubmit={onSubmit} className="flex w-full flex-col gap-2">
           {loading ? (
             <div className="flex w-full min-h-9 items-center justify-between gap-3 border-t border-border/70 bg-surface2/50 py-2 pl-6 pr-4 backdrop-blur-sm dark:border-white/[0.06] dark:bg-white/[0.03]">
               <span className="min-w-0 text-xs text-muted sm:text-sm">Nova is generating a reply…</span>
@@ -2109,6 +2222,13 @@ export default function HomePage() {
                     ? "Some files failed to upload. Remove and retry."
                     : `${uploads.length} file${uploads.length > 1 ? "s" : ""} ready`}
                 </div>
+              </div>
+            </div>
+          ) : null}
+          {ttsPlayingTurnId !== null || ttsGeneratingTurnId !== null ? (
+            <div className="pointer-events-none flex justify-end px-6">
+              <div className="mb-[35px]">
+                <VoiceSpeakingOrb />
               </div>
             </div>
           ) : null}

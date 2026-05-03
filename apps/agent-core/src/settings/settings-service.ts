@@ -45,7 +45,9 @@ const DEFAULT_SETTINGS: AppSettings = {
       bubbleRadiusPx: 16,
       showNames: true
     },
-    sendOnEnter: false
+    sendOnEnter: false,
+    voiceDictationAutoSend: false,
+    voiceDictationSilenceSec: 2
   },
   learning: {
     enabled: process.env.NOVA_LEARNING_ENABLED === "true" || process.env.NOVA_LEARNING_ENABLED === undefined,
@@ -279,7 +281,15 @@ export class SettingsService {
           bubbleRadiusPx: update.web?.chatStyle?.bubbleRadiusPx ?? current.web.chatStyle.bubbleRadiusPx,
           showNames: update.web?.chatStyle?.showNames ?? current.web.chatStyle.showNames
         },
-        sendOnEnter: update.web?.sendOnEnter ?? current.web.sendOnEnter
+        sendOnEnter: update.web?.sendOnEnter ?? current.web.sendOnEnter,
+        voiceDictationAutoSend:
+          typeof update.web?.voiceDictationAutoSend === "boolean"
+            ? update.web.voiceDictationAutoSend
+            : current.web.voiceDictationAutoSend,
+        voiceDictationSilenceSec:
+          typeof update.web?.voiceDictationSilenceSec === "number" && Number.isFinite(update.web.voiceDictationSilenceSec)
+            ? clampInt(Math.round(update.web.voiceDictationSilenceSec), 1, 4, current.web.voiceDictationSilenceSec)
+            : current.web.voiceDictationSilenceSec
       },
       learning: {
         enabled: update.learning?.enabled ?? current.learning.enabled,
@@ -495,7 +505,14 @@ export class SettingsService {
           bubbleRadiusPx: clampInt(settings.web?.chatStyle?.bubbleRadiusPx, 0, 30, DEFAULT_SETTINGS.web.chatStyle.bubbleRadiusPx),
           showNames: settings.web?.chatStyle?.showNames !== false
         },
-        sendOnEnter: settings.web?.sendOnEnter === true
+        sendOnEnter: settings.web?.sendOnEnter === true,
+        voiceDictationAutoSend: settings.web?.voiceDictationAutoSend === true,
+        voiceDictationSilenceSec: clampInt(
+          Math.round(Number(settings.web?.voiceDictationSilenceSec)),
+          1,
+          4,
+          DEFAULT_SETTINGS.web.voiceDictationSilenceSec
+        )
       },
       learning: {
         enabled: settings.learning?.enabled !== false,
