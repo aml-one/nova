@@ -48,7 +48,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     sendOnEnter: false,
     voiceDictationAutoSend: false,
     voiceDictationSilenceSec: 2,
-    voiceContinuousConversation: false
+    voiceContinuousConversation: false,
+    readAloudMessages: false,
+    showThinkingInChat: true,
+    textScale: "normal"
   },
   learning: {
     enabled: process.env.NOVA_LEARNING_ENABLED === "true" || process.env.NOVA_LEARNING_ENABLED === undefined,
@@ -294,7 +297,19 @@ export class SettingsService {
         voiceContinuousConversation:
           typeof update.web?.voiceContinuousConversation === "boolean"
             ? update.web.voiceContinuousConversation
-            : current.web.voiceContinuousConversation
+            : current.web.voiceContinuousConversation,
+        readAloudMessages:
+          typeof update.web?.readAloudMessages === "boolean"
+            ? update.web.readAloudMessages
+            : current.web.readAloudMessages,
+        showThinkingInChat:
+          typeof update.web?.showThinkingInChat === "boolean"
+            ? update.web.showThinkingInChat
+            : current.web.showThinkingInChat,
+        textScale:
+          update.web?.textScale === "medium" || update.web?.textScale === "big" || update.web?.textScale === "normal"
+            ? update.web.textScale
+            : current.web.textScale
       },
       learning: {
         enabled: update.learning?.enabled ?? current.learning.enabled,
@@ -518,7 +533,13 @@ export class SettingsService {
           4,
           DEFAULT_SETTINGS.web.voiceDictationSilenceSec
         ),
-        voiceContinuousConversation: settings.web?.voiceContinuousConversation === true
+        voiceContinuousConversation: settings.web?.voiceContinuousConversation === true,
+        readAloudMessages: settings.web?.readAloudMessages === true,
+        showThinkingInChat: settings.web?.showThinkingInChat !== false,
+        textScale:
+          settings.web?.textScale === "medium" || settings.web?.textScale === "big" || settings.web?.textScale === "normal"
+            ? settings.web.textScale
+            : "normal"
       },
       learning: {
         enabled: settings.learning?.enabled !== false,

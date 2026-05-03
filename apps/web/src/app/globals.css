@@ -219,25 +219,15 @@ html[data-text-scale="big"] {
   }
 }
 
-@keyframes nova-entity-morph-a {
+@keyframes nova-entity-surface-wave {
   0%,
   100% {
-    border-radius: 58% 42% 48% 52% / 52% 48% 51% 49%;
-    filter: blur(0px);
+    transform: scale(1);
+    opacity: 0.45;
   }
   50% {
-    border-radius: 44% 56% 54% 46% / 46% 54% 48% 52%;
-    filter: blur(0.5px);
-  }
-}
-
-@keyframes nova-entity-morph-b {
-  0%,
-  100% {
-    border-radius: 48% 52% 42% 58% / 49% 51% 54% 46%;
-  }
-  50% {
-    border-radius: 52% 48% 56% 44% / 53% 47% 45% 55%;
+    transform: scale(1.06);
+    opacity: 0.95;
   }
 }
 
@@ -263,6 +253,18 @@ html[data-text-scale="big"] {
   animation: nova-entity-wobble var(--nova-wobble-dur) ease-in-out infinite;
 }
 
+.nova-speaking-entity__surface-ring {
+  position: absolute;
+  inset: -4%;
+  border-radius: 50%;
+  border: 2px solid rgba(103, 232, 249, 0.42);
+  box-shadow:
+    0 0 0 1px rgba(56, 189, 248, 0.2),
+    0 0 22px rgba(99, 102, 241, 0.25);
+  pointer-events: none;
+  animation: nova-entity-surface-wave 1.35s ease-in-out infinite;
+}
+
 .nova-speaking-entity__halo {
   position: absolute;
   inset: -12%;
@@ -281,7 +283,7 @@ html[data-text-scale="big"] {
 .nova-speaking-entity__ribbon {
   position: absolute;
   inset: 4%;
-  border-radius: 58% 42% 48% 52% / 52% 48% 51% 49%;
+  border-radius: 50%;
   mix-blend-mode: screen;
   opacity: 0.88;
   pointer-events: none;
@@ -299,9 +301,7 @@ html[data-text-scale="big"] {
     rgba(253, 224, 71, 0.65),
     rgba(103, 232, 249, 0.95)
   );
-  animation:
-    nova-entity-spin 3.2s linear infinite,
-    nova-entity-morph-a 4.5s ease-in-out infinite;
+  animation: nova-entity-spin 3.2s linear infinite;
   transform-style: preserve-3d;
 }
 
@@ -315,9 +315,7 @@ html[data-text-scale="big"] {
     rgba(52, 211, 153, 0.7),
     rgba(56, 189, 248, 0.9)
   );
-  animation:
-    nova-entity-spin-slow 5.8s linear infinite,
-    nova-entity-morph-b 3.8s ease-in-out infinite;
+  animation: nova-entity-spin-slow 5.8s linear infinite;
 }
 
 .nova-speaking-entity__ribbon--c {

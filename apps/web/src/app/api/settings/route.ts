@@ -36,6 +36,9 @@ type AppSettingsPayload = {
     voiceDictationAutoSend?: boolean;
     voiceDictationSilenceSec?: number;
     voiceContinuousConversation?: boolean;
+    readAloudMessages?: boolean;
+    showThinkingInChat?: boolean;
+    textScale?: "normal" | "medium" | "big";
     chatStyle?: {
       userBubbleColor?: string;
       assistantBubbleColor?: string;

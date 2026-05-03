@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiFetch } from "../lib/api-fetch";
 
 type TextScale = "normal" | "medium" | "big";
 
@@ -17,13 +18,6 @@ function nextScale(current: TextScale): TextScale {
   return SCALE_SEQUENCE[(idx + 1) % SCALE_SEQUENCE.length];
 }
 
-function readSavedScale(): TextScale {
-  if (typeof window === "undefined") return "normal";
-  const raw = window.localStorage.getItem("nova:text-scale");
-  if (raw === "medium" || raw === "big" || raw === "normal") return raw;
-  return "normal";
-}
-
 function applyScale(scale: TextScale): void {
   if (typeof document === "undefined") return;
   document.documentElement.setAttribute("data-text-scale", scale);
@@ -35,9 +29,55 @@ export function TextScaleToggle() {
 
   useEffect(() => {
     setMounted(true);
-    const saved = readSavedScale();
-    setScale(saved);
-    applyScale(saved);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await apiFetch("/api/settings");
+        const data = (await response.json()) as { settings?: { web?: { textScale?: string } } };
+        if (!response.ok || cancelled) return;
+        const ts = data.settings?.web?.textScale;
+        const legacy =
+          typeof window !== "undefined" ? window.localStorage.getItem("nova:text-scale") : null;
+        const legacyOk = legacy === "medium" || legacy === "big" || legacy === "normal";
+        if (
+          legacyOk &&
+          (ts === undefined || ts === "normal") &&
+          legacy !== "normal"
+        ) {
+          await apiFetch("/api/settings", {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ web: { textScale: legacy } })
+          });
+          setScale(legacy);
+          applyScale(legacy);
+          try {
+            window.localStorage.removeItem("nova:text-scale");
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        if (ts === "medium" || ts === "big" || ts === "normal") {
+          setScale(ts);
+          applyScale(ts);
+          return;
+        }
+        if (legacyOk) {
+          setScale(legacy);
+          applyScale(legacy);
+        }
+      } catch {
+        const legacy = typeof window !== "undefined" ? window.localStorage.getItem("nova:text-scale") : null;
+        if (legacy === "medium" || legacy === "big" || legacy === "normal") {
+          setScale(legacy);
+          applyScale(legacy);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (!mounted) return null;
@@ -52,7 +92,17 @@ export function TextScaleToggle() {
       onClick={() => {
         setScale(next);
         applyScale(next);
-        window.localStorage.setItem("nova:text-scale", next);
+        void (async () => {
+          try {
+            await apiFetch("/api/settings", {
+              method: "PUT",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ web: { textScale: next } })
+            });
+          } catch {
+            // Ignore save failures; scale still applied in-session.
+          }
+        })();
       }}
       className="inline-flex h-8 min-w-[2.9rem] items-center justify-center rounded-ui px-2 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-500/10 dark:text-slate-300 dark:hover:bg-slate-400/10"
       title={`Text size: ${currentLabel} (${scale === "normal" ? "100%" : scale === "medium" ? "125%" : "150%"}). Click for ${nextLabel}.`}

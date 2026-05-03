@@ -24,7 +24,7 @@ In your `.env` (repo root or wherever you load env for agent-core), point at the
 NOVA_STT_COMMAND=/absolute/path/to/Nova/apps/agent-core/scripts/stt_wrap.sh
 ```
 
-On macOS/Linux, `chmod +x scripts/stt_wrap.sh` once. The wrapper runs `.venv-stt/bin/python scripts/stt_local.py` with the audio path.
+On macOS/Linux, `chmod +x scripts/stt_wrap.sh` once (optional: agent-core runs `.sh` wrappers via `/bin/sh` so missing `+x` still works). The wrapper runs `.venv-stt/bin/python scripts/stt_local.py` with the audio path.
 
 On Windows without a POSIX shell, use a `.cmd` that calls your venv’s `python.exe` with `stt_local.py` and `%1`, or set `NOVA_STT_COMMAND` to a single `py -3` one-liner your shell can parse (see `.env.example`).
 

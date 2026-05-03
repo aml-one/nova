@@ -145,6 +145,7 @@ const NovaSpeakingEntity = forwardRef<HTMLDivElement>(function NovaSpeakingEntit
   return (
     <div ref={ref} className="nova-speaking-entity" aria-hidden>
       <div className="nova-speaking-entity__halo" />
+      <div className="nova-speaking-entity__surface-ring" />
       <div className="nova-speaking-entity__ribbon nova-speaking-entity__ribbon--a" />
       <div className="nova-speaking-entity__ribbon nova-speaking-entity__ribbon--b" />
       <div className="nova-speaking-entity__ribbon nova-speaking-entity__ribbon--c" />
@@ -520,6 +521,8 @@ export default function HomePage() {
   const sttTranscribingRef = useRef(false);
   const sttRecordingRef = useRef(false);
   const voiceContinuousConversationRef = useRef(false);
+  /** After TTS ends, prefer server STT once (Web Speech often fails to pick up audio right after playback). */
+  const preferServerSttAfterTtsRef = useRef(false);
   const startMicTranscriptionRef = useRef<(() => Promise<void>) | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
@@ -683,6 +686,9 @@ export default function HomePage() {
               voiceDictationAutoSend?: boolean;
               voiceDictationSilenceSec?: number;
               voiceContinuousConversation?: boolean;
+              readAloudMessages?: boolean;
+              showThinkingInChat?: boolean;
+              textScale?: "normal" | "medium" | "big";
               chatStyle?: {
                 userBubbleColor?: string;
                 assistantBubbleColor?: string;
@@ -762,6 +768,50 @@ export default function HomePage() {
             bubbleRadiusPx: data.settings?.web?.chatStyle?.bubbleRadiusPx ?? prev.bubbleRadiusPx,
             showNames: data.settings?.web?.chatStyle?.showNames ?? prev.showNames
           }));
+          setReadAloudMessages(data.settings?.web?.readAloudMessages === true);
+          setShowThinkingInChat(data.settings?.web?.showThinkingInChat !== false);
+          {
+            const ts = data.settings?.web?.textScale;
+            if (ts === "medium" || ts === "big" || ts === "normal") {
+              try {
+                document.documentElement.setAttribute("data-text-scale", ts);
+              } catch {
+                /* ignore */
+              }
+            }
+          }
+          try {
+            const legacyRa = window.localStorage.getItem("nova-chat-read-aloud");
+            if (legacyRa === "1" && data.settings?.web?.readAloudMessages !== true) {
+              await apiFetch("/api/settings", {
+                method: "PUT",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ web: { readAloudMessages: true } })
+              });
+              setReadAloudMessages(true);
+            }
+            window.localStorage.removeItem("nova-chat-read-aloud");
+            const legacyTs = window.localStorage.getItem("nova:text-scale");
+            const serverTs = data.settings?.web?.textScale;
+            if (
+              (legacyTs === "medium" || legacyTs === "big") &&
+              (serverTs === "normal" || serverTs === undefined)
+            ) {
+              await apiFetch("/api/settings", {
+                method: "PUT",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ web: { textScale: legacyTs } })
+              });
+              try {
+                document.documentElement.setAttribute("data-text-scale", legacyTs);
+              } catch {
+                /* ignore */
+              }
+            }
+            window.localStorage.removeItem("nova:text-scale");
+          } catch {
+            /* ignore migration */
+          }
         }
       } finally {
         setChatStyleReady(true);
@@ -879,17 +929,6 @@ export default function HomePage() {
   useEffect(() => {
     readAloudRef.current = readAloudMessages;
   }, [readAloudMessages]);
-
-  useEffect(() => {
-    try {
-      const v = window.localStorage.getItem("nova-chat-read-aloud");
-      if (v === "1") {
-        setReadAloudMessages(true);
-      }
-    } catch {
-      // Ignore storage failures.
-    }
-  }, []);
 
   const detachTtsOrbAnalyser = useCallback(() => {
     if (chatTtsOrbAttachRetryRef.current != null) {
@@ -1024,9 +1063,8 @@ export default function HomePage() {
 
         const s = Math.min(1, Math.max(0, level));
         const calm = s < 0.04;
-        const sx = calm ? 1 : 1 + s * 0.12;
-        const sy = calm ? 1 : 1 + s * 0.52;
-        m.style.transform = `scale(${sx.toFixed(4)}, ${sy.toFixed(4)})`;
+        const sc = calm ? 1 : 1 + s * 0.34;
+        m.style.transform = `scale(${sc.toFixed(4)})`;
         const wobbleSec = calm ? 6.5 : Math.max(1.35, 5.4 - s * 5.2);
         o.style.setProperty("--nova-wobble-dur", `${wobbleSec.toFixed(2)}s`);
 
@@ -1087,12 +1125,13 @@ export default function HomePage() {
     setTtsPlayingTurnId(null);
     setTtsGeneratingTurnId(null);
     if (opts?.naturalTtsEnd) {
+      preferServerSttAfterTtsRef.current = true;
       window.setTimeout(() => {
         if (!voiceContinuousConversationRef.current) return;
         if (loadingRef.current || sttTranscribingRef.current || sttRecordingRef.current) return;
         if (getMicCapabilityError()) return;
         void startMicTranscriptionRef.current?.();
-      }, 580);
+      }, 1100);
     }
   }, [detachTtsOrbAnalyser]);
 
@@ -1129,6 +1168,19 @@ export default function HomePage() {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ web: { voiceContinuousConversation: next } })
+      });
+    } catch {
+      // Ignore save failures for this optional UX preference.
+    }
+  }, []);
+
+  const persistShowThinkingInChat = useCallback(async (next: boolean) => {
+    setShowThinkingInChat(next);
+    try {
+      await apiFetch("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ web: { showThinkingInChat: next } })
       });
     } catch {
       // Ignore save failures for this optional UX preference.
@@ -1195,11 +1247,17 @@ export default function HomePage() {
   const toggleReadAloudHeader = useCallback(
     (next: boolean) => {
       setReadAloudMessages(next);
-      try {
-        window.localStorage.setItem("nova-chat-read-aloud", next ? "1" : "0");
-      } catch {
-        // Ignore storage failures.
-      }
+      void (async () => {
+        try {
+          await apiFetch("/api/settings", {
+            method: "PUT",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ web: { readAloudMessages: next } })
+          });
+        } catch {
+          // Ignore save failures for this optional UX preference.
+        }
+      })();
       if (!next) {
         stopChatTtsPlayback();
       }
@@ -1446,6 +1504,14 @@ export default function HomePage() {
     if (sttRecording || sttTranscribing) return;
     setSttError(null);
     try {
+      if (preferServerSttAfterTtsRef.current) {
+        preferServerSttAfterTtsRef.current = false;
+        const serverOk = await refreshSttServerConfigured(true);
+        if (serverOk) {
+          await startMediaRecorderTranscription();
+          return;
+        }
+      }
       const capabilityError = getMicCapabilityError();
       setSttCapabilityError(capabilityError);
       if (capabilityError) {
@@ -2044,7 +2110,9 @@ export default function HomePage() {
           void persistSendOnEnter(next);
         }}
         showThinkingInChat={showThinkingInChat}
-        onShowThinkingChange={setShowThinkingInChat}
+        onShowThinkingChange={(next) => {
+          void persistShowThinkingInChat(next);
+        }}
         readAloudMessages={readAloudMessages}
         onReadAloudChange={toggleReadAloudHeader}
         onSessionChange={(sessionId) => {
@@ -2087,6 +2155,7 @@ export default function HomePage() {
     chatOptionsOpen,
     deleteActiveSession,
     persistSendOnEnter,
+    persistShowThinkingInChat,
     persistVoiceContinuousConversation,
     persistVoiceDictationAutoSend,
     readAloudMessages,
@@ -2144,7 +2213,8 @@ export default function HomePage() {
           className={cn(
             "space-y-2 px-6 pb-6 sm:px-7",
             chatStyleReady && turns.length > 0 ? "pt-[30px]" : "pt-2",
-            ttsPlaybackActive && ttsPlayingTurnId !== null && "pb-[min(44vh,28rem)]"
+            ttsPlaybackActive && ttsPlayingTurnId !== null && "pb-[min(44vh,28rem)]",
+            ttsPlaybackActive && ttsPlayingTurnId !== null && "pr-[min(200px,40vw)] sm:pr-[220px]"
           )}
         >
           {!chatStyleReady ? <div className="text-sm text-muted">Loading chat style…</div> : null}

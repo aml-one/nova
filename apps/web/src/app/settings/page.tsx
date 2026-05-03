@@ -70,6 +70,9 @@ type SettingsState = {
     voiceDictationAutoSend: boolean;
     voiceDictationSilenceSec: number;
     voiceContinuousConversation: boolean;
+    readAloudMessages: boolean;
+    showThinkingInChat: boolean;
+    textScale: "normal" | "medium" | "big";
     chatStyle: {
       userBubbleColor: string;
       assistantBubbleColor: string;
@@ -173,6 +176,9 @@ const DEFAULT_SETTINGS: SettingsState = {
     voiceDictationAutoSend: false,
     voiceDictationSilenceSec: 2,
     voiceContinuousConversation: false,
+    readAloudMessages: false,
+    showThinkingInChat: true,
+    textScale: "normal",
     chatStyle: {
       userBubbleColor: "#dbeafe",
       assistantBubbleColor: "#e9d5ff",
@@ -3067,6 +3073,12 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
       })(),
       voiceContinuousConversation:
         value?.web?.voiceContinuousConversation ?? DEFAULT_SETTINGS.web.voiceContinuousConversation,
+      readAloudMessages: value?.web?.readAloudMessages === true,
+      showThinkingInChat: value?.web?.showThinkingInChat !== false,
+      textScale:
+        value?.web?.textScale === "medium" || value?.web?.textScale === "big" || value?.web?.textScale === "normal"
+          ? value.web.textScale
+          : DEFAULT_SETTINGS.web.textScale,
       chatStyle: {
         userBubbleColor: value?.web?.chatStyle?.userBubbleColor ?? DEFAULT_SETTINGS.web.chatStyle.userBubbleColor,
         assistantBubbleColor: value?.web?.chatStyle?.assistantBubbleColor ?? DEFAULT_SETTINGS.web.chatStyle.assistantBubbleColor,

@@ -53,6 +53,12 @@ export type AppSettings = {
     voiceDictationSilenceSec: number;
     /** After read-aloud / TTS finishes, start voice input automatically for back-and-forth. */
     voiceContinuousConversation: boolean;
+    /** Chat read-aloud (TTS) default — persisted so it survives browser data loss. */
+    readAloudMessages: boolean;
+    /** Show model thinking / reasoning blocks in the chat thread. */
+    showThinkingInChat: boolean;
+    /** Global UI text scale (mirrors `data-text-scale` on `<html>`). */
+    textScale: "normal" | "medium" | "big";
   };
   learning: {
     enabled: boolean;
@@ -301,7 +307,13 @@ export class SettingsRepository {
             if (!Number.isFinite(n)) return 2;
             return Math.min(4, Math.max(1, n));
           })(),
-          voiceContinuousConversation: parsed.web?.voiceContinuousConversation === true
+          voiceContinuousConversation: parsed.web?.voiceContinuousConversation === true,
+          readAloudMessages: parsed.web?.readAloudMessages === true,
+          showThinkingInChat: parsed.web?.showThinkingInChat !== false,
+          textScale:
+            parsed.web?.textScale === "medium" || parsed.web?.textScale === "big" || parsed.web?.textScale === "normal"
+              ? parsed.web.textScale
+              : "normal"
         },
         learning: {
           enabled: parsed.learning?.enabled === true,

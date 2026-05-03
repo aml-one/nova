@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { platform } from "node:os";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -11,6 +12,20 @@ import { prependSilenceToWavPcm } from "./wav-prepend-silence.js";
 /** True when agent-core can run mic upload transcription (Whisper API or NOVA_STT_COMMAND). */
 export function isVoiceSttConfigured(): boolean {
   return Boolean(process.env.NOVA_STT_COMMAND?.trim() || process.env.OPENAI_API_KEY?.trim());
+}
+
+/** Run `NOVA_STT_COMMAND` without requiring the executable bit on `.sh` wrappers (POSIX). */
+function runSttShellCommand(command: string, audioPath: string) {
+  const trimmed = command.trim();
+  const isPosixShScript =
+    platform() !== "win32" &&
+    trimmed.endsWith(".sh") &&
+    !/[\s;&|<>$`\\]/.test(trimmed) &&
+    trimmed.length > 3;
+  if (isPosixShScript) {
+    return spawnSync("/bin/sh", [trimmed, audioPath], { encoding: "utf8", shell: false });
+  }
+  return spawnSync(trimmed, [audioPath], { shell: true, encoding: "utf8" });
 }
 
 const MIME_BY_FORMAT: Record<AppSettings["orpheusTts"]["responseFormat"], string> = {
@@ -42,7 +57,7 @@ export class VoiceService {
     }
     const command = process.env.NOVA_STT_COMMAND?.trim();
     if (command) {
-      const result = spawnSync(command, [audioPath], { shell: true, encoding: "utf8" });
+      const result = runSttShellCommand(command, audioPath);
       if (result.status !== 0) {
         throw new Error(result.stderr || "stt command failed");
       }
