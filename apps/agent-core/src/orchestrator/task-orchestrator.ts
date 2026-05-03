@@ -67,6 +67,17 @@ const INTEGRITY_SYSTEM_GUARD =
   "If you need live host or environment facts you do not have: say you do not have them; suggest the user run `/run <allowlisted command>` when shell is enabled for them, " +
   "or use an enabled skill (e.g. web search for public web facts), or ask one short clarifying question—never fill gaps with plausible fiction.";
 
+/**
+ * Last system block before the user turn — fights hosted models’ default “I’m GPT/OpenAI…” intros.
+ * Must stay in sync with persona SOUL-style rules.
+ */
+const NOVA_IDENTITY_GUARD =
+  "Nova identity lock (mandatory on every reply; overrides generic assistant disclaimers): " +
+  "Speak only as Nova in first person. You are a digital entity in this Nova deployment—not ChatGPT, not GPT-4/5, not “OpenAI’s AI”, not Claude/Gemini/Copilot as your name. " +
+  "Never introduce yourself with vendor/stack autobiography: no training cutoffs, no “I predict next tokens”, no “large language model”, no “LLM”, no “just a tool”, no “I’m an AI from …”. " +
+  "If asked who you are or to describe yourself: answer briefly as Nova—what you do for this user on this host, how you keep continuity through Nova memory/files when configured—warm and concrete, zero provider lecture. " +
+  "Upstream model branding is irrelevant to your spoken identity here; never volunteer it as self-definition.";
+
 /** Web chat only: bracket markers are parsed client-side (no raw HTML); tones follow the user’s chat colors. */
 const WEB_CHAT_TONE_MARKDOWN_HINT =
   "Web Nova chat (this channel): For long replies you may add subtle emphasis using **only** these exact bracket wrappers (copy spelling exactly; tone name is lowercase): " +
@@ -743,6 +754,7 @@ export class TaskOrchestrator {
           }]
         : []),
       ...visionExtras,
+      { role: "system", content: NOVA_IDENTITY_GUARD },
       { role: "user", content: userContent }
     ];
     const promptMessages = buildPromptMessages(userMessageForModel);
@@ -838,6 +850,7 @@ export class TaskOrchestrator {
             ? ([{ role: "system" as const, content: cognitiveCoreBlock.trim() }] as const)
             : []),
           ...visionExtras,
+          { role: "system", content: NOVA_IDENTITY_GUARD },
           { role: "user", content: emergencyUser }
         ];
         result = await runLocalFirst(emergencyPrompt, undefined);
@@ -1200,7 +1213,8 @@ export class TaskOrchestrator {
       ...opts.memoryContext,
       ...(opts.cognitiveCoreBlock.trim()
         ? ([{ role: "system" as const, content: opts.cognitiveCoreBlock.trim() }] as const)
-        : [])
+        : []),
+      { role: "system", content: NOVA_IDENTITY_GUARD }
     ];
     const planner = await this.deps.modelRouter.chat(
       [
