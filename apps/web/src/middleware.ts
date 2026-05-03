@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+function forwardCookieHeader(request: NextRequest): HeadersInit {
+  const cookie = request.headers.get("cookie");
+  return cookie ? { cookie } : {};
+}
+
 export async function middleware(request: NextRequest) {
   const session = request.cookies.get("nova_session")?.value;
   const { pathname } = request.nextUrl;
@@ -27,7 +32,9 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/services");
   let loginEnabled = true;
   try {
-    const response = await fetch(new URL("/api/auth/state", request.url));
+    const response = await fetch(new URL("/api/auth/state", request.url), {
+      headers: forwardCookieHeader(request)
+    });
     if (response.ok) {
       const payload = (await response.json()) as { loginEnabled?: boolean };
       loginEnabled = payload.loginEnabled !== false;
@@ -44,8 +51,23 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  if ((!loginEnabled || session) && pathname.startsWith("/login")) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+  if (pathname.startsWith("/login")) {
+    if (!loginEnabled) {
+      return NextResponse.redirect(new URL("/dashboard", request.url));
+    }
+    if (session) {
+      try {
+        const me = await fetch(new URL("/api/auth/me", request.url), {
+          headers: forwardCookieHeader(request)
+        });
+        if (me.ok) {
+          return NextResponse.redirect(new URL("/dashboard", request.url));
+        }
+      } catch {
+        // Stale or invalid session cookie: allow the login page to render.
+      }
+    }
+    return NextResponse.next();
   }
 
   return NextResponse.next();

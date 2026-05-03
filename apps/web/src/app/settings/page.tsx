@@ -431,11 +431,12 @@ export default function SettingsPage() {
 
   useEffect(() => {
     void (async () => {
-      const stateResponse = await fetch("/api/auth/state");
+      const stateResponse = await fetch("/api/auth/state", { credentials: "include" });
       const stateData = (await stateResponse.json()) as { loginEnabled?: boolean };
       const loginEnabled = stateData.loginEnabled !== false;
-      const meResponse = await fetch("/api/auth/me");
+      const meResponse = await fetch("/api/auth/me", { credentials: "include" });
       if (loginEnabled && !meResponse.ok) {
+        await fetch("/api/auth/logout", { method: "POST", credentials: "include" }).catch(() => undefined);
         router.push("/login");
         return;
       }
