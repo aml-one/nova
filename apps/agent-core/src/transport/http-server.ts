@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, randomUUID } from "node:crypto";
 import { exec as execCallback, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { promisify } from "node:util";
 import { TaskOrchestrator } from "../orchestrator/task-orchestrator.js";
@@ -16,6 +16,7 @@ import {
 import { OutboundDispatcher } from "../messaging/outbound-dispatcher.js";
 import { Logger } from "../observability/logger.js";
 import { VoiceService } from "../voice/voice-service.js";
+import { prepareChatTextForSpeech } from "../voice/tts-text.js";
 import { getDatabase } from "../storage/sqlite.js";
 import { RagService } from "../rag/rag-service.js";
 import { BackupService } from "../backup/backup-service.js";
@@ -47,6 +48,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { MobilePushService } from "../mobile/push-service.js";
 import { LearningDaemon } from "../improvement/learning-daemon.js";
 import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
+import { expandUserPath, invalidateSentiCoreOrchestrationCache } from "../emotion/senti-core-loader.js";
 const execAsync = promisify(execCallback);
 
 type HttpServerOptions = {
@@ -304,6 +306,60 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const payload = (await readJson(request)) as Partial<AppSettings>;
         const updated = options.settings.updatePartial(payload);
         return sendJson(response, 200, { settings: updated, correlationId });
+      }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/settings/senti-core/file") {
+        const rawPath = options.settings.get().sentiCore.orchestrationMarkdownPath.trim();
+        if (!rawPath) {
+          return sendJson(response, 400, {
+            error: "sentiCore.orchestrationMarkdownPath is empty — set it in Settings first.",
+            correlationId
+          });
+        }
+        const path = expandUserPath(rawPath);
+        try {
+          const content = readFileSync(path, "utf8");
+          return sendJson(response, 200, { path, content, correlationId });
+        } catch (error) {
+          const code = error && typeof error === "object" && "code" in error ? (error as NodeJS.ErrnoException).code : "";
+          if (code === "ENOENT") {
+            return sendJson(response, 200, { path, content: "", missing: true, correlationId });
+          }
+          return sendJson(response, 500, {
+            error: error instanceof Error ? error.message : "failed to read SentiCore file",
+            correlationId
+          });
+        }
+      }
+      if (request.method === "PUT" && parsedUrl.pathname === "/v1/settings/senti-core/file") {
+        const payload = (await readJson(request)) as { content?: string };
+        const rawPath = options.settings.get().sentiCore.orchestrationMarkdownPath.trim();
+        if (!rawPath) {
+          return sendJson(response, 400, {
+            error: "sentiCore.orchestrationMarkdownPath is empty — set it in Settings first.",
+            correlationId
+          });
+        }
+        const path = expandUserPath(rawPath);
+        const content = typeof payload.content === "string" ? payload.content : "";
+        const buf = Buffer.from(content, "utf8");
+        const maxBytes = 512 * 1024;
+        if (buf.length > maxBytes) {
+          return sendJson(response, 413, {
+            error: `file too large (${buf.length} bytes; max ${maxBytes})`,
+            correlationId
+          });
+        }
+        try {
+          mkdirSync(dirname(path), { recursive: true });
+          writeFileSync(path, buf);
+          invalidateSentiCoreOrchestrationCache();
+          return sendJson(response, 200, { ok: true, path, correlationId });
+        } catch (error) {
+          return sendJson(response, 500, {
+            error: error instanceof Error ? error.message : "failed to write SentiCore file",
+            correlationId
+          });
+        }
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/system/health/full") {
         const full = await buildFullHealth(
@@ -1049,7 +1105,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/voice/speak-audio") {
         const payload = (await readJson(request)) as { text?: string };
-        const text = typeof payload.text === "string" ? payload.text.trim() : "";
+        const text = prepareChatTextForSpeech(typeof payload.text === "string" ? payload.text : "");
         if (!text) {
           return sendJson(response, 400, { error: "text is required", correlationId });
         }

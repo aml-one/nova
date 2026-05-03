@@ -7,6 +7,7 @@ import { FaCopy, FaPenToSquare, FaRotateRight } from "react-icons/fa6";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { Textarea } from "../../components/ui/textarea";
 import { Select } from "../../components/ui/select";
 import { Checkbox } from "../../components/ui/checkbox";
 import { HealthPill } from "../../components/ui/health-pill";
@@ -382,6 +383,13 @@ export default function SettingsPage() {
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
   const [chatStyleSaveState, setChatStyleSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [sentiCoreModalOpen, setSentiCoreModalOpen] = useState(false);
+  const [sentiCoreDraft, setSentiCoreDraft] = useState("");
+  const [sentiCoreResolvedPath, setSentiCoreResolvedPath] = useState("");
+  const [sentiCoreMissingFile, setSentiCoreMissingFile] = useState(false);
+  const [sentiCoreLoading, setSentiCoreLoading] = useState(false);
+  const [sentiCoreSaving, setSentiCoreSaving] = useState(false);
+  const [sentiCoreModalError, setSentiCoreModalError] = useState<string | null>(null);
 
   const isLightMode = resolvedTheme === "light";
   const activeAssistantBubbleColor = isLightMode ? settings.web.chatStyle.assistantBubbleColorLight : settings.web.chatStyle.assistantBubbleColor;
@@ -570,6 +578,54 @@ export default function SettingsPage() {
     const data = (await response.json()) as { latestSuccess?: BackupRunState; latestRun?: BackupRunState };
     if (response.ok) {
       setLatestIdentityBackup(data.latestSuccess ?? data.latestRun ?? null);
+    }
+  }
+
+  async function openSentiCoreEditor(): Promise<void> {
+    setSentiCoreModalError(null);
+    setSentiCoreModalOpen(true);
+    setSentiCoreLoading(true);
+    setSentiCoreDraft("");
+    setSentiCoreResolvedPath("");
+    setSentiCoreMissingFile(false);
+    try {
+      const r = await fetch("/api/settings/senti-core/file");
+      const data = (await r.json()) as { path?: string; content?: string; missing?: boolean; error?: string };
+      if (!r.ok) {
+        setSentiCoreModalError(data.error ?? `HTTP ${r.status}`);
+        return;
+      }
+      setSentiCoreDraft(data.content ?? "");
+      setSentiCoreResolvedPath(data.path ?? "");
+      setSentiCoreMissingFile(data.missing === true);
+    } catch {
+      setSentiCoreModalError("Could not load file (network error).");
+    } finally {
+      setSentiCoreLoading(false);
+    }
+  }
+
+  async function saveSentiCoreEditor(): Promise<void> {
+    setSentiCoreModalError(null);
+    setSentiCoreSaving(true);
+    try {
+      const r = await fetch("/api/settings/senti-core/file", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ content: sentiCoreDraft })
+      });
+      const data = (await r.json()) as { error?: string };
+      if (!r.ok) {
+        setSentiCoreModalError(data.error ?? `HTTP ${r.status}`);
+        return;
+      }
+      setSentiCoreMissingFile(false);
+      setStatus("SentiCore orchestration file saved.");
+      setSentiCoreModalOpen(false);
+    } catch {
+      setSentiCoreModalError("Could not save file (network error).");
+    } finally {
+      setSentiCoreSaving(false);
     }
   }
 
@@ -1870,12 +1926,11 @@ export default function SettingsPage() {
               <div>
                 <h3 className="text-sm font-semibold">SOUL.md · SentiCore orchestration</h3>
                 <p className="text-xs text-muted">
-                  You do not need a <code className="text-[11px]">SOUL.md</code> unless you use SentiCore-style orchestration text. When present, point to a markdown file{" "}
-                  <strong>on the agent-core host</strong> (often <code className="text-[11px]">SOUL.md</code> inside your SentiCore clone). Nova injects it into the cognitive core after memory blocks.{" "}
+                  Markdown lives <strong>on the agent-core host</strong> (often <code className="text-[11px]">SOUL.md</code> beside your{" "}
                   <a className="underline" href="https://github.com/chuchuyei/SentiCore" rel="noreferrer" target="_blank">
                     SentiCore
                   </a>{" "}
-                  may ship examples; create your own file if you prefer.
+                  checkout). When enabled, Nova injects it into the cognitive core after memory blocks. Edit it here without leaving Settings.
                 </p>
               </div>
               <label className="flex items-center gap-2 text-sm">
@@ -1886,7 +1941,7 @@ export default function SettingsPage() {
                 Enable SOUL / SentiCore orchestration in prompts
               </label>
               <label className="grid gap-1 text-xs">
-                Path to markdown (absolute path or <code className="text-[11px]">~/…</code> on the agent host)
+                Path on agent host (absolute or <code className="text-[11px]">~/…</code>)
                 <Input
                   value={settings.sentiCore.orchestrationMarkdownPath}
                   onChange={(e) =>
@@ -1895,6 +1950,12 @@ export default function SettingsPage() {
                   placeholder="~/nova-deps/SentiCore/SOUL.md"
                 />
               </label>
+              <p className="text-[11px] text-muted">
+                After changing the path, click <strong>Save Settings</strong> at the top before opening the editor (the agent reads the saved path).
+              </p>
+              <Button type="button" tone="orange" className="text-sm font-semibold" onClick={() => void openSentiCoreEditor()}>
+                Edit orchestration markdown…
+              </Button>
             </div>
             <div className="rounded-ui border bg-surface p-3">
               <div className="mb-2">
@@ -2084,7 +2145,7 @@ export default function SettingsPage() {
               Mirror user valence from phrasing
             </label>
             <p className="text-xs text-muted">
-              SOUL / SentiCore orchestration is configured under <strong>Settings → Identity</strong> (same saved fields as before).
+              SOUL / SentiCore orchestration: configure path under <strong>Settings → Identity</strong>, then use <strong>Edit orchestration markdown…</strong> to edit the file on the agent host.
             </p>
             <div className="mt-4 border-t border-border pt-3 space-y-2">
               <h3 className="text-sm font-semibold">Orpheus TTS (optional)</h3>
@@ -2709,6 +2770,53 @@ export default function SettingsPage() {
           </div>
         </Card>
       </aside>
+
+      {sentiCoreModalOpen ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="senti-core-editor-title"
+          onClick={() => setSentiCoreModalOpen(false)}
+        >
+          <div className="w-full max-w-3xl" onClick={(e) => e.stopPropagation()}>
+            <Card className="flex max-h-[90vh] w-full flex-col gap-3 overflow-hidden p-4 shadow-xl">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 id="senti-core-editor-title" className="text-base font-semibold">
+                Edit SentiCore orchestration
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" tone="neutral" onClick={() => setSentiCoreModalOpen(false)}>
+                  Close
+                </Button>
+                <Button type="button" tone="green" disabled={sentiCoreSaving || sentiCoreLoading} onClick={() => void saveSentiCoreEditor()}>
+                  {sentiCoreSaving ? "Saving…" : "Save file"}
+                </Button>
+              </div>
+            </div>
+            {sentiCoreResolvedPath ? (
+              <p className="break-all font-mono text-[11px] text-muted">{sentiCoreResolvedPath}</p>
+            ) : null}
+            {sentiCoreMissingFile ? (
+              <p className="rounded-ui border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-100">
+                File did not exist yet — saving will create it (directories are created if needed).
+              </p>
+            ) : null}
+            {sentiCoreModalError ? <p className="text-xs text-rose-400">{sentiCoreModalError}</p> : null}
+            {sentiCoreLoading ? (
+              <p className="text-sm text-muted">Loading…</p>
+            ) : (
+              <Textarea
+                className="min-h-[min(420px,50vh)] w-full shrink font-mono text-xs leading-relaxed"
+                value={sentiCoreDraft}
+                onChange={(e) => setSentiCoreDraft(e.target.value)}
+                spellCheck={false}
+              />
+            )}
+            </Card>
+          </div>
+        </div>
+      ) : null}
     </form>
   );
 }

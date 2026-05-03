@@ -83,8 +83,12 @@ function stripMarkdownForTts(raw: string): string {
   }
   visible = visible.trim();
   visible = visible.replace(/```[\s\S]*?```/g, " ");
-  visible = visible.replace(/\[nova:\w+\][\s\S]*?\[\/nova\]/gi, " ");
+  /** Keep inner speech; strip only Nova chat tone wrappers (was deleting wrapped sentences entirely). */
+  visible = visible.replace(/\[nova:[^\]]+\]([\s\S]*?)\[\/nova\]/gi, "$1");
+  visible = visible.replace(/\[\/nova\]/gi, " ");
   visible = visible.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  visible = visible.replace(/[\uFEFF\u200B-\u200D]/g, "");
+  visible = visible.replace(/[\u2013\u2014]/g, ", ");
   visible = visible.replace(/[#*_>`]+/g, " ");
   visible = visible.replace(/\s+/g, " ").trim();
   return visible.slice(0, 8000);

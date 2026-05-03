@@ -3,6 +3,11 @@ import { homedir } from "node:os";
 
 let cache: { resolved: string; mtimeMs: number; content: string } | null = null;
 
+/** Clears cached orchestration markdown after disk writes (Settings UI editor). */
+export function invalidateSentiCoreOrchestrationCache(): void {
+  cache = null;
+}
+
 export function expandUserPath(raw: string): string {
   const trimmed = raw.trim();
   if (trimmed.startsWith("~/") || trimmed === "~") {
