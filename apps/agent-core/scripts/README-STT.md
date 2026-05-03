@@ -18,13 +18,15 @@ python -m venv .venv-stt
 pip install -r scripts/stt-requirements.txt
 ```
 
-In your `.env` (repo root or wherever you load env for agent-core):
+In your `.env` (repo root or wherever you load env for agent-core), point at the **wrapper** (one path; works with Nova’s `spawnSync`):
 
 ```env
-NOVA_STT_COMMAND=python scripts/stt_local.py
+NOVA_STT_COMMAND=/absolute/path/to/Nova/apps/agent-core/scripts/stt_wrap.sh
 ```
 
-On Windows, if `python` is not on PATH, try `py -3 scripts\stt_local.py` instead.
+On macOS/Linux, `chmod +x scripts/stt_wrap.sh` once. The wrapper runs `.venv-stt/bin/python scripts/stt_local.py` with the audio path.
+
+On Windows without a POSIX shell, use a `.cmd` that calls your venv’s `python.exe` with `stt_local.py` and `%1`, or set `NOVA_STT_COMMAND` to a single `py -3` one-liner your shell can parse (see `.env.example`).
 
 **Tuning (optional):**
 
