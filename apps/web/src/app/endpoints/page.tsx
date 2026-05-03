@@ -1,64 +1,204 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { cn } from "../../lib/cn";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { EndpointResultBody } from "./endpoint-result-view";
 import { triggerBlobDownload } from "../../lib/audio-download";
 
+type EndpointCategory =
+  | "system"
+  | "debug"
+  | "observability"
+  | "persona-memory"
+  | "chat"
+  | "integrations"
+  | "voice";
+
 type EndpointItem = {
+  category: EndpointCategory;
+  /** Short human title shown first (e.g. Health, Spoken audio). */
+  title: string;
   method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
   note: string;
 };
 
+const CATEGORY_META: Record<EndpointCategory, { label: string; sectionClass: string; badgeClass: string }> = {
+  system: {
+    label: "System",
+    sectionClass:
+      "border-emerald-300/50 bg-emerald-100/40 dark:border-emerald-500/35 dark:bg-emerald-950/45",
+    badgeClass: "bg-emerald-200/70 text-emerald-950 dark:bg-emerald-800/60 dark:text-emerald-50"
+  },
+  debug: {
+    label: "Debug",
+    sectionClass:
+      "border-violet-300/50 bg-violet-100/45 dark:border-violet-500/35 dark:bg-violet-950/45",
+    badgeClass: "bg-violet-200/70 text-violet-950 dark:bg-violet-800/60 dark:text-violet-50"
+  },
+  observability: {
+    label: "Observability",
+    sectionClass: "border-sky-300/50 bg-sky-100/45 dark:border-sky-500/35 dark:bg-sky-950/45",
+    badgeClass: "bg-sky-200/70 text-sky-950 dark:bg-sky-800/60 dark:text-sky-50"
+  },
+  "persona-memory": {
+    label: "Persona & memory",
+    sectionClass:
+      "border-amber-300/55 bg-amber-100/45 dark:border-amber-500/35 dark:bg-amber-950/45",
+    badgeClass: "bg-amber-200/75 text-amber-950 dark:bg-amber-800/55 dark:text-amber-50"
+  },
+  chat: {
+    label: "Chat & providers",
+    sectionClass: "border-rose-300/50 bg-rose-100/40 dark:border-rose-500/35 dark:bg-rose-950/45",
+    badgeClass: "bg-rose-200/70 text-rose-950 dark:bg-rose-800/55 dark:text-rose-50"
+  },
+  integrations: {
+    label: "Integrations",
+    sectionClass:
+      "border-cyan-300/50 bg-cyan-100/40 dark:border-cyan-500/35 dark:bg-cyan-950/45",
+    badgeClass: "bg-cyan-200/70 text-cyan-950 dark:bg-cyan-800/55 dark:text-cyan-50"
+  },
+  voice: {
+    label: "Voice & speech",
+    sectionClass:
+      "border-indigo-300/50 bg-indigo-100/45 dark:border-indigo-500/35 dark:bg-indigo-950/45",
+    badgeClass: "bg-indigo-200/70 text-indigo-950 dark:bg-indigo-800/55 dark:text-indigo-50"
+  }
+};
+
+const CATEGORY_ORDER: EndpointCategory[] = [
+  "system",
+  "debug",
+  "observability",
+  "persona-memory",
+  "chat",
+  "integrations",
+  "voice"
+];
+
 const ENDPOINTS: EndpointItem[] = [
-  { method: "GET", path: "/api/system/health", note: "Overall system health checks." },
+  { category: "system", title: "Health", method: "GET", path: "/api/system/health", note: "Overall system health checks." },
   {
+    category: "debug",
+    title: "Vision routing",
     method: "GET",
     path: "/api/debug/vision",
-    note: "Vision routing snapshot (lanes, priority, configured flags) — no upstream calls."
+    note: "Vision routing snapshot (lanes, priority, flags) — no upstream calls."
   },
   {
+    category: "debug",
+    title: "Chat routing",
     method: "GET",
     path: "/api/debug/chat-routing",
-    note: "Vision + chat routing: why run history may show Copilot while vision uses local; integration skips."
+    note: "Why run history may show Copilot while vision uses local; integration skips."
   },
-  { method: "GET", path: "/api/thoughts?limit=200", note: "Latest thought events." },
   {
+    category: "observability",
+    title: "Thoughts feed",
+    method: "GET",
+    path: "/api/thoughts?limit=200",
+    note: "Latest thought events."
+  },
+  {
+    category: "observability",
+    title: "Emotion timeline",
     method: "GET",
     path: "/api/emotion/history?limit=200",
-    note: "Unified Nova mood timeline (all channels/users); optional userId query ignored."
+    note: "Unified Nova mood timeline (all channels/users)."
   },
   {
+    category: "observability",
+    title: "Chat run history",
+    method: "GET",
+    path: "/api/chat/history?limit=100",
+    note: "Recent chat run records."
+  },
+  {
+    category: "observability",
+    title: "Autonomy inspect",
+    method: "GET",
+    path: "/api/improvement/inspect?limit=200",
+    note: "Autonomy / improvement loop diagnostics snapshot."
+  },
+  {
+    category: "observability",
+    title: "Learning history",
+    method: "GET",
+    path: "/api/improvement/history",
+    note: "Learning history grouped by date."
+  },
+  {
+    category: "persona-memory",
+    title: "Persona file",
+    method: "GET",
+    path: "/api/persona/default",
+    note: "Current base persona YAML."
+  },
+  {
+    category: "persona-memory",
+    title: "Persona versions",
+    method: "GET",
+    path: "/api/personas/versions?personaId=default&rewritesOnly=true",
+    note: "Persona rewrite history only."
+  },
+  {
+    category: "persona-memory",
+    title: "Autonomous facts",
     method: "GET",
     path: "/api/memory/autonomous-facts?limit=200",
-    note: "Autonomous long-term facts (MemoryService); optional userId filters to one profile."
+    note: "Long-term MemoryService facts; optional userId filters one profile."
   },
-  { method: "GET", path: "/api/improvement/inspect?limit=200", note: "Autonomy/loop diagnostics snapshot." },
-  { method: "GET", path: "/api/improvement/history", note: "Learning history grouped by date." },
-  { method: "GET", path: "/api/persona/default", note: "Current base persona file." },
-  { method: "GET", path: "/api/personas/versions?personaId=default&rewritesOnly=true", note: "Persona rewrite history only." },
-  { method: "GET", path: "/api/chat/history?limit=100", note: "Recent chat run records." },
-  { method: "POST", path: "/api/chat", note: "Non-streaming chat request." },
   {
+    category: "chat",
+    title: "Chat (buffered)",
+    method: "POST",
+    path: "/api/chat",
+    note: "Non-streaming chat; triggers identity repair path on intro-style questions."
+  },
+  {
+    category: "chat",
+    title: "Chat (stream)",
     method: "POST",
     path: "/api/chat/stream",
-    note: "Streaming chat (SSE): events start, activity (e.g. web-search), token, done, error."
+    note: "SSE: events start, activity (e.g. web-search), token, done, error."
   },
-  { method: "GET", path: "/api/providers/catalog", note: "Provider models and setup status." },
-  { method: "GET", path: "/api/skills/manifests", note: "Loaded skill manifests." },
-  { method: "POST", path: "/api/camera/test", note: "Test one configured camera." },
   {
+    category: "chat",
+    title: "Provider catalog",
+    method: "GET",
+    path: "/api/providers/catalog",
+    note: "Models and setup status per provider."
+  },
+  {
+    category: "integrations",
+    title: "Skills manifests",
+    method: "GET",
+    path: "/api/skills/manifests",
+    note: "Loaded workspace skill manifests."
+  },
+  {
+    category: "integrations",
+    title: "Camera test",
+    method: "POST",
+    path: "/api/camera/test",
+    note: "Probe one configured camera."
+  },
+  {
+    category: "voice",
+    title: "Spoken audio (TTS)",
     method: "POST",
     path: "/api/voice/speak-audio",
-    note: 'Body JSON { "text": "…" } — returns binary audio (wav/mp3/… per Settings → Voice). Runner shows preview + download.'
+    note: 'Binary reply: JSON body `{ "text": "…" }` → WAV/MP3/… per Settings → Voice. Same pipeline as chat read-aloud.'
   },
   {
+    category: "voice",
+    title: "TTS pipeline trace",
     method: "POST",
     path: "/api/voice/tts-trace",
-    note: 'JSON { "text": "…" } — shows request → preparedForSpeech → sentToOrpheus + mood; no Orpheus call.'
+    note: 'JSON `{ "text": "…" }` → request → preparedForSpeech → sentToOrpheus + mood; no Orpheus HTTP call.'
   }
 ];
 
@@ -81,6 +221,15 @@ export default function EndpointsPage() {
   const [resultError, setResultError] = useState<string | null>(null);
   const [audioResult, setAudioResult] = useState<{ url: string; blob: Blob; mime: string } | null>(null);
   const selected = useMemo(() => ENDPOINTS.find((item) => item.path === path && item.method === method), [method, path]);
+
+  const endpointsByCategory = useMemo(() => {
+    const map = new Map<EndpointCategory, EndpointItem[]>();
+    for (const cat of CATEGORY_ORDER) map.set(cat, []);
+    for (const item of ENDPOINTS) {
+      map.get(item.category)?.push(item);
+    }
+    return map;
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -142,31 +291,56 @@ export default function EndpointsPage() {
     <div className="space-y-4">
       <Card className="space-y-2">
         <h1 className="text-2xl font-semibold">Endpoints</h1>
-        <p className="text-sm text-muted">Browse available debug endpoints and run them directly from the web UI.</p>
+        <p className="text-sm text-muted">
+          Browse HTTP routes exposed by this web app (mostly proxies to agent-core). Items are grouped by category with pastel bands.
+          Under <strong className="text-foreground">Voice & speech</strong>, use <strong className="text-foreground">Spoken audio (TTS)</strong> for the same synthesis as chat read-aloud.
+        </p>
       </Card>
       <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
-        <Card className="space-y-2">
+        <Card className="space-y-3">
           <h2 className="text-sm font-semibold">Available endpoints</h2>
-          <div className="max-h-[62vh] space-y-1 overflow-auto pr-1">
-            {ENDPOINTS.map((item) => {
-              const active = item.path === path && item.method === method;
+          <div className="max-h-[62vh] space-y-3 overflow-auto pr-1">
+            {CATEGORY_ORDER.map((categoryId) => {
+              const items = endpointsByCategory.get(categoryId) ?? [];
+              if (!items.length) return null;
+              const meta = CATEGORY_META[categoryId];
               return (
-                <button
-                  key={`${item.method}-${item.path}`}
-                  type="button"
-                  className={`w-full rounded-ui border px-2 py-2 text-left text-xs ${
-                    active ? "border-blue-500/60 bg-blue-500/10" : "bg-surface hover:bg-surface2"
-                  }`}
-                  onClick={() => {
-                    setPath(item.path);
-                    setMethod(item.method);
-                    const preset = POST_BODY_PRESETS[item.path];
-                    if (item.method !== "GET" && preset) setBody(preset);
-                  }}
-                >
-                  <div className="font-semibold">{item.method} {item.path}</div>
-                  <div className="text-muted">{item.note}</div>
-                </button>
+                <section key={categoryId} className={cn("rounded-xl border p-2.5", meta.sectionClass)}>
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className={cn("rounded-md px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide", meta.badgeClass)}>
+                      {meta.label}
+                    </span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {items.map((item) => {
+                      const active = item.path === path && item.method === method;
+                      return (
+                        <button
+                          key={`${item.method}-${item.path}`}
+                          type="button"
+                          className={cn(
+                            "w-full rounded-lg border px-2.5 py-2 text-left transition-colors",
+                            active
+                              ? "border-blue-500/70 bg-blue-500/15 ring-2 ring-blue-400/35 dark:border-blue-400/60 dark:bg-blue-500/20"
+                              : "border-black/10 bg-white/40 hover:bg-white/70 dark:border-white/10 dark:bg-black/15 dark:hover:bg-black/25"
+                          )}
+                          onClick={() => {
+                            setPath(item.path);
+                            setMethod(item.method);
+                            const preset = POST_BODY_PRESETS[item.path];
+                            if (item.method !== "GET" && preset) setBody(preset);
+                          }}
+                        >
+                          <div className="text-sm font-semibold leading-snug text-foreground">{item.title}</div>
+                          <div className="mt-0.5 font-mono text-[11px] text-foreground/85">
+                            {item.method} {item.path}
+                          </div>
+                          <div className="mt-1 text-[11px] leading-relaxed text-muted">{item.note}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
               );
             })}
           </div>
@@ -202,11 +376,17 @@ export default function EndpointsPage() {
                 />
               </label>
             ) : null}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button type="button" tone="blue" onClick={() => void runRequest()} disabled={loading}>
                 {loading ? "Running..." : "Run request"}
               </Button>
-              {selected ? <span className="text-xs text-muted">{selected.note}</span> : null}
+              {selected ? (
+                <span className="text-xs text-muted">
+                  <span className="font-semibold text-foreground">{selected.title}</span>
+                  {" — "}
+                  {selected.note}
+                </span>
+              ) : null}
             </div>
           </div>
           <div className="rounded-ui border bg-surface2 p-2">

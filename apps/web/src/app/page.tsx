@@ -28,6 +28,7 @@ import { dispatchNovaEmotionRefresh } from "../lib/emotion-user";
 import { ChatMarkdown } from "../components/chat-markdown";
 import { triggerBlobDownload } from "../lib/audio-download";
 import { loadAudioElementThenPlay } from "../lib/audio-play";
+import { shouldUseNovaIdentityBufferedChat } from "../lib/nova-identity-chat";
 
 type MediaItem = {
   url: string;
@@ -608,47 +609,36 @@ export default function HomePage() {
       return;
     }
     try {
-      const startedAt = Date.now();
-      let emotionRefreshedOnFirstToken = false;
-      const response = await fetch("/api/chat/stream", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          message: composedMessage,
-          imageUrl: toAgentVisionImageUrl(readyUploads.find((item) => item.kind === "image")?.url)
-        }),
-        signal: streamAbort.signal
-      });
-      if (!response.ok || !response.body) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
-        setTurns((prev) =>
-          prev.map((turn) =>
-            turn.id === assistantId
-              ? { ...turn, text: `Error: ${data.error ?? "Request failed"}`, thinkingText: undefined }
-              : turn.id === userTurn.id
-                ? { ...turn, isPending: false }
-                : turn
-          )
-        );
-        return;
-      }
-      /** Coalesce burst token events (many `data:` lines per chunk) into one React update per macrotask — avoids maximum update depth. */
-      let streamPartialFlushQueued = false;
-      let pendingStreamPartialText = "";
-      const applyStreamPartialNow = (partialText: string): void => {
-        if (!emotionRefreshedOnFirstToken && partialText.trim().length > 0) {
-          emotionRefreshedOnFirstToken = true;
-          dispatchNovaEmotionRefresh();
+      const visionImageUrl = toAgentVisionImageUrl(readyUploads.find((item) => item.kind === "image")?.url);
+      const identityBufferedChat = shouldUseNovaIdentityBufferedChat(trimmed);
+
+      if (identityBufferedChat) {
+        const startedAt = Date.now();
+        setStreamPhase("thinking");
+        dispatchNovaEmotionRefresh();
+        const buffered = await fetchNovaBufferedChatReply({
+          composedMessage,
+          imageUrl: visionImageUrl,
+          signal: streamAbort.signal
+        });
+        if (!buffered.ok) {
+          setTurns((prev) =>
+            prev.map((turn) =>
+              turn.id === assistantId
+                ? { ...turn, text: `Error: ${buffered.error}`, thinkingText: undefined }
+                : turn.id === userTurn.id
+                  ? { ...turn, isPending: false }
+                  : turn
+            )
+          );
+          return;
         }
-        lastStreamRawRef.current = partialText;
-        let nextPhase: StreamPhase = "thinking";
-        if (webSearchDepthRef.current > 0) {
-          nextPhase = "web-search";
-        } else if (isInsideReasoningStream(partialText)) {
-          nextPhase = "reasoning";
-        }
-        setStreamPhase((prev) => (prev === nextPhase ? prev : nextPhase));
-        const { visible, thinking } = extractThinking({ text: partialText });
+        dispatchNovaEmotionRefresh();
+        lastStreamRawRef.current = buffered.reply;
+        const { visible, thinking } = extractThinking({ text: buffered.reply });
+        const elapsedMs = Math.max(1, Date.now() - startedAt);
+        const tokenCount = estimateTokens(visible);
+        const tokensPerSecond = Number(((tokenCount * 1000) / elapsedMs).toFixed(1));
         setTurns((prev) =>
           prev.map((turn) =>
             turn.id === assistantId
@@ -656,77 +646,150 @@ export default function HomePage() {
                   ...turn,
                   text: visible,
                   attachments: extractMediaFromText(visible),
-                  thinkingText: thinking || undefined
+                  thinkingText: thinking || undefined,
+                  stats: {
+                    tokenCount,
+                    elapsedMs,
+                    tokensPerSecond,
+                    hideProviderModel: hideProviderModelInStats
+                  }
                 }
               : turn
           )
         );
-      };
-
-      const streamResult = await readSseStream(
-        response.body,
-        streamAbort.signal,
-        (partialText) => {
-          pendingStreamPartialText = partialText;
-          if (!streamPartialFlushQueued) {
-            streamPartialFlushQueued = true;
-            queueMicrotask(() => {
-              streamPartialFlushQueued = false;
-              applyStreamPartialNow(pendingStreamPartialText);
-            });
+        setTurns((prev) => prev.map((turn) => (turn.id === userTurn.id ? { ...turn, isPending: false } : turn)));
+        setUploads([]);
+        dispatchNovaEmotionRefresh();
+        if (
+          readAloudRef.current &&
+          visible.trim().length > 0 &&
+          !visible.includes("_Stopped._") &&
+          !/\/Stopped\./i.test(visible)
+        ) {
+          void playChatTts(assistantId, visible);
+        }
+      } else {
+        const startedAt = Date.now();
+        let emotionRefreshedOnFirstToken = false;
+        const response = await fetch("/api/chat/stream", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            message: composedMessage,
+            imageUrl: visionImageUrl
+          }),
+          signal: streamAbort.signal
+        });
+        if (!response.ok || !response.body) {
+          const data = (await response.json().catch(() => ({}))) as { error?: string };
+          setTurns((prev) =>
+            prev.map((turn) =>
+              turn.id === assistantId
+                ? { ...turn, text: `Error: ${data.error ?? "Request failed"}`, thinkingText: undefined }
+                : turn.id === userTurn.id
+                  ? { ...turn, isPending: false }
+                  : turn
+            )
+          );
+          return;
+        }
+        /** Coalesce burst token events (many `data:` lines per chunk) into one React update per macrotask — avoids maximum update depth. */
+        let streamPartialFlushQueued = false;
+        let pendingStreamPartialText = "";
+        const applyStreamPartialNow = (partialText: string): void => {
+          if (!emotionRefreshedOnFirstToken && partialText.trim().length > 0) {
+            emotionRefreshedOnFirstToken = true;
+            dispatchNovaEmotionRefresh();
           }
-        },
-        (evt) => {
-          if (evt.kind !== "web-search") return;
-          if (evt.phase === "start") {
-            webSearchDepthRef.current += 1;
-            setStreamPhase((prev) => (prev === "web-search" ? prev : "web-search"));
-          } else {
-            webSearchDepthRef.current = Math.max(0, webSearchDepthRef.current - 1);
-            if (webSearchDepthRef.current === 0) {
-              const raw = lastStreamRawRef.current;
-              const next = isInsideReasoningStream(raw) ? "reasoning" : "thinking";
-              setStreamPhase((prev) => (prev === next ? prev : next));
+          lastStreamRawRef.current = partialText;
+          let nextPhase: StreamPhase = "thinking";
+          if (webSearchDepthRef.current > 0) {
+            nextPhase = "web-search";
+          } else if (isInsideReasoningStream(partialText)) {
+            nextPhase = "reasoning";
+          }
+          setStreamPhase((prev) => (prev === nextPhase ? prev : nextPhase));
+          const { visible, thinking } = extractThinking({ text: partialText });
+          setTurns((prev) =>
+            prev.map((turn) =>
+              turn.id === assistantId
+                ? {
+                    ...turn,
+                    text: visible,
+                    attachments: extractMediaFromText(visible),
+                    thinkingText: thinking || undefined
+                  }
+                : turn
+            )
+          );
+        };
+
+        const streamResult = await readSseStream(
+          response.body,
+          streamAbort.signal,
+          (partialText) => {
+            pendingStreamPartialText = partialText;
+            if (!streamPartialFlushQueued) {
+              streamPartialFlushQueued = true;
+              queueMicrotask(() => {
+                streamPartialFlushQueued = false;
+                applyStreamPartialNow(pendingStreamPartialText);
+              });
+            }
+          },
+          (evt) => {
+            if (evt.kind !== "web-search") return;
+            if (evt.phase === "start") {
+              webSearchDepthRef.current += 1;
+              setStreamPhase((prev) => (prev === "web-search" ? prev : "web-search"));
+            } else {
+              webSearchDepthRef.current = Math.max(0, webSearchDepthRef.current - 1);
+              if (webSearchDepthRef.current === 0) {
+                const raw = lastStreamRawRef.current;
+                const next = isInsideReasoningStream(raw) ? "reasoning" : "thinking";
+                setStreamPhase((prev) => (prev === next ? prev : next));
+              }
             }
           }
-        }
-      );
-      const { visible, thinking, firstTokenMs, provider, model: modelName, hideProviderModel, providerTps } = extractThinking(streamResult);
-      const elapsedMs = Math.max(1, Date.now() - startedAt);
-      const tokenCount = estimateTokens(visible);
-      const tokensPerSecond = Number(((tokenCount * 1000) / elapsedMs).toFixed(1));
-      setTurns((prev) =>
-        prev.map((turn) =>
-          turn.id === assistantId
-            ? {
-                ...turn,
-                text: visible,
-                attachments: extractMediaFromText(visible),
-                thinkingText: thinking || undefined,
-                stats: {
-                  tokenCount,
-                  elapsedMs,
-                  tokensPerSecond,
-                  firstTokenMs,
-                  provider,
-                  model: modelName,
-                  hideProviderModel: hideProviderModel || hideProviderModelInStats,
-                  providerTps
+        );
+        const { visible, thinking, firstTokenMs, provider, model: modelName, hideProviderModel, providerTps } =
+          extractThinking(streamResult);
+        const elapsedMs = Math.max(1, Date.now() - startedAt);
+        const tokenCount = estimateTokens(visible);
+        const tokensPerSecond = Number(((tokenCount * 1000) / elapsedMs).toFixed(1));
+        setTurns((prev) =>
+          prev.map((turn) =>
+            turn.id === assistantId
+              ? {
+                  ...turn,
+                  text: visible,
+                  attachments: extractMediaFromText(visible),
+                  thinkingText: thinking || undefined,
+                  stats: {
+                    tokenCount,
+                    elapsedMs,
+                    tokensPerSecond,
+                    firstTokenMs,
+                    provider,
+                    model: modelName,
+                    hideProviderModel: hideProviderModel || hideProviderModelInStats,
+                    providerTps
+                  }
                 }
-              }
-            : turn
-        )
-      );
-      setTurns((prev) => prev.map((turn) => (turn.id === userTurn.id ? { ...turn, isPending: false } : turn)));
-      setUploads([]);
-      dispatchNovaEmotionRefresh();
-      if (
-        readAloudRef.current &&
-        visible.trim().length > 0 &&
-        !visible.includes("_Stopped._") &&
-        !/\/Stopped\./i.test(visible)
-      ) {
-        void playChatTts(assistantId, visible);
+              : turn
+          )
+        );
+        setTurns((prev) => prev.map((turn) => (turn.id === userTurn.id ? { ...turn, isPending: false } : turn)));
+        setUploads([]);
+        dispatchNovaEmotionRefresh();
+        if (
+          readAloudRef.current &&
+          visible.trim().length > 0 &&
+          !visible.includes("_Stopped._") &&
+          !/\/Stopped\./i.test(visible)
+        ) {
+          void playChatTts(assistantId, visible);
+        }
       }
     } catch (error) {
       const aborted =
@@ -1235,7 +1298,7 @@ export default function HomePage() {
                 </div>
               ) : null}
               {turn.role === "assistant" ? (
-                <div className="mt-2 flex items-center gap-1">
+                <div className="mt-2 flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     className={bubbleIconActionClass}
@@ -1245,16 +1308,18 @@ export default function HomePage() {
                   >
                     {lastCopiedTurnId === turn.id ? <FaCheck className="h-3.5 w-3.5 text-emerald-400" /> : <FaCopy className="h-3.5 w-3.5" />}
                   </button>
-                  <button
+                  <Button
                     type="button"
-                    className={bubbleIconActionClass}
-                    style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
+                    tone="neutral"
+                    className="h-8 shrink-0 gap-1.5 px-3 text-xs font-medium"
                     disabled={
                       !turn.text.trim() ||
                       Boolean(loading && index === turns.length - 1 && turn.role === "assistant")
                     }
                     title={
-                      ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id ? "Stop audio / cancel generation" : "Read aloud"
+                      ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id
+                        ? "Stop audio / cancel generation"
+                        : "Read this message aloud (Orpheus)"
                     }
                     aria-pressed={ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id}
                     onClick={() => {
@@ -1268,23 +1333,25 @@ export default function HomePage() {
                     {ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id ? (
                       <span className="inline-block h-3 w-3 shrink-0 rounded-[2px] bg-current" aria-hidden />
                     ) : (
-                      <FaVolumeHigh className="h-3.5 w-3.5" />
+                      <FaVolumeHigh className="h-3.5 w-3.5 shrink-0" />
                     )}
-                  </button>
-                  <button
+                    {ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id ? "Stop audio" : "Read aloud"}
+                  </Button>
+                  <Button
                     type="button"
-                    className={bubbleIconActionClass}
-                    style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
+                    tone="purple"
+                    className="h-8 shrink-0 gap-1.5 px-3 text-xs font-medium"
                     disabled={
                       !turn.text.trim() ||
                       Boolean(loading && index === turns.length - 1 && turn.role === "assistant") ||
                       ttsGeneratingTurnId === turn.id
                     }
-                    title="Download synthesized audio for this message"
+                    title="Download synthesized WAV/MP3 for this message"
                     onClick={() => void downloadChatTtsForTurn(turn.id, turn.text)}
                   >
-                    <FaDownload className="h-3.5 w-3.5" />
-                  </button>
+                    <FaDownload className="h-3.5 w-3.5 shrink-0" />
+                    Download audio
+                  </Button>
                 </div>
               ) : null}
               {turn.role === "assistant" && showThinkingInChat && turn.thinkingText ? (
@@ -1710,6 +1777,27 @@ function estimateTokens(text: string): number {
   const trimmed = text.trim();
   if (!trimmed) return 0;
   return Math.ceil(trimmed.length / 4);
+}
+
+async function fetchNovaBufferedChatReply(input: {
+  composedMessage: string;
+  imageUrl?: string;
+  signal: AbortSignal;
+}): Promise<{ ok: true; reply: string } | { ok: false; error: string }> {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      message: input.composedMessage,
+      imageUrl: input.imageUrl
+    }),
+    signal: input.signal
+  });
+  const data = (await response.json().catch(() => ({}))) as { reply?: string; error?: string };
+  if (!response.ok) {
+    return { ok: false, error: data.error ?? `Request failed (${response.status})` };
+  }
+  return { ok: true, reply: data.reply ?? "" };
 }
 
 function withOpacity(hex: string, opacityPct: number): string {

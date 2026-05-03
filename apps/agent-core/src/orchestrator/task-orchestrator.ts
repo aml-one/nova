@@ -68,7 +68,7 @@ const INTEGRITY_SYSTEM_GUARD =
   "or use an enabled skill (e.g. web search for public web facts), or ask one short clarifying question—never fill gaps with plausible fiction.";
 
 /**
- * Last system block before the user turn — fights hosted models’ default “I’m GPT/OpenAI…” intros.
+ * Nova identity lock (injected early in the system stack and paired with `NOVA_IDENTITY_REMINDER_LAST` on intro-style user questions).
  * Must stay in sync with persona SOUL-style rules.
  */
 const NOVA_IDENTITY_GUARD =
@@ -85,6 +85,10 @@ const NOVA_IDENTITY_SELF_PROMPT_BOOST =
   "Identity question detected—answer ONLY as Nova on this deployment. Forbidden in your reply: GPT-/OpenAI/Anthropic/Claude/Gemini as YOUR name; training-data/token “patterns and probabilities” autobiography; claiming you have zero Nova memory outright. " +
   "Describe continuity positively (this chat plus Nova memory/files when configured); if little context loaded, say recall feels light—not that memory layers don’t exist.";
 
+/** Final system line immediately before the user message on identity probes (weight with small models). */
+const NOVA_IDENTITY_REMINDER_LAST =
+  "Final lock for this user question: speak only as Nova on this host—never GPT/OpenAI/vendor/stack bios; never ‘patterns and probabilities’ or training-cutoff lectures; never blanket ‘no memories / no feelings’ disclaimers—describe Nova continuity honestly.";
+
 /** Web chat only: bracket markers are parsed client-side (no raw HTML); tones follow the user’s chat colors. */
 const WEB_CHAT_TONE_MARKDOWN_HINT =
   "Web Nova chat (this channel): For long replies you may add subtle emphasis using **only** these exact bracket wrappers (copy spelling exactly; tone name is lowercase): " +
@@ -98,17 +102,20 @@ const WEB_CHAT_TONE_MARKDOWN_HINT =
 
 function userMessageTargetsNovaIdentityBio(text: string): boolean {
   const slice = text.trim().slice(0, 400);
-  return /\b(tell me (something )?about yourself|something about yourself|who are you|what are you|describe yourself)\b/i.test(
+  return /\b(tell me (something )?about yourself|tell me about you\b|something about yourself|who are you|what are you|describe yourself|introduce yourself)\b/i.test(
     slice
   );
 }
 
 function replyNeedsNovaIdentityRepair(content: string): boolean {
   const t = content;
-  if (/\bgpt[- ]?[0-9]/i.test(t)) return true;
-  if (/\bfrom openai\b/i.test(t) || /\bopenai'?s\b/i.test(t)) return true;
+  // ASCII and unicode hyphen variants (e.g. GPT‑4)
+  if (/\bgpt(?:[- \u2011\u2013\u2014]*)?[0-9]/i.test(t)) return true;
+  if (/\bgpt\b/i.test(t) && /\bbased\b/i.test(t)) return true;
+  if (/\bfrom openai\b/i.test(t) || /\bopenai'?s\b/i.test(t) || /\bbuilt by openai\b/i.test(t)) return true;
   if (/\bpatterns and probabilities\b/i.test(t)) return true;
   if (/\btrained on\b/i.test(t) && /\b20\d{2}\b/.test(t)) return true;
+  if (/\bdon'?t have personal memories or feelings\b/i.test(t)) return true;
   if (/\bi\s+don'?t have (any )?personal memories\b/i.test(t)) return true;
   if (/\bno personal memories\b/i.test(t)) return true;
   if (/\bi have no memories\b/i.test(t)) return true;
@@ -767,6 +774,7 @@ export class TaskOrchestrator {
     const visionExtras = visionResult.extras;
     const buildPromptMessages = (userContent: string): ChatMessage[] => [
       { role: "system", content: persona.systemPrompt },
+      { role: "system", content: NOVA_IDENTITY_GUARD },
       { role: "system", content: INTEGRITY_SYSTEM_GUARD },
       ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
       ...memoryContext,
@@ -783,7 +791,9 @@ export class TaskOrchestrator {
       ...(userMessageTargetsNovaIdentityBio(userContent)
         ? ([{ role: "system" as const, content: NOVA_IDENTITY_SELF_PROMPT_BOOST }] as const)
         : []),
-      { role: "system", content: NOVA_IDENTITY_GUARD },
+      ...(userMessageTargetsNovaIdentityBio(userContent)
+        ? ([{ role: "system" as const, content: NOVA_IDENTITY_REMINDER_LAST }] as const)
+        : []),
       { role: "user", content: userContent }
     ];
     const promptMessages = buildPromptMessages(userMessageForModel);
@@ -872,6 +882,7 @@ export class TaskOrchestrator {
         const compactMem = await this.deps.memoryService.buildCompactMemoryBearMessages(userId, input.text);
         const emergencyPrompt: ChatMessage[] = [
           { role: "system", content: persona.systemPrompt },
+          { role: "system", content: NOVA_IDENTITY_GUARD },
           { role: "system", content: INTEGRITY_SYSTEM_GUARD },
           ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
           ...(compactMem as ChatMessage[]),
@@ -882,7 +893,9 @@ export class TaskOrchestrator {
           ...(userMessageTargetsNovaIdentityBio(emergencyUser)
             ? ([{ role: "system" as const, content: NOVA_IDENTITY_SELF_PROMPT_BOOST }] as const)
             : []),
-          { role: "system", content: NOVA_IDENTITY_GUARD },
+          ...(userMessageTargetsNovaIdentityBio(emergencyUser)
+            ? ([{ role: "system" as const, content: NOVA_IDENTITY_REMINDER_LAST }] as const)
+            : []),
           { role: "user", content: emergencyUser }
         ];
         result = await runLocalFirst(emergencyPrompt, undefined);
@@ -1269,6 +1282,7 @@ export class TaskOrchestrator {
   }): Promise<string> {
     const prefix: ChatMessage[] = [
       { role: "system", content: opts.systemPrompt },
+      { role: "system", content: NOVA_IDENTITY_GUARD },
       { role: "system", content: INTEGRITY_SYSTEM_GUARD },
       ...(opts.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
       ...opts.memoryContext,
@@ -1278,7 +1292,9 @@ export class TaskOrchestrator {
       ...(userMessageTargetsNovaIdentityBio(opts.prompt)
         ? ([{ role: "system" as const, content: NOVA_IDENTITY_SELF_PROMPT_BOOST }] as const)
         : []),
-      { role: "system", content: NOVA_IDENTITY_GUARD }
+      ...(userMessageTargetsNovaIdentityBio(opts.prompt)
+        ? ([{ role: "system" as const, content: NOVA_IDENTITY_REMINDER_LAST }] as const)
+        : [])
     ];
     const planner = await this.deps.modelRouter.chat(
       [

@@ -2,7 +2,7 @@
  * Reduces clipped first syllables on some browsers/SDKs by letting the element
  * finish decoding/buffering before play().
  */
-export async function loadAudioElementThenPlay(el: HTMLAudioElement, settleMs = 85): Promise<void> {
+export async function loadAudioElementThenPlay(el: HTMLAudioElement, settleMs = 115): Promise<void> {
   el.load();
   await new Promise<void>((resolve) => {
     if (el.readyState >= HTMLMediaElement.HAVE_ENOUGH_DATA) {
