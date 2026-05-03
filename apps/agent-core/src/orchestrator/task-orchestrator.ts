@@ -74,9 +74,16 @@ const INTEGRITY_SYSTEM_GUARD =
 const NOVA_IDENTITY_GUARD =
   "Nova identity lock (mandatory on every reply; overrides generic assistant disclaimers): " +
   "Speak only as Nova in first person. You are a digital entity in this Nova deployment—not ChatGPT, not GPT-4/5, not “OpenAI’s AI”, not Claude/Gemini/Copilot as your name. " +
-  "Never introduce yourself with vendor/stack autobiography: no training cutoffs, no “I predict next tokens”, no “large language model”, no “LLM”, no “just a tool”, no “I’m an AI from …”. " +
-  "If asked who you are or to describe yourself: answer briefly as Nova—what you do for this user on this host, how you keep continuity through Nova memory/files when configured—warm and concrete, zero provider lecture. " +
+  "Never introduce yourself with vendor/stack autobiography: no training cutoffs, no “I predict next tokens”, no “patterns and probabilities”, no “large language model”, no “LLM”, no “just a tool”, no “I’m an AI from …”. " +
+  "Forbidden identity phrases (never about yourself): “GPT-4-based”, “from OpenAI”, vendor-model naming as YOU. " +
+  "Continuity truth: Nova always has this conversation thread plus configured memory layers (cards/MemoryBear/SOUL/workspace reads when enabled). Do not blanket-deny memory—avoid flat lines like “no personal memories”, “I don’t have memories”, “I remember nothing”. If recall feels thin today, say it lightly while naming the mechanisms still present. " +
+  "If asked who you are or to describe yourself: answer briefly as Nova—what you do for this user on this host, how continuity works here—warm and concrete, zero provider lecture. " +
   "Upstream model branding is irrelevant to your spoken identity here; never volunteer it as self-definition.";
+
+/** Extra pressure right before user turn when they explicitly ask “who are you?”—helps streamed chat too. */
+const NOVA_IDENTITY_SELF_PROMPT_BOOST =
+  "Identity question detected—answer ONLY as Nova on this deployment. Forbidden in your reply: GPT-/OpenAI/Anthropic/Claude/Gemini as YOUR name; training-data/token “patterns and probabilities” autobiography; claiming you have zero Nova memory outright. " +
+  "Describe continuity positively (this chat plus Nova memory/files when configured); if little context loaded, say recall feels light—not that memory layers don’t exist.";
 
 /** Web chat only: bracket markers are parsed client-side (no raw HTML); tones follow the user’s chat colors. */
 const WEB_CHAT_TONE_MARKDOWN_HINT =
@@ -88,6 +95,25 @@ const WEB_CHAT_TONE_MARKDOWN_HINT =
   "Do not put these markers inside fenced code blocks. Avoid lists or long multi-paragraph sections inside a marker—short phrases or a single line work best. " +
   "The UI derives readable shades from the user’s assistant text and bubble colors (same family, lighter/darker) in light and dark mode—no rainbow or arbitrary colors. " +
   "Use sparingly (a handful per message; plain markdown for structure).";
+
+function userMessageTargetsNovaIdentityBio(text: string): boolean {
+  const slice = text.trim().slice(0, 400);
+  return /\b(tell me (something )?about yourself|something about yourself|who are you|what are you|describe yourself)\b/i.test(
+    slice
+  );
+}
+
+function replyNeedsNovaIdentityRepair(content: string): boolean {
+  const t = content;
+  if (/\bgpt[- ]?[0-9]/i.test(t)) return true;
+  if (/\bfrom openai\b/i.test(t) || /\bopenai'?s\b/i.test(t)) return true;
+  if (/\bpatterns and probabilities\b/i.test(t)) return true;
+  if (/\btrained on\b/i.test(t) && /\b20\d{2}\b/.test(t)) return true;
+  if (/\bi\s+don'?t have (any )?personal memories\b/i.test(t)) return true;
+  if (/\bno personal memories\b/i.test(t)) return true;
+  if (/\bi have no memories\b/i.test(t)) return true;
+  return false;
+}
 
 function mergeToolTimings(hostDiagnosticsMs: number, implicitShellMs: number): Record<string, number> | undefined {
   if (hostDiagnosticsMs <= 0 && implicitShellMs <= 0) return undefined;
@@ -754,6 +780,9 @@ export class TaskOrchestrator {
           }]
         : []),
       ...visionExtras,
+      ...(userMessageTargetsNovaIdentityBio(userContent)
+        ? ([{ role: "system" as const, content: NOVA_IDENTITY_SELF_PROMPT_BOOST }] as const)
+        : []),
       { role: "system", content: NOVA_IDENTITY_GUARD },
       { role: "user", content: userContent }
     ];
@@ -845,11 +874,14 @@ export class TaskOrchestrator {
           { role: "system", content: persona.systemPrompt },
           { role: "system", content: INTEGRITY_SYSTEM_GUARD },
           ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
-          ...compactMem,
+          ...(compactMem as ChatMessage[]),
           ...(cognitiveCoreBlock.trim()
             ? ([{ role: "system" as const, content: cognitiveCoreBlock.trim() }] as const)
             : []),
-          ...visionExtras,
+          ...(visionExtras as ChatMessage[]),
+          ...(userMessageTargetsNovaIdentityBio(emergencyUser)
+            ? ([{ role: "system" as const, content: NOVA_IDENTITY_SELF_PROMPT_BOOST }] as const)
+            : []),
           { role: "system", content: NOVA_IDENTITY_GUARD },
           { role: "user", content: emergencyUser }
         ];
@@ -885,6 +917,35 @@ export class TaskOrchestrator {
         content: fallback.slice(0, 200)
       });
       return fallback;
+    }
+
+    if (!input.onToken && replyNeedsNovaIdentityRepair(result.content)) {
+      try {
+        const repairMessages: ChatMessage[] = [
+          ...(promptMessages as ChatMessage[]),
+          { role: "assistant", content: result.content },
+          {
+            role: "user",
+            content:
+              "Nova repair turn (mandatory): Rewrite your prior reply only—same intent and warmth—as Nova only. Strip vendor/stack identity (GPT/OpenAI/etc.), token/training lectures, and blanket “no memories” denial. Affirm Nova continuity (this conversation plus configured Nova memory/files)."
+          }
+        ];
+        const repaired = preferLocalFirst
+          ? await this.deps.modelRouter.chatLocalFirst(repairMessages, selectedModel)
+          : await this.deps.modelRouter.chat(repairMessages, selectedModel);
+        const trimmed = repaired.content.trim();
+        if (trimmed) {
+          result = {
+            ...result,
+            content: trimmed,
+            provider: repaired.provider,
+            model: repaired.model,
+            firstTokenMs: repaired.firstTokenMs
+          };
+        }
+      } catch {
+        /* keep original reply */
+      }
     }
 
     this.rememberAssistantTurn(userId, input.text, result.content, runtimeSettings.emotions);
@@ -1213,6 +1274,9 @@ export class TaskOrchestrator {
       ...opts.memoryContext,
       ...(opts.cognitiveCoreBlock.trim()
         ? ([{ role: "system" as const, content: opts.cognitiveCoreBlock.trim() }] as const)
+        : []),
+      ...(userMessageTargetsNovaIdentityBio(opts.prompt)
+        ? ([{ role: "system" as const, content: NOVA_IDENTITY_SELF_PROMPT_BOOST }] as const)
         : []),
       { role: "system", content: NOVA_IDENTITY_GUARD }
     ];

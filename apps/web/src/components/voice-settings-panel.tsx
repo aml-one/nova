@@ -5,6 +5,7 @@ import { Card } from "./ui/card";
 import { Input } from "./ui/input";
 import { Button } from "./ui/button";
 import { triggerBlobDownload } from "../lib/audio-download";
+import { loadAudioElementThenPlay } from "../lib/audio-play";
 
 /** Wake-word bridge status and tests (Settings → Voice). */
 export function VoiceWakeWordPanel() {
@@ -113,7 +114,9 @@ export function OrpheusTtsPreviewCard() {
               const el = audioRef.current;
               if (el) {
                 el.src = url;
-                await el.play().catch(() => setTtsError("Playback blocked or unsupported in this browser."));
+                await loadAudioElementThenPlay(el).catch(() =>
+                  setTtsError("Playback blocked or unsupported in this browser.")
+                );
               }
             } catch {
               setTtsError("Request failed");

@@ -1,9 +1,18 @@
 import type { EmotionState } from "../emotion/emotion-service.js";
 
-/** Lex-au Orpheus tags supported by typical builds — keep markup ASCII-only. */
-const TAG_CHUCKLE = "<chuckle>";
-const TAG_LAUGH = "<laugh>";
-const TAG_SIGH = "<sigh>";
+/**
+ * Lex-au / Orpheus non-speech markers — ASCII-only; forwarded to synthesis unchanged.
+ * @see augmentOrpheusSpeechForMood
+ */
+const ORPHEUS_NONVERB_TAG_NAMES =
+  "laugh|sigh|chuckle|cough|sniffle|groan|yawn|gasp" as const;
+
+const NONVERB_TAG_RE = new RegExp(`<(?:${ORPHEUS_NONVERB_TAG_NAMES})\\b[^>]*>`, "gi");
+
+/** Count Orpheus-style non-speech tags (conservative stacking guard). */
+export function countOrpheusNonverbTags(text: string): number {
+  return (text.match(NONVERB_TAG_RE) ?? []).length;
+}
 
 function stableRoll(text: string, salt: number): number {
   let h = 2166136261 >>> 0;
@@ -33,9 +42,17 @@ function alreadyHmmPrefixed(text: string): boolean {
   return /^hm+m?[,.!\s]/i.test(text);
 }
 
+/** True when synthesis already starts with a non-speech tag (avoid stacking prefixes). */
+function hasLeadingNonverbPrefix(text: string): boolean {
+  return /^\s*<(?:groan|sigh|sniffle|gasp|cough|yawn)\b[^>]*>/i.test(text);
+}
+
 /**
  * Adds short spoken fillers and Orpheus emotion tags so TTS reflects Nova’s unified mood.
  * Conservative: avoids stacking tags when input already contains several.
+ *
+ * Tags understood end-to-end when sent as Orpheus `input`: &lt;laugh&gt;, &lt;sigh&gt;, &lt;chuckle&gt;,
+ * &lt;cough&gt;, &lt;sniffle&gt;, &lt;groan&gt;, &lt;yawn&gt;, &lt;gasp&gt; (plus model-authored copies in chat text).
  */
 export function augmentOrpheusSpeechForMood(
   text: string,
@@ -47,8 +64,7 @@ export function augmentOrpheusSpeechForMood(
   }
 
   let result = trimmed;
-  const tagCount = (result.match(/<(?:laugh|chuckle|sigh|groan|yawn)\b[^>]*>/gi) ?? []).length;
-  if (tagCount >= 5) {
+  if (countOrpheusNonverbTags(result) >= 5) {
     return result;
   }
 
@@ -59,6 +75,8 @@ export function augmentOrpheusSpeechForMood(
   const happyCue =
     /\b(great|awesome|perfect|wonderful|glad to hear|nice work|exactly|love(?:ly)? it)\b/i.test(result) ||
     /\b(yay|woo ?hoo)\b/i.test(result);
+  const surpriseCue =
+    /\b(wow|oh no|what\?|wait[,!]?|unexpected|can't believe|cannot believe|seriously\??)\b/i.test(result);
 
   const hmmThinking =
     (mood.label === "curious" || mood.label === "neutral") &&
@@ -77,6 +95,19 @@ export function augmentOrpheusSpeechForMood(
     result = `Hmm, ${result}`;
   }
 
+  // Anxious surprise — gasp before other negative prefix sounds
+  if (
+    mood.label === "anxious" &&
+    mood.arousal > 0.28 &&
+    surpriseCue &&
+    result.length > 22 &&
+    stableRoll(trimmed, 83) < 0.38 &&
+    !/<gasp>/i.test(result) &&
+    !hasLeadingNonverbPrefix(result)
+  ) {
+    result = `<gasp> ${result}`;
+  }
+
   const joyfulBright = mood.label === "joyful" && mood.valence > 0.15;
   const minJoyLen = happyCue ? 20 : 42;
   if (joyfulBright && result.length >= minJoyLen) {
@@ -85,23 +116,70 @@ export function augmentOrpheusSpeechForMood(
     if (!/<chuckle>/i.test(result) && stableRoll(trimmed, 11) < chuckleProb) {
       const splitIdx = result.search(/[.!?]\s+/);
       if (splitIdx >= 12 && splitIdx < result.length - 20) {
-        result = `${result.slice(0, splitIdx + 1)} ${TAG_CHUCKLE} ${result.slice(splitIdx + 1).trimStart()}`;
+        result = `${result.slice(0, splitIdx + 1)} <chuckle> ${result.slice(splitIdx + 1).trimStart()}`;
       } else {
-        result = `${result} ${TAG_CHUCKLE}`;
+        result = `${result} <chuckle>`;
       }
     }
     if (!/<laugh>/i.test(result) && stableRoll(trimmed, 17) < laughProb) {
-      result = `${result} ${TAG_LAUGH}`;
+      result = `${result} <laugh>`;
     }
   }
 
+  // Low-energy neutral — occasional yawn lead-in (very rare)
   if (
-    (mood.label === "empathetic" || mood.label === "anxious" || mood.label === "frustrated") &&
-    mood.valence < -0.05 &&
-    stableRoll(trimmed, 23) < 0.28 &&
-    !/<sigh>/i.test(result)
+    mood.label === "neutral" &&
+    mood.arousal < 0.14 &&
+    mood.valence > -0.08 &&
+    result.length > 88 &&
+    stableRoll(trimmed, 91) < 0.065 &&
+    !/<yawn>/i.test(result) &&
+    !hasLeadingNonverbPrefix(result)
   ) {
-    result = `${TAG_SIGH} ${result}`;
+    result = `<yawn> ${result}`;
+  }
+
+  const negRoll = stableRoll(trimmed, 23);
+
+  // Frustration — groan (exclusive with sigh/sniffle cluster)
+  if (
+    mood.label === "frustrated" &&
+    mood.valence < -0.02 &&
+    negRoll < 0.24 &&
+    result.length > 28 &&
+    !/<groan>/i.test(result) &&
+    !/<(?:sigh|sniffle)\b[^>]*>/i.test(result) &&
+    !hasLeadingNonverbPrefix(result)
+  ) {
+    result = `<groan> ${result}`;
+  } else if (
+    (mood.label === "empathetic" || mood.label === "anxious" || mood.label === "guilty") &&
+    mood.valence < -0.05 &&
+    negRoll < 0.28 &&
+    result.length > 28 &&
+    !/<(?:groan|sigh|sniffle)\b[^>]*>/i.test(result) &&
+    !hasLeadingNonverbPrefix(result)
+  ) {
+    const texture = stableRoll(trimmed, 71);
+    if (texture < 0.075 && mood.label === "empathetic") {
+      result = `<sniffle> ${result}`;
+    } else {
+      result = `<sigh> ${result}`;
+    }
+  }
+
+  // Inline cough — avoids stacking another leading prefix after groan/sigh/yawn/gasp
+  if (
+    (mood.label === "guilty" || mood.label === "frustrated") &&
+    result.length > 52 &&
+    stableRoll(trimmed, 97) < 0.055 &&
+    !/<cough>/i.test(result) &&
+    countOrpheusNonverbTags(result) < 4
+  ) {
+    const splitIdx = result.search(/[.!?]\s+/);
+    if (splitIdx >= 14 && splitIdx < result.length - 18) {
+      result = `${result.slice(0, splitIdx + 1)} <cough> ${result.slice(splitIdx + 1).trimStart()}`;
+    }
   }
 
   return result.replace(/\s{2,}/g, " ").trim();

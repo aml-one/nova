@@ -27,6 +27,7 @@ import { cn } from "../lib/cn";
 import { dispatchNovaEmotionRefresh } from "../lib/emotion-user";
 import { ChatMarkdown } from "../components/chat-markdown";
 import { triggerBlobDownload } from "../lib/audio-download";
+import { loadAudioElementThenPlay } from "../lib/audio-play";
 
 type MediaItem = {
   url: string;
@@ -526,7 +527,7 @@ export default function HomePage() {
         el.onerror = () => {
           stopChatTtsPlayback();
         };
-        await el.play().catch(() => stopChatTtsPlayback());
+        await loadAudioElementThenPlay(el).catch(() => stopChatTtsPlayback());
       } catch (err) {
         const aborted = err instanceof DOMException && err.name === "AbortError";
         if (!aborted) {

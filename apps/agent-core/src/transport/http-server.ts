@@ -1138,7 +1138,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           pipeline: [
             "requestText: raw POST body (assistant markdown allowed)",
             "preparedForSpeech: strips thinking blocks, fences, nova tags, markdown → plain",
-            "sentToOrpheus: mood augmentation (Hmm prefixes, <chuckle>/<laugh>/<sigh>, etc.) — this string is Orpheus `input`"
+            "sentToOrpheus: mood augmentation (Hmm prefixes; <laugh>/<chuckle>/<sigh>/<gasp>/<groan>/<yawn>/<cough>/<sniffle>) — Orpheus `input`"
           ]
         });
       }

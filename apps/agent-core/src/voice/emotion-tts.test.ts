@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { augmentOrpheusSpeechForMood } from "./emotion-tts.js";
+import { augmentOrpheusSpeechForMood, countOrpheusNonverbTags } from "./emotion-tts.js";
+
+describe("countOrpheusNonverbTags", () => {
+  it("detects standard Lex-au tags", () => {
+    expect(countOrpheusNonverbTags("<laugh><sigh>")).toBe(2);
+    expect(countOrpheusNonverbTags("<sniffle> ok <gasp>")).toBe(2);
+    expect(countOrpheusNonverbTags("<groan><yawn><cough><chuckle>")).toBe(4);
+  });
+});
 
 describe("augmentOrpheusSpeechForMood", () => {
   it("prefixes Hmm for curious mood with thinking cue", () => {
@@ -43,6 +51,34 @@ describe("augmentOrpheusSpeechForMood", () => {
       const text = `Walkthrough part ${i}: we configure the relay then drain the queue safely before cutover.`;
       const out = augmentOrpheusSpeechForMood(text, mood);
       if (out.toLowerCase().startsWith("hmm,")) {
+        found = true;
+        break;
+      }
+    }
+    expect(found).toBe(true);
+  });
+
+  it("may prefix groan for frustrated mood given deterministic text rolls", () => {
+    const mood = { label: "frustrated" as const, valence: -0.35, arousal: 0.55 };
+    let found = false;
+    for (let i = 0; i < 120; i++) {
+      const text = `Segment ${i}: this integration keeps failing after redeploy. We should isolate which layer drops events.`;
+      const out = augmentOrpheusSpeechForMood(text, mood);
+      if (/<groan>/i.test(out)) {
+        found = true;
+        break;
+      }
+    }
+    expect(found).toBe(true);
+  });
+
+  it("may prefix gasp for anxious surprise wording", () => {
+    const mood = { label: "anxious" as const, valence: -0.08, arousal: 0.52 };
+    let found = false;
+    for (let i = 0; i < 100; i++) {
+      const text = `Wait — what? Batch ${i}: that endpoint should never return null during replay.`;
+      const out = augmentOrpheusSpeechForMood(text, mood);
+      if (/<gasp>/i.test(out)) {
         found = true;
         break;
       }

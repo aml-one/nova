@@ -28,7 +28,8 @@ export function buildUnifiedCognitiveCoreBlock(
     talking =
       `Talking core: HTTP speech synthesis is available (${tts.baseUrl.trim()}). ` +
       "Web chat may auto-read your replies aloud or let the user play any message — prefer clear, speakable sentences for answers they will hear; " +
-      "avoid stacking long code blocks in spoken replies (summarize aloud and keep code short when essential).";
+      "avoid stacking long code blocks in spoken replies (summarize aloud and keep code short when essential). " +
+      "When tone fits, you may insert Orpheus/Lex-au-style speech tags literally (e.g. <laugh>, <chuckle>, <sigh>, <gasp>, <groan>, <yawn>, <cough>, <sniffle>) sparingly mid-line — Nova may also add tags from unified mood.";
   }
   return [emotion, senti, talking].filter(Boolean).join("\n\n");
 }
