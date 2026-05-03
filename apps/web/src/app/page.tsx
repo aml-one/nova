@@ -1,6 +1,7 @@
 /* eslint-disable react/no-unescaped-entities */
 "use client";
 
+import type { RefObject } from "react";
 import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "next-themes";
@@ -17,7 +18,9 @@ import {
   FaDownload,
   FaVolumeHigh,
   FaXmark,
-  FaMicrophone
+  FaMicrophone,
+  FaChevronDown,
+  FaArrowUp
 } from "react-icons/fa6";
 import { Card } from "../components/ui/card";
 import { Textarea } from "../components/ui/textarea";
@@ -30,6 +33,7 @@ import { ChatMarkdown } from "../components/chat-markdown";
 import { triggerBlobDownload } from "../lib/audio-download";
 import { loadAudioElementThenPlay } from "../lib/audio-play";
 import { shouldUseNovaIdentityBufferedChat } from "../lib/nova-identity-chat";
+import { useShellHeaderExtras } from "../components/shell-header-extras";
 
 type MediaItem = {
   url: string;
@@ -188,6 +192,104 @@ function describeMicStartError(error: unknown): string {
   return "Microphone permission denied or unavailable.";
 }
 
+type ChatSessionHeaderControlsProps = {
+  sessions: ChatSession[];
+  activeSessionId: string;
+  sessionDeleteConfirmOpen: boolean;
+  sessionDeletePopoverRef: RefObject<HTMLDivElement | null>;
+  onSessionChange: (sessionId: string) => void;
+  onNewSession: () => void;
+  onRenameSession: () => void;
+  onToggleDeleteMenu: () => void;
+  onCancelDelete: () => void;
+  onConfirmDelete: () => void;
+};
+
+function ChatSessionHeaderControls({
+  sessions,
+  activeSessionId,
+  sessionDeleteConfirmOpen,
+  sessionDeletePopoverRef,
+  onSessionChange,
+  onNewSession,
+  onRenameSession,
+  onToggleDeleteMenu,
+  onCancelDelete,
+  onConfirmDelete
+}: ChatSessionHeaderControlsProps) {
+  return (
+    <>
+      <div className="relative min-w-0 max-w-[min(22rem,calc(100vw-10rem))] flex-[1_1_12rem]">
+        <Select
+          className="h-8 w-full appearance-none rounded-lg border-slate-300/40 bg-slate-200/90 py-1 pl-2.5 pr-9 text-sm leading-normal text-slate-900 dark:border-white/10 dark:bg-white/10 dark:text-slate-100"
+          value={activeSessionId}
+          onChange={(event) => onSessionChange(event.target.value)}
+        >
+          {sessions.map((session) => (
+            <option key={session.id} value={session.id}>
+              {session.title}
+            </option>
+          ))}
+        </Select>
+        <FaChevronDown
+          className="pointer-events-none absolute right-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-slate-500 dark:text-slate-400"
+          aria-hidden
+        />
+      </div>
+      <Button
+        type="button"
+        tone="green"
+        className="inline-flex h-8 min-w-8 shrink-0 items-center justify-center rounded-lg px-2"
+        onClick={onNewSession}
+        title="Start new session"
+      >
+        <FaPlus className="h-4 w-4" />
+      </Button>
+      <Button
+        type="button"
+        tone="neutral"
+        className="inline-flex h-8 min-w-8 shrink-0 items-center justify-center rounded-lg px-2"
+        onClick={onRenameSession}
+        title="Rename active session"
+      >
+        <FaPenToSquare className="h-4 w-4" />
+      </Button>
+      <div ref={sessionDeletePopoverRef} className="relative shrink-0">
+        <Button
+          type="button"
+          tone="red"
+          className="inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-2"
+          onClick={onToggleDeleteMenu}
+          title="Delete active session"
+          aria-expanded={sessionDeleteConfirmOpen}
+          aria-haspopup="dialog"
+        >
+          <FaTrash className="h-4 w-4" />
+        </Button>
+        {sessionDeleteConfirmOpen ? (
+          <div
+            className="absolute right-0 top-full z-50 mt-1.5 w-[min(18rem,calc(100vw-2rem))] rounded-ui border border-rose-500/35 bg-surface2 p-3 shadow-lg ring-1 ring-black/10 dark:ring-white/10"
+            role="dialog"
+            aria-labelledby="session-delete-confirm-title"
+          >
+            <p id="session-delete-confirm-title" className="mb-3 text-sm font-medium text-foreground">
+              Delete this session? This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2">
+              <Button type="button" tone="neutral" className="text-sm" onClick={onCancelDelete}>
+                Cancel
+              </Button>
+              <Button type="button" tone="red" className="text-sm" onClick={onConfirmDelete}>
+                Delete session
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
 export default function HomePage() {
   const { resolvedTheme } = useTheme();
   const [message, setMessage] = useState("");
@@ -256,12 +358,14 @@ export default function HomePage() {
   const [lastCopiedTurnId, setLastCopiedTurnId] = useState<string | null>(null);
   const [sessionDeleteConfirmOpen, setSessionDeleteConfirmOpen] = useState(false);
   const sessionDeletePopoverRef = useRef<HTMLDivElement | null>(null);
+  const chatComposerFileInputRef = useRef<HTMLInputElement | null>(null);
   const hasLoadedSessionsRef = useRef(false);
   const hasDoneInitialBottomScrollRef = useRef(false);
   const uploadPreviewUrlsRef = useRef<Map<string, string>>(new Map());
   const compactActionClass = "inline-flex h-9 min-w-9 items-center justify-center px-2";
   const bubbleIconActionClass =
     "inline-flex h-7 w-7 items-center justify-center transition-[filter] hover:brightness-110";
+  const { setShellHeaderExtras } = useShellHeaderExtras();
   const isDarkTheme = resolvedTheme !== "light";
   const userBubbleColorForTheme = isDarkTheme ? chatStyle.userBubbleColor : chatStyle.userBubbleColorLight;
   const assistantBubbleColorForTheme = isDarkTheme ? chatStyle.assistantBubbleColor : chatStyle.assistantBubbleColorLight;
@@ -1188,7 +1292,7 @@ export default function HomePage() {
     }, 1200);
   }
 
-  function deleteActiveSession(): void {
+  const deleteActiveSession = useCallback((): void => {
     if (!activeSessionId) return;
     const remaining = sessions.filter((item) => item.id !== activeSessionId);
     setSessionDeleteConfirmOpen(false);
@@ -1207,104 +1311,61 @@ export default function HomePage() {
     setTurns(nextActive.turns ?? []);
     setMessage("");
     setUploads([]);
-  }
+  }, [activeSessionId, sessions]);
+
+  useLayoutEffect(() => {
+    setShellHeaderExtras(
+      <ChatSessionHeaderControls
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        sessionDeleteConfirmOpen={sessionDeleteConfirmOpen}
+        sessionDeletePopoverRef={sessionDeletePopoverRef}
+        onSessionChange={(sessionId) => {
+          const session = sessions.find((item) => item.id === sessionId);
+          if (!session) return;
+          setActiveSessionId(session.id);
+          setTurns(session.turns ?? []);
+        }}
+        onNewSession={() => {
+          setSessionDeleteConfirmOpen(false);
+          const next = createEmptySession();
+          setSessions((prev) => [next, ...prev]);
+          setActiveSessionId(next.id);
+          setTurns([]);
+          setMessage("");
+          setUploads([]);
+        }}
+        onRenameSession={() => {
+          setSessionDeleteConfirmOpen(false);
+          const active = sessions.find((item) => item.id === activeSessionId);
+          if (!active) return;
+          const next = window.prompt("Rename session", active.title)?.trim();
+          if (!next) return;
+          setSessions((prev) => prev.map((item) => (item.id === activeSessionId ? { ...item, title: next } : item)));
+        }}
+        onToggleDeleteMenu={() => {
+          if (!activeSessionId) return;
+          setSessionDeleteConfirmOpen((open) => !open);
+        }}
+        onCancelDelete={() => setSessionDeleteConfirmOpen(false)}
+        onConfirmDelete={() => deleteActiveSession()}
+      />
+    );
+    return () => setShellHeaderExtras(null);
+  }, [
+    activeSessionId,
+    deleteActiveSession,
+    sessionDeleteConfirmOpen,
+    sessions,
+    setShellHeaderExtras
+  ]);
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col gap-4">
-      <Card className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="mb-2 flex shrink-0 items-center justify-between">
-          <h1 className="text-2xl font-semibold">Nova Chat</h1>
-          <div className="flex items-center gap-1.5">
-            <Select
-              className="h-9 min-w-[260px] py-1 pl-2 pr-6 text-sm leading-normal"
-              value={activeSessionId}
-              onChange={(event) => {
-                const sessionId = event.target.value;
-                const session = sessions.find((item) => item.id === sessionId);
-                if (!session) return;
-                setActiveSessionId(session.id);
-                setTurns(session.turns ?? []);
-              }}
-            >
-              {sessions.map((session) => (
-                <option key={session.id} value={session.id}>
-                  {session.title}
-                </option>
-              ))}
-            </Select>
-            <Button
-              type="button"
-              tone="green"
-              className="inline-flex h-8 min-w-8 items-center justify-center px-2"
-              onClick={() => {
-                setSessionDeleteConfirmOpen(false);
-                const next = createEmptySession();
-                setSessions((prev) => [next, ...prev]);
-                setActiveSessionId(next.id);
-                setTurns([]);
-                setMessage("");
-                setUploads([]);
-              }}
-              title="Start new session"
-            >
-              <FaPlus className="h-5 w-5" />
-            </Button>
-            <Button
-              type="button"
-              tone="neutral"
-              className="inline-flex h-8 min-w-8 items-center justify-center px-2"
-              onClick={() => {
-                setSessionDeleteConfirmOpen(false);
-                const active = sessions.find((item) => item.id === activeSessionId);
-                if (!active) return;
-                const next = window.prompt("Rename session", active.title)?.trim();
-                if (!next) return;
-                setSessions((prev) => prev.map((item) => (item.id === activeSessionId ? { ...item, title: next } : item)));
-              }}
-              title="Rename active session"
-            >
-              <FaPenToSquare className="h-5 w-5" />
-            </Button>
-            <div ref={sessionDeletePopoverRef} className="relative">
-              <Button
-                type="button"
-                tone="red"
-                className="inline-flex h-8 min-w-8 items-center justify-center px-2"
-                onClick={() => {
-                  if (!activeSessionId) return;
-                  setSessionDeleteConfirmOpen((open) => !open);
-                }}
-                title="Delete active session"
-                aria-expanded={sessionDeleteConfirmOpen}
-                aria-haspopup="dialog"
-              >
-                <FaTrash className="h-5 w-5" />
-              </Button>
-              {sessionDeleteConfirmOpen ? (
-                <div
-                  className="absolute right-0 top-full z-30 mt-1.5 w-[min(18rem,calc(100vw-2rem))] rounded-ui border border-rose-500/35 bg-surface2 p-3 shadow-lg ring-1 ring-black/10 dark:ring-white/10"
-                  role="dialog"
-                  aria-labelledby="session-delete-confirm-title"
-                >
-                  <p id="session-delete-confirm-title" className="mb-3 text-sm font-medium text-foreground">
-                    Delete this session? This cannot be undone.
-                  </p>
-                  <div className="flex justify-end gap-2">
-                    <Button type="button" tone="neutral" className="text-sm" onClick={() => setSessionDeleteConfirmOpen(false)}>
-                      Cancel
-                    </Button>
-                    <Button type="button" tone="red" className="text-sm" onClick={() => deleteActiveSession()}>
-                      Delete session
-                    </Button>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
+      <Card className="flex h-full min-h-0 flex-1 flex-col overflow-hidden border-0 bg-transparent p-0 shadow-none">
         <div
           ref={chatScrollRef}
-          className="min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden rounded-xl border bg-surface p-3"
+          className="min-h-0 flex-1 space-y-2 overflow-y-auto overflow-x-hidden rounded-2xl border border-slate-200/60 bg-surface p-3 dark:border-white/[0.08]"
           onScroll={(event) => {
             const target = event.currentTarget;
             const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
@@ -1313,7 +1374,13 @@ export default function HomePage() {
           }}
         >
           {!chatStyleReady ? <div className="text-sm text-muted">Loading chat style…</div> : null}
-          {chatStyleReady && turns.length === 0 ? <div className="text-sm text-muted">Start chatting with Nova.</div> : null}
+          {chatStyleReady && turns.length === 0 ? (
+            <div className="flex min-h-[min(48vh,26rem)] flex-col items-center justify-center px-4 py-10 text-center">
+              <p className="text-lg font-normal tracking-tight text-slate-800 dark:text-slate-100">
+                What&apos;s on your mind today?
+              </p>
+            </div>
+          ) : null}
           {chatStyleReady && turns.map((turn, index) => (
             <article
               key={turn.id}
@@ -1654,9 +1721,9 @@ export default function HomePage() {
           ))}
         </div>
         <audio ref={chatTtsAudioRef} className="hidden" playsInline preload="none" />
-        <form onSubmit={onSubmit} className="mt-3 shrink-0 space-y-2">
+        <form onSubmit={onSubmit} className="mx-auto mt-4 w-full max-w-3xl shrink-0 space-y-2 px-0 sm:px-1">
           {loading ? (
-            <div className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-rose-500/50 bg-pastelRed/40 px-3 py-2 dark:bg-rose-950/35">
+            <div className="flex min-h-10 items-center justify-between gap-3 rounded-2xl border border-rose-500/50 bg-pastelRed/40 px-3 py-2 dark:bg-rose-950/35">
               <span className="min-w-0 text-sm font-medium text-slate-900 dark:text-slate-100">Nova is generating a reply…</span>
               <Button
                 type="button"
@@ -1670,45 +1737,8 @@ export default function HomePage() {
               </Button>
             </div>
           ) : null}
-          <div
-            className={cn(
-              "rounded-ui border border-dashed p-3 text-sm transition",
-              dragging ? "border-blue-500 bg-pastelBlue/50" : "bg-surface2"
-            )}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={(event) => {
-              event.preventDefault();
-              setDragging(false);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              addFiles(event.dataTransfer.files);
-            }}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span>Drop images/videos here, or choose files.</span>
-              <label className="cursor-pointer rounded-ui border bg-pastelGreen px-2 py-0.5 text-xs text-slate-900">
-                Add files
-                <input
-                  type="file"
-                  className="hidden"
-                  multiple
-                  accept="image/*,video/*"
-                  onChange={(event) => {
-                    if (!event.target.files) return;
-                    addFiles(event.target.files);
-                    event.target.value = "";
-                  }}
-                />
-              </label>
-            </div>
-          </div>
           {uploads.length ? (
-            <div className="rounded-2xl border bg-surface2 p-2">
+            <div className="rounded-2xl border border-slate-200/50 bg-surface2/80 p-2 dark:border-white/10">
               <div className="mb-2 flex flex-wrap gap-2">
                 {uploads.map((item, idx) => {
                   const previewUrl =
@@ -1741,33 +1771,82 @@ export default function HomePage() {
               </div>
             </div>
           ) : null}
-          <Textarea
-            value={message}
-            onChange={(event) => setMessage(event.target.value)}
-            onKeyDown={(event) => {
-              if (!sendOnEnter) return;
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                if (!loading && message.trim()) {
-                  void onSubmit(event as unknown as FormEvent<HTMLFormElement>);
-                }
-              }
+          <div
+            className={cn(
+              "flex min-h-[52px] w-full items-end gap-1 rounded-[28px] border border-slate-300/30 px-2 py-1.5 shadow-sm transition sm:gap-2 sm:px-3 sm:py-2",
+              "bg-slate-200/95 dark:border-transparent dark:bg-[#2f2f2f]",
+              dragging && "ring-2 ring-sky-500/50 ring-offset-2 ring-offset-surface dark:ring-offset-slate-900"
+            )}
+            onDragOver={(event) => {
+              event.preventDefault();
+              setDragging(true);
             }}
-            rows={4}
-            placeholder="Ask Nova to do something..."
-          />
-          {sttError || sttCapabilityError ? (
-            <div className="text-xs text-rose-400">{sttError ?? sttCapabilityError}</div>
-          ) : null}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
+            onDragLeave={(event) => {
+              event.preventDefault();
+              setDragging(false);
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              setDragging(false);
+              addFiles(event.dataTransfer.files);
+            }}
+          >
+            <input
+              ref={chatComposerFileInputRef}
+              type="file"
+              className="hidden"
+              multiple
+              accept="image/*,video/*"
+              onChange={(event) => {
+                if (!event.target.files) return;
+                addFiles(event.target.files);
+                event.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              className="mb-1 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-slate-600 transition hover:bg-black/8 dark:text-slate-300 dark:hover:bg-white/10"
+              onClick={() => chatComposerFileInputRef.current?.click()}
+              title="Add images or videos"
+            >
+              <FaPlus className="h-4 w-4" />
+            </button>
+            <Textarea
+              value={message}
+              onChange={(event) => setMessage(event.target.value)}
+              onKeyDown={(event) => {
+                if (!sendOnEnter) return;
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  if (!loading && message.trim()) {
+                    void onSubmit(event as unknown as FormEvent<HTMLFormElement>);
+                  }
+                }
+              }}
+              rows={2}
+              placeholder="Ask anything"
+              className="mb-0.5 min-h-[48px] max-h-[200px] flex-1 resize-none border-0 bg-transparent py-2.5 text-[15px] leading-snug text-slate-900 shadow-none ring-0 placeholder:text-slate-500 focus:ring-0 dark:text-slate-100 dark:placeholder:text-slate-500"
+            />
+            <div className="mb-1 flex shrink-0 items-center gap-1 sm:gap-1.5">
+              <Link
+                href="/thoughts"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full text-violet-500 transition hover:bg-black/6 dark:text-violet-400 dark:hover:bg-white/8"
+                title="Open Live Thoughts"
+              >
+                <FaBrain className="h-4 w-4" />
+              </Link>
+              {uploadedMedia.length > 0 ? (
+                <span className="hidden sm:inline">
+                  <Badge tone="pink">{uploadedMedia.length} media</Badge>
+                </span>
+              ) : null}
               <button
                 type="button"
                 className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition",
+                  "inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition",
                   sttRecording
-                    ? "border-rose-400/60 bg-rose-500/20 text-rose-100"
-                    : "border-sky-400/45 bg-sky-500/15 text-sky-100 hover:bg-sky-500/25",
+                    ? "bg-rose-500/25 text-rose-950 dark:bg-rose-500/30 dark:text-rose-50"
+                    : "bg-slate-300/80 text-slate-800 hover:bg-slate-300 dark:bg-white/12 dark:text-slate-100 dark:hover:bg-white/18",
                   (sttTranscribing || Boolean(sttCapabilityError)) && "cursor-not-allowed opacity-55"
                 )}
                 onClick={() => {
@@ -1786,37 +1865,29 @@ export default function HomePage() {
                       : "Record voice and transcribe into message"
                 }
               >
-                <span
-                  className={cn(
-                    "inline-flex h-5 w-5 items-center justify-center rounded-full border",
-                    sttRecording
-                      ? "border-rose-300/70 bg-rose-400/20"
-                      : "border-sky-300/60 bg-sky-400/20"
-                  )}
-                >
-                  <FaMicrophone className={cn("h-3 w-3", sttRecording && "animate-pulse")} />
-                </span>
-                {sttRecording ? "Listening..." : sttTranscribing ? "Transcribing..." : "Voice"}
+                <FaMicrophone className={cn("h-3.5 w-3.5 shrink-0", sttRecording && "animate-pulse")} />
+                <span className="max-[380px]:hidden">{sttRecording ? "Listening…" : sttTranscribing ? "…" : "Voice"}</span>
               </button>
-              <Link href="/thoughts" className="inline-flex items-center text-violet-400 hover:text-violet-300" title="Open Live Thoughts">
-                <FaBrain className="h-3.5 w-3.5" />
-              </Link>
-              {uploadedMedia.length > 0 ? <Badge tone="pink">{uploadedMedia.length} media ready</Badge> : null}
-            </div>
-            <div className="flex h-8 min-w-[4.75rem] shrink-0 items-center justify-end">
-              <Button
+              <button
                 type="submit"
-                tone="green"
+                disabled={loading || !message.trim()}
+                title="Send message"
                 className={cn(
-                  "h-8 w-[4.5rem] px-3 text-sm transition-opacity",
-                  !loading && message.trim().length > 0 ? "opacity-100" : "pointer-events-none opacity-0 invisible"
+                  "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition",
+                  !loading && message.trim().length > 0
+                    ? "bg-slate-900 text-white shadow-sm hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-100"
+                    : "cursor-not-allowed bg-slate-300/55 text-slate-500 dark:bg-white/8 dark:text-slate-500"
                 )}
               >
-                Send
-              </Button>
+                <FaArrowUp className="h-4 w-4" />
+              </button>
             </div>
           </div>
-          <details className="rounded-ui border border-white/10 bg-surface2/40 px-2 py-1 text-xs">
+          {sttError || sttCapabilityError ? (
+            <div className="px-1 text-center text-xs text-rose-400">{sttError ?? sttCapabilityError}</div>
+          ) : null}
+          <p className="px-2 text-center text-[11px] text-muted">Drop images or videos onto the bar. Shift+Enter for a new line.</p>
+          <details className="rounded-xl border border-slate-200/60 bg-surface2/50 px-2 py-1.5 text-xs dark:border-white/10">
             <summary className="cursor-pointer select-none text-muted">Chat options</summary>
             <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
               <label className="flex items-center gap-1 text-xs text-muted">

@@ -31,6 +31,7 @@ import {
 import { ThemeToggle } from "./theme-toggle";
 import { TextScaleToggle } from "./text-scale-toggle";
 import { EmotionBadge } from "./emotion-badge";
+import { ShellHeaderExtrasProvider, useShellHeaderExtras } from "./shell-header-extras";
 import { cn } from "../lib/cn";
 
 type NavLink = { href: string; label: string; icon: IconType; subtitle: string };
@@ -76,11 +77,41 @@ const settingsLink: NavLink = {
   subtitle: "Configure providers, channels, safety, voice (tab), and UI."
 };
 
+function AppMainColumn({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const { extras } = useShellHeaderExtras();
+  const activeLink =
+    pathname === "/settings" ? settingsLink : (links.find((link) => link.href === pathname) ?? links[0]);
+  const chatHeaderMode = pathname === "/" && extras != null;
+
+  return (
+    <>
+      <header className="sticky top-0 z-30 shrink-0 border-b bg-surface/90 backdrop-blur">
+        <div className="flex items-center justify-between gap-2 px-4 py-2">
+          <div className="min-w-0 flex-1">
+            {chatHeaderMode ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">{extras}</div>
+            ) : (
+              <>
+                <div className="text-sm font-semibold">{activeLink.label}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">{activeLink.subtitle}</div>
+              </>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <EmotionBadge />
+          </div>
+        </div>
+      </header>
+      <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-6">{children}</main>
+      <footer className="shrink-0 px-4 pb-4 text-[11px] text-muted" />
+    </>
+  );
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [navCollapsed, setNavCollapsed] = useState(false);
-  const activeLink =
-    pathname === "/settings" ? settingsLink : (links.find((link) => link.href === pathname) ?? links[0]);
 
   return (
     <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-gradient-to-br from-surface via-surface to-surface2">
@@ -153,19 +184,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
       <div className={cn("flex min-h-0 flex-1 flex-col", navCollapsed ? "ml-14" : "ml-56")}>
-        <header className="sticky top-0 z-30 shrink-0 border-b bg-surface/90 backdrop-blur">
-          <div className="flex items-center justify-between gap-2 px-4 py-2">
-            <div>
-              <div className="text-sm font-semibold">{activeLink.label}</div>
-              <div className="text-xs text-slate-500">{activeLink.subtitle}</div>
-            </div>
-            <div className="flex items-center gap-2">
-              <EmotionBadge />
-            </div>
-          </div>
-        </header>
-        <main className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-6">{children}</main>
-        <footer className="shrink-0 px-4 pb-4 text-[11px] text-muted" />
+        <ShellHeaderExtrasProvider>
+          <AppMainColumn>{children}</AppMainColumn>
+        </ShellHeaderExtrasProvider>
       </div>
     </div>
   );
