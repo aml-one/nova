@@ -11,9 +11,26 @@ export async function POST(request: Request) {
     headers: { "content-type": "application/json", ...getAgentHeaders(request) },
     body: JSON.stringify(payload)
   });
-  const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & { error?: string };
+  const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & {
+    error?: string;
+    detail?: string;
+    endpointTried?: string;
+    ok?: boolean;
+  };
   if (!response.ok) {
-    return NextResponse.json({ error: data.error ?? "Signal register start failed" }, { status: response.status });
+    const message =
+      (typeof data.error === "string" && data.error.trim()) ||
+      (typeof data.detail === "string" && data.detail.trim()) ||
+      "Signal register start failed";
+    return NextResponse.json(
+      {
+        error: message,
+        detail: typeof data.detail === "string" ? data.detail : undefined,
+        endpointTried: typeof data.endpointTried === "string" ? data.endpointTried : undefined,
+        ok: data.ok === false ? false : undefined
+      },
+      { status: response.status }
+    );
   }
   return NextResponse.json(data);
 }

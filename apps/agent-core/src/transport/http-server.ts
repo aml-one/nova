@@ -690,7 +690,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/register") {
         const payload = (await readJson(request)) as { signalApiUrl?: string; signalAccountNumber?: string };
         const signalApiUrl = payload.signalApiUrl?.trim() || "http://127.0.0.1:8085";
-        const signalAccountNumber = payload.signalAccountNumber?.trim() || process.env.SIGNAL_ACCOUNT_NUMBER?.trim() || "";
+        const signalAccountNumber = normalizeSignalAccountNumber(
+          payload.signalAccountNumber?.trim() || process.env.SIGNAL_ACCOUNT_NUMBER?.trim() || ""
+        );
         if (!signalAccountNumber) {
           return sendJson(response, 400, { error: "SIGNAL_ACCOUNT_NUMBER is required", correlationId });
         }
@@ -700,7 +702,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/verify") {
         const payload = (await readJson(request)) as { signalApiUrl?: string; signalAccountNumber?: string; code?: string };
         const signalApiUrl = payload.signalApiUrl?.trim() || "http://127.0.0.1:8085";
-        const signalAccountNumber = payload.signalAccountNumber?.trim() || "";
+        const signalAccountNumber = normalizeSignalAccountNumber(
+          payload.signalAccountNumber?.trim() || process.env.SIGNAL_ACCOUNT_NUMBER?.trim() || ""
+        );
         const code = payload.code?.trim() || "";
         if (!signalAccountNumber || !code) {
           return sendJson(response, 400, { error: "SIGNAL_ACCOUNT_NUMBER and verification code are required", correlationId });
@@ -2904,7 +2908,7 @@ async function startSignalRegistration(
   ];
   let last = "registration request failed";
   for (const endpoint of candidates) {
-    const attempt = await postJson(endpoint, {});
+    const attempt = await postSignalCliJson(endpoint);
     if (attempt.ok) {
       return {
         ok: true,
@@ -2932,7 +2936,7 @@ async function verifySignalRegistration(
   ];
   let last = "verification request failed";
   for (const endpoint of candidates) {
-    const attempt = await postJson(endpoint, {});
+    const attempt = await postSignalCliJson(endpoint);
     if (attempt.ok) {
       return { ok: true, detail: "Signal number verified and linked.", endpointTried: endpoint };
     }
@@ -2964,18 +2968,45 @@ async function pingUrl(url: string, headers?: HeadersInit): Promise<{ ok: boolea
   }
 }
 
-async function postJson(url: string, body: unknown, headers?: HeadersInit): Promise<{ ok: boolean; detail: string }> {
+/**
+ * E.164-style number for signal-cli-rest-api paths (+digits).
+ */
+function normalizeSignalAccountNumber(raw: string): string {
+  const collapsed = raw.trim().replace(/\s+/g, "");
+  if (!collapsed) {
+    return "";
+  }
+  if (collapsed.startsWith("+")) {
+    const digits = collapsed.slice(1).replace(/\D/g, "");
+    return digits ? `+${digits}` : "";
+  }
+  const digits = collapsed.replace(/\D/g, "");
+  return digits ? `+${digits}` : "";
+}
+
+/**
+ * signal-cli-rest-api examples use POST + Content-Type: application/json with an empty body (no JSON `{}`).
+ */
+async function postSignalCliJson(url: string, headers?: HeadersInit): Promise<{ ok: boolean; detail: string }> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6000);
+  const timer = setTimeout(() => controller.abort(), 12_000);
   try {
     const response = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", ...(headers ?? {}) },
-      body: JSON.stringify(body ?? {}),
       signal: controller.signal
     });
     if (!response.ok) {
-      return { ok: false, detail: `endpoint returned ${response.status}` };
+      let suffix = "";
+      try {
+        const text = (await response.text()).trim().slice(0, 1200);
+        if (text) {
+          suffix = `: ${text}`;
+        }
+      } catch {
+        // ignore
+      }
+      return { ok: false, detail: `HTTP ${response.status}${suffix}` };
     }
     return { ok: true, detail: "ok" };
   } catch (error) {
