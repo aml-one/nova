@@ -1,22 +1,44 @@
 ﻿import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
+import { sessionCookieSecure } from "../../../../lib/session-cookie";
 
 export async function POST(request: Request) {
-  const payload = (await request.json()) as { email?: string; password?: string };
-  const response = await fetch(`${getAgentBaseUrl(request)}/v1/auth/login`, {
-    method: "POST",
-    headers: getAgentHeaders(request, true),
-    body: JSON.stringify(payload)
-  });
-  const data = (await response.json()) as {
+  let payload: { email?: string; password?: string };
+  try {
+    payload = (await request.json()) as { email?: string; password?: string };
+  } catch {
+    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${getAgentBaseUrl(request)}/v1/auth/login`, {
+      method: "POST",
+      headers: getAgentHeaders(request, true),
+      body: JSON.stringify(payload)
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : "agent unreachable";
+    return NextResponse.json({ error: `Could not reach Nova agent: ${detail}` }, { status: 502 });
+  }
+
+  let data: {
     token?: string;
     expiresAt?: string;
     user?: { email?: string };
     error?: string;
   };
-  if (!response.ok || !data.token) {
-    return NextResponse.json({ error: data.error ?? "login failed" }, { status: response.status });
+  try {
+    data = (await response.json()) as typeof data;
+  } catch {
+    return NextResponse.json({ error: "agent returned non-JSON response" }, { status: 502 });
   }
+
+  if (!response.ok || !data.token) {
+    const status = response.ok ? 401 : response.status >= 400 ? response.status : 401;
+    return NextResponse.json({ error: data.error ?? "login failed" }, { status });
+  }
+
   const out = NextResponse.json({ user: data.user ?? null });
   out.cookies.set({
     name: "nova_session",
@@ -24,7 +46,7 @@ export async function POST(request: Request) {
     path: "/",
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production"
+    secure: sessionCookieSecure(request)
   });
   return out;
 }

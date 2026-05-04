@@ -32,13 +32,21 @@ export default function LoginPage() {
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ email, password })
       });
-      const data = (await response.json()) as { error?: string };
-      if (!response.ok) {
+      let data: { error?: string };
+      try {
+        data = (await response.json()) as { error?: string };
+      } catch {
+        setError(response.ok ? "Unexpected response from server" : `Login failed (${response.status})`);
+        return;
+      }
+      if (!response.ok || data.error) {
         setError(data.error ?? "Authentication failed");
         return;
       }
+      router.refresh();
       router.push("/dashboard");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Authentication failed");
