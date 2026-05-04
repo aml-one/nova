@@ -52,7 +52,7 @@ type ChannelDebugEntry = {
   at: string;
   channel: "signal" | "whatsapp";
   direction: "in" | "out";
-  transport?: "webhook" | "baileys" | "dispatcher";
+  transport?: "webhook" | "baileys" | "dispatcher" | "next_proxy";
   correlationId: string;
   peer: string;
   textPreview: string;
@@ -458,6 +458,8 @@ export default function SettingsPage() {
   const [channelDebugError, setChannelDebugError] = useState<string | null>(null);
   const [channelDebugLoading, setChannelDebugLoading] = useState(false);
   const [channelDebugAutoRefresh, setChannelDebugAutoRefresh] = useState(true);
+  const [signalDockerLogs, setSignalDockerLogs] = useState("");
+  const [signalDockerNote, setSignalDockerNote] = useState<string | null>(null);
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
   const lastSavedVoiceSilenceSecRef = useRef<number>(DEFAULT_SETTINGS.web.voiceDictationSilenceSec);
@@ -1011,18 +1013,43 @@ export default function SettingsPage() {
   const refreshChannelDebug = useCallback(async (): Promise<void> => {
     setChannelDebugLoading(true);
     setChannelDebugError(null);
-    try {
+    setSignalDockerNote(null);
+    const msgPromise = (async () => {
       const response = await apiFetch("/api/setup/channels/message-debug?limit=200");
-      const data = (await response.json()) as { items?: ChannelDebugEntry[]; error?: string };
-      if (!response.ok) {
-        setChannelDebugError(data.error ?? `HTTP ${response.status}`);
+      const data = (await response.json().catch(() => ({}))) as { items?: ChannelDebugEntry[]; error?: string };
+      return { response, data };
+    })();
+    const dockerPromise = (async () => {
+      const response = await apiFetch("/api/setup/channels/signal-docker-logs?lines=250");
+      const data = (await response.json().catch(() => ({}))) as { ok?: boolean; logs?: string; detail?: string; error?: string };
+      return { response, data };
+    })();
+    try {
+      const [{ response: msgRes, data: msgData }, { response: dockerRes, data: dockerData }] = await Promise.all([
+        msgPromise,
+        dockerPromise
+      ]);
+      if (!msgRes.ok) {
+        setChannelDebugError(msgData.error ?? `HTTP ${msgRes.status}`);
         setChannelDebugEntries([]);
-        return;
+      } else {
+        setChannelDebugEntries(Array.isArray(msgData.items) ? msgData.items : []);
       }
-      setChannelDebugEntries(Array.isArray(data.items) ? data.items : []);
+      if (!dockerRes.ok) {
+        setSignalDockerLogs("");
+        setSignalDockerNote(dockerData.error ?? `Docker logs HTTP ${dockerRes.status}`);
+      } else if (dockerData.ok === false) {
+        setSignalDockerLogs("");
+        setSignalDockerNote(dockerData.detail ?? dockerData.error ?? "Docker logs unavailable on this host.");
+      } else {
+        setSignalDockerLogs(typeof dockerData.logs === "string" ? dockerData.logs : "");
+        setSignalDockerNote(null);
+      }
     } catch (e) {
       setChannelDebugError(e instanceof Error ? e.message : String(e));
       setChannelDebugEntries([]);
+      setSignalDockerLogs("");
+      setSignalDockerNote(null);
     } finally {
       setChannelDebugLoading(false);
     }
@@ -2659,23 +2686,25 @@ export default function SettingsPage() {
                 </div>
               </div>
               <p className="text-[11px] text-muted leading-snug">
-                In-memory log of <strong className="text-foreground">Signal and WhatsApp only</strong> (clears when the agent restarts).{" "}
-                <strong className="text-foreground">Web chat</strong> loads your default model (e.g. Gemma) but does not write here — use this list to debug channel webhooks, not the browser chat.
+                Only <strong className="text-foreground">Signal/WhatsApp</strong> webhook traffic (not browser chat). In-memory; clears when agent-core restarts.
               </p>
               <p className="text-[11px] text-muted leading-snug">
-                <strong className="text-foreground">Signal path:</strong> Signal servers → signal-cli / signal-cli-rest-api → <strong className="text-foreground">HTTP POST to Nova</strong> →
-                signature check → JSON parse → allowed number → orchestrator → outbound send. Nova only sees traffic after that POST. Configure the bridge to call either{" "}
-                <code className="text-[10px]">https://&lt;your-web-host&gt;/api/webhooks/signal</code> (Next forwards to the agent) or{" "}
-                <code className="text-[10px]">http://&lt;agent-host&gt;:8787/v1/webhooks/signal</code> if the agent port is reachable from the bridge.
+                The bridge must POST to the <em>same</em> agent this UI uses — typically <code className="text-[10px]">https://…/api/webhooks/signal</code> or{" "}
+                <code className="text-[10px]">http://&lt;host&gt;:8787/v1/webhooks/signal</code> if reachable from the container.
               </p>
               <p className="text-[11px] text-muted leading-snug">
-                <strong className="text-foreground">Where it stops (use the rows below):</strong> no rows at all → POST never hit this agent (wrong URL/port, firewall, or bridge not calling Nova).{" "}
-                <code className="text-[10px]">signature_invalid</code> → <code className="text-[10px]">SIGNAL_WEBHOOK_SECRET</code> / header mismatch.{" "}
-                <code className="text-[10px]">parsed_zero_messages</code> → JSON shape not recognized (receipt-only, or fields differ from what Nova expects).{" "}
-                <code className="text-[10px]">access_denied</code> → number not allowed in channel tiers. <code className="text-[10px]">orchestrator_error</code> → Nova threw while replying.{" "}
-                <code className="text-[10px]">signal · in</code> + Nova handled but no <code className="text-[10px]">signal · out</code> / dispatcher errors → check <code className="text-[10px]">SIGNAL_API_URL</code> send path.
+                Rows: <strong className="text-foreground">none</strong> = no POST here · <code className="text-[10px]">signature_invalid</code> ·{" "}
+                <code className="text-[10px]">parsed_zero_messages</code> · <code className="text-[10px]">access_denied</code> · <code className="text-[10px]">orchestrator_error</code> · in but no out = send.
+              </p>
+              <p className="text-[11px] text-muted leading-snug">
+                <strong className="text-foreground">next_proxy</strong> rows = Next could not reach the agent or the agent returned an error body.{" "}
+                <strong className="text-foreground">Docker</strong> = last lines from <code className="text-[10px]">nova-signal-bridge</code> on the <em>agent host</em> only (empty if Docker runs elsewhere, e.g. only on your Mac).
               </p>
               <div className="flex flex-wrap gap-3 text-[11px]">
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-3 w-3 shrink-0 rounded-sm border border-violet-500/60 bg-violet-500/35" aria-hidden />
+                  Next proxy
+                </span>
                 <span className="inline-flex items-center gap-1">
                   <span className="inline-block h-3 w-3 shrink-0 rounded-sm border border-blue-500/60 bg-blue-500/35" aria-hidden />
                   Signal in
@@ -2694,60 +2723,76 @@ export default function SettingsPage() {
                 </span>
               </div>
               {channelDebugError ? <p className="text-xs text-red-600 dark:text-red-400">{channelDebugError}</p> : null}
-              <div className="h-[460px] space-y-1.5 overflow-y-auto overflow-x-hidden rounded border border-border/60 bg-surface2 p-2">
-                {channelDebugEntries.length === 0 && channelDebugLoading ? (
-                  <p className="px-1 py-4 text-center text-xs text-muted">Loading…</p>
-                ) : null}
-                {channelDebugEntries.length === 0 && !channelDebugLoading ? (
-                  <p className="px-1 py-4 text-center text-xs text-muted">
-                    No rows yet. Send on <strong className="text-foreground">Signal/WhatsApp</strong> (or hit the webhooks). Web UI messages never appear here.
-                  </p>
-                ) : null}
-                {channelDebugEntries.map((entry) => (
-                  <div
-                    key={entry.id}
-                    className={`rounded-md border border-border/40 px-2 py-1.5 text-[12px] leading-snug ${channelDebugRowAccent(entry)}`}
-                  >
-                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <span className="font-mono text-[11px] text-muted">{formatChannelDebugTime(entry.at)}</span>
-                      <strong className="capitalize">{entry.channel}</strong>
-                      <span className="text-muted">·</span>
-                      <span>{entry.direction === "in" ? "in" : "out"}</span>
-                      {entry.transport ? (
-                        <>
+              <div className="grid gap-2 md:grid-cols-2">
+                <div>
+                  <div className="mb-1 text-[11px] font-medium text-muted">Agent + Next</div>
+                  <div className="h-[460px] space-y-1.5 overflow-y-auto overflow-x-hidden rounded border border-border/60 bg-surface2 p-2">
+                    {channelDebugEntries.length === 0 && channelDebugLoading ? (
+                      <p className="px-1 py-4 text-center text-xs text-muted">Loading…</p>
+                    ) : null}
+                    {channelDebugEntries.length === 0 && !channelDebugLoading ? (
+                      <p className="px-1 py-4 text-center text-xs text-muted">
+                        No webhook hits yet — only Signal/WhatsApp POSTs to the agent show here.
+                      </p>
+                    ) : null}
+                    {channelDebugEntries.map((entry) => (
+                      <div
+                        key={entry.id}
+                        className={`rounded-md border border-border/40 px-2 py-1.5 text-[12px] leading-snug ${channelDebugRowAccent(entry)}`}
+                      >
+                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                          <span className="font-mono text-[11px] text-muted">{formatChannelDebugTime(entry.at)}</span>
+                          <strong className="capitalize">{entry.channel}</strong>
                           <span className="text-muted">·</span>
-                          <span className="text-[11px]">{entry.transport}</span>
-                        </>
-                      ) : null}
-                      {entry.direction === "in" && typeof entry.reachedNova === "boolean" ? (
-                        <span
-                          className={`text-[11px] font-medium ${entry.reachedNova ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}
-                        >
-                          · Nova {entry.reachedNova ? "handled" : "did not handle"}
-                        </span>
-                      ) : null}
-                    </div>
-                    {entry.peer ? (
-                      <div className="truncate text-[11px] text-muted" title={entry.peer}>
-                        Peer: {entry.peer}
+                          <span>{entry.direction === "in" ? "in" : "out"}</span>
+                          {entry.transport ? (
+                            <>
+                              <span className="text-muted">·</span>
+                              <span className="text-[11px]">{entry.transport}</span>
+                            </>
+                          ) : null}
+                          {entry.direction === "in" && typeof entry.reachedNova === "boolean" ? (
+                            <span
+                              className={`text-[11px] font-medium ${entry.reachedNova ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}
+                            >
+                              · Nova {entry.reachedNova ? "handled" : "did not handle"}
+                            </span>
+                          ) : null}
+                        </div>
+                        {entry.peer ? (
+                          <div className="truncate text-[11px] text-muted" title={entry.peer}>
+                            Peer: {entry.peer}
+                          </div>
+                        ) : null}
+                        <div className="break-words">{entry.textPreview}</div>
+                        {entry.trace?.length ? (
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {entry.trace.map((step, ti) => (
+                              <span key={`${entry.id}-t-${ti}`} className="rounded bg-black/10 px-1.5 py-0 font-mono text-[10px] dark:bg-white/10">
+                                {step}
+                              </span>
+                            ))}
+                          </div>
+                        ) : null}
+                        <div className="mt-1 truncate font-mono text-[10px] text-muted" title={entry.correlationId}>
+                          corr: {entry.correlationId}
+                        </div>
+                        {entry.error ? <div className="mt-1 text-[11px] text-red-600 dark:text-red-400">{entry.error}</div> : null}
                       </div>
-                    ) : null}
-                    <div className="break-words">{entry.textPreview}</div>
-                    {entry.trace?.length ? (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {entry.trace.map((step, ti) => (
-                          <span key={`${entry.id}-t-${ti}`} className="rounded bg-black/10 px-1.5 py-0 font-mono text-[10px] dark:bg-white/10">
-                            {step}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                    <div className="mt-1 truncate font-mono text-[10px] text-muted" title={entry.correlationId}>
-                      corr: {entry.correlationId}
-                    </div>
-                    {entry.error ? <div className="mt-1 text-[11px] text-red-600 dark:text-red-400">{entry.error}</div> : null}
+                    ))}
                   </div>
-                ))}
+                </div>
+                <div>
+                  <div className="mb-1 text-[11px] font-medium text-muted">Signal bridge (Docker)</div>
+                  <div className="flex h-[460px] flex-col rounded border border-border/60 bg-surface2">
+                    {signalDockerNote ? (
+                      <p className="shrink-0 border-b border-border/50 p-2 text-[11px] text-amber-800 dark:text-amber-200">{signalDockerNote}</p>
+                    ) : null}
+                    <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[10px] leading-snug text-muted">
+                      {signalDockerLogs || (channelDebugLoading ? "Loading…" : "(no log lines)")}
+                    </pre>
+                  </div>
+                </div>
               </div>
             </div>
           </Card>
@@ -3543,6 +3588,9 @@ export default function SettingsPage() {
 }
 
 function channelDebugRowAccent(entry: ChannelDebugEntry): string {
+  if (entry.transport === "next_proxy") {
+    return "border-l-[4px] border-violet-500 bg-violet-500/[0.08] dark:bg-violet-500/15";
+  }
   if (entry.channel === "signal") {
     return entry.direction === "in"
       ? "border-l-[4px] border-blue-500 bg-blue-500/[0.08] dark:bg-blue-500/15"

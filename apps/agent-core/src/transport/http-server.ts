@@ -723,6 +723,52 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const items = listChannelDebugEntries(limit);
         return sendJson(response, 200, { items, correlationId });
       }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/webhook-proxy-trace") {
+        const payload = (await readJson(request)) as {
+          channel?: string;
+          stage?: string;
+          httpStatus?: number;
+          detail?: string;
+          bodyPreview?: string;
+        };
+        const ch = payload.channel === "whatsapp" ? "whatsapp" : "signal";
+        const detail = typeof payload.detail === "string" ? payload.detail.trim() : "";
+        const bodyPreview = typeof payload.bodyPreview === "string" ? payload.bodyPreview : "";
+        const stage = typeof payload.stage === "string" ? payload.stage.trim() : "forward_to_agent";
+        const trace = ["next_proxy", stage];
+        if (typeof payload.httpStatus === "number" && Number.isFinite(payload.httpStatus)) {
+          trace.push(`agent_http_${payload.httpStatus}`);
+        }
+        pushChannelDebug({
+          channel: ch,
+          direction: "in",
+          transport: "next_proxy",
+          correlationId: randomUUID(),
+          peer: "next.js",
+          textPreview: previewChannelText(bodyPreview || detail || "(no detail)"),
+          trace,
+          error: detail || (payload.httpStatus ? `upstream HTTP ${payload.httpStatus}` : undefined)
+        });
+        return sendJson(response, 200, { ok: true, correlationId });
+      }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/setup/channels/signal-docker-logs") {
+        const rawLines = parsedUrl.searchParams.get("lines");
+        const parsedLines = rawLines ? Number(rawLines) : 200;
+        const lines = Math.min(800, Math.max(1, Number.isFinite(parsedLines) ? parsedLines : 200));
+        try {
+          const out = await runLocalCommand(`docker logs --tail ${lines} nova-signal-bridge 2>&1`);
+          const logs = `${out.stdout ?? ""}${out.stderr ?? ""}`.trimEnd();
+          return sendJson(response, 200, { ok: true, logs, correlationId });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          return sendJson(response, 200, {
+            ok: false,
+            logs: "",
+            detail: `Could not read docker logs (is Docker installed on this host, and container named nova-signal-bridge running here?): ${msg}`,
+            correlationId
+          });
+        }
+      }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/status") {
         return sendJson(response, 200, { status: getWhatsAppWebBridgeStatus(), correlationId });
       }
