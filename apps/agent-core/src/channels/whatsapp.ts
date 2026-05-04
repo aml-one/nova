@@ -1,4 +1,6 @@
+import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import type { ChannelMessage } from "./channel-router.js";
+import { effectiveWhatsAppPhoneNumberId, effectiveWhatsAppToken } from "./channel-runtime-config.js";
 import { sendWhatsAppWebMessage } from "./whatsapp-web-bridge.js";
 
 type WhatsAppWebhookPayload = {
@@ -16,6 +18,8 @@ type WhatsAppWebhookPayload = {
 };
 
 export class WhatsAppChannelAdapter {
+  constructor(private readonly getSettings?: () => AppSettings) {}
+
   async ingestWebhook(payload: unknown): Promise<ChannelMessage[]> {
     const parsed = payload as WhatsAppWebhookPayload;
     const messages = parsed.entry?.flatMap((entry) => entry.changes ?? []) ?? [];
@@ -46,8 +50,9 @@ export class WhatsAppChannelAdapter {
       await sendWhatsAppWebMessage(to, text);
       return;
     }
-    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-    const token = process.env.WHATSAPP_TOKEN;
+    const settings = this.getSettings?.();
+    const phoneNumberId = settings ? effectiveWhatsAppPhoneNumberId(settings) : process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const token = settings ? effectiveWhatsAppToken(settings) : process.env.WHATSAPP_TOKEN;
     const baseUrl = process.env.WHATSAPP_API_BASE_URL ?? "https://graph.facebook.com";
     if (!phoneNumberId || !token) {
       console.log(`whatsapp send skipped (missing credentials) => ${to}: ${text}`);

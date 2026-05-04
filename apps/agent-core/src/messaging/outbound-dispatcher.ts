@@ -1,13 +1,19 @@
 import { SignalChannelAdapter } from "../channels/signal.js";
 import { WhatsAppChannelAdapter } from "../channels/whatsapp.js";
 import { Logger } from "../observability/logger.js";
+import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import { OutboundQueueService } from "./outbound-queue.js";
 
 export class OutboundDispatcher {
   private readonly queue = new OutboundQueueService();
-  private readonly wa = new WhatsAppChannelAdapter();
-  private readonly signal = new SignalChannelAdapter();
+  private readonly wa: WhatsAppChannelAdapter;
+  private readonly signal: SignalChannelAdapter;
   private readonly logger = new Logger();
+
+  constructor(getSettings: () => AppSettings) {
+    this.wa = new WhatsAppChannelAdapter(getSettings);
+    this.signal = new SignalChannelAdapter(getSettings);
+  }
 
   private timer: NodeJS.Timeout | undefined;
 

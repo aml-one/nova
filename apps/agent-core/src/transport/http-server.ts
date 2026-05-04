@@ -7,6 +7,12 @@ import { promisify } from "node:util";
 import { TaskOrchestrator } from "../orchestrator/task-orchestrator.js";
 import { WhatsAppChannelAdapter } from "../channels/whatsapp.js";
 import { SignalChannelAdapter } from "../channels/signal.js";
+import {
+  effectiveSignalAccountNumber,
+  effectiveSignalApiUrl,
+  effectiveWhatsAppPhoneNumberId,
+  effectiveWhatsAppToken
+} from "../channels/channel-runtime-config.js";
 import { getWhatsAppWebBridgeStatus, startWhatsAppWebBridge, stopWhatsAppWebBridge } from "../channels/whatsapp-web-bridge.js";
 import { mapInboundIdentity } from "../channels/identity-mapping.js";
 import { ChannelRouter } from "../channels/channel-router.js";
@@ -85,10 +91,10 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   registerCopilotSettingsSource(() => options.settings.get());
   registerOllamaSettingsSource(() => options.settings.get());
   const port = options.port ?? Number(process.env.NOVA_AGENT_PORT ?? "8787");
-  const wa = new WhatsAppChannelAdapter();
-  const signal = new SignalChannelAdapter();
+  const wa = new WhatsAppChannelAdapter(() => options.settings.get());
+  const signal = new SignalChannelAdapter(() => options.settings.get());
   const router = new ChannelRouter();
-  const dispatcher = new OutboundDispatcher();
+  const dispatcher = new OutboundDispatcher(() => options.settings.get());
   const logger = new Logger();
   const voice = new VoiceService(() => options.settings.get(), () => options.orchestrator.getEmotionState());
   const rag = new RagService();
@@ -2496,7 +2502,7 @@ async function buildFullHealth(
   checks.push(checkEmotionalCore(getSettings, getUnifiedMood));
   checks.push(await checkVoiceTtsReachable(getSettings));
   checks.push(...(await checkModelProviders(modelRouter)));
-  checks.push(...(await checkChannels()));
+  checks.push(...(await checkChannels(getSettings)));
   checks.push(...checkSecurityConfig());
   checks.push(await checkPerplexicaWebsearch(getSettings));
   checks.push({
@@ -2758,25 +2764,34 @@ async function checkPerplexicaWebsearch(getSettings: () => AppSettings): Promise
   };
 }
 
-async function checkChannels(): Promise<HealthCheckResult[]> {
+async function checkChannels(getSettings: () => AppSettings): Promise<HealthCheckResult[]> {
   const checks: HealthCheckResult[] = [];
-  const waConfigured = Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TOKEN);
-  const waTokenFingerprint = fingerprintSecret(process.env.WHATSAPP_TOKEN);
-  const waDetail = await checkWhatsAppConnection();
+  const settings = getSettings();
+  const waId = effectiveWhatsAppPhoneNumberId(settings);
+  const waTok = effectiveWhatsAppToken(settings);
+  const waConfigured = Boolean(waId && waTok);
+  const waTokenFingerprint = fingerprintSecret(waTok || process.env.WHATSAPP_TOKEN);
+  const waDetail = waConfigured ? await checkWhatsAppConnectionWithCredentials(waId, waTok) : { ok: false, detail: "credentials missing" };
   checks.push({
     id: "whatsapp-config",
     name: "WhatsApp Configuration",
     level: !waConfigured ? "orange" : waDetail.ok ? "green" : "orange",
-    detail: !waConfigured ? "missing WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_TOKEN" : waDetail.detail,
+    detail: !waConfigured
+      ? "missing WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_TOKEN (env or Settings → Channels)"
+      : waDetail.detail,
     fingerprint: waTokenFingerprint
   });
-  const signalConfigured = Boolean(process.env.SIGNAL_API_URL && process.env.SIGNAL_ACCOUNT_NUMBER);
-  const signalDetail = await checkSignalConnection();
+  const signalUrl = effectiveSignalApiUrl(settings);
+  const signalAcc = effectiveSignalAccountNumber(settings);
+  const signalConfigured = Boolean(signalUrl && signalAcc);
+  const signalDetail = signalConfigured ? await checkSignalConnectionForBase(signalUrl) : { ok: false, detail: "base URL missing" };
   checks.push({
     id: "signal-config",
     name: "Signal Configuration",
     level: !signalConfigured ? "orange" : signalDetail.ok ? "green" : "orange",
-    detail: !signalConfigured ? "missing SIGNAL_API_URL or SIGNAL_ACCOUNT_NUMBER" : signalDetail.detail
+    detail: !signalConfigured
+      ? "missing SIGNAL_API_URL or SIGNAL_ACCOUNT_NUMBER (env or Settings → Channels)"
+      : signalDetail.detail
   });
   return checks;
 }
@@ -2820,25 +2835,15 @@ function enrichHealthChecks(checks: HealthCheckResult[]): HealthCheckResult[] {
   });
 }
 
-async function checkWhatsAppConnection(): Promise<{ ok: boolean; detail: string }> {
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const token = process.env.WHATSAPP_TOKEN;
-  if (!phoneNumberId || !token) {
-    return { ok: false, detail: "credentials missing" };
-  }
+async function checkWhatsAppConnectionWithCredentials(
+  phoneNumberId: string,
+  token: string
+): Promise<{ ok: boolean; detail: string }> {
   const baseUrl = process.env.WHATSAPP_API_BASE_URL ?? "https://graph.facebook.com";
   const url = `${baseUrl.replace(/\/$/, "")}/v22.0/${phoneNumberId}?fields=id`;
   return pingUrl(url, {
     authorization: `Bearer ${token}`
   });
-}
-
-async function checkSignalConnection(): Promise<{ ok: boolean; detail: string }> {
-  const baseUrl = process.env.SIGNAL_API_URL;
-  if (!baseUrl) {
-    return { ok: false, detail: "SIGNAL_API_URL missing" };
-  }
-  return checkSignalConnectionForBase(baseUrl);
 }
 
 async function checkSignalConnectionForBase(baseUrl: string): Promise<{ ok: boolean; detail: string }> {

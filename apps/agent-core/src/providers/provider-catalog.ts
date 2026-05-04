@@ -1,5 +1,11 @@
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import {
+  effectiveSignalAccountNumber,
+  effectiveSignalApiUrl,
+  effectiveWhatsAppPhoneNumberId,
+  effectiveWhatsAppToken
+} from "../channels/channel-runtime-config.js";
+import {
   copilotLikelyConfigured,
   headersForCopilotModelsGet,
   isCopilotIntegrationDisabled,
@@ -55,8 +61,8 @@ export class ProviderCatalogService {
     const lmstudioDisabled = s.lmstudio.disabled !== false;
     const copilotDisabled = s.copilot.disabled === true;
     const copilotConfigured = !copilotDisabled && copilotLikelyConfigured(this.getSettings);
-    const waConfigured = Boolean(process.env.WHATSAPP_PHONE_NUMBER_ID && process.env.WHATSAPP_TOKEN);
-    const signalConfigured = Boolean(process.env.SIGNAL_API_URL && process.env.SIGNAL_ACCOUNT_NUMBER);
+    const waConfigured = Boolean(effectiveWhatsAppPhoneNumberId(s) && effectiveWhatsAppToken(s));
+    const signalConfigured = Boolean(effectiveSignalApiUrl(s) && effectiveSignalAccountNumber(s));
     const ollamaEndpointConfigured =
       Boolean(process.env.OLLAMA_BASE_URL?.trim()) || Boolean(s.vision.ollamaBaseUrl?.trim());
     return {
@@ -107,16 +113,20 @@ export class ProviderCatalogService {
       },
       signalBridge: {
         configured: signalConfigured,
-        details: signalConfigured ? "Signal bridge configured" : "Set SIGNAL_API_URL and SIGNAL_ACCOUNT_NUMBER",
+        details: signalConfigured
+          ? "Signal bridge configured (env and/or Settings → Channels)"
+          : "Set SIGNAL_API_URL and SIGNAL_ACCOUNT_NUMBER (env or Settings → Channels)",
         steps: [
           "Run signal-cli-rest-api (Docker or local service).",
           "Link your Signal number once in signal-cli-rest-api.",
-          "Set SIGNAL_API_URL and SIGNAL_ACCOUNT_NUMBER (+ optional SIGNAL_WEBHOOK_SECRET)."
+          "Set SIGNAL_API_URL and SIGNAL_ACCOUNT_NUMBER in env, or paste API URL + account under Settings → Channels (+ optional SIGNAL_WEBHOOK_SECRET)."
         ]
       },
       whatsAppBridge: {
         configured: waConfigured,
-        details: waConfigured ? "WhatsApp bridge configured" : "Set WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_TOKEN",
+        details: waConfigured
+          ? "WhatsApp bridge configured (env and/or Settings → Channels)"
+          : "Set WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_TOKEN (env or Settings → Channels)",
         steps: [
           "In Meta for Developers, create an app and add WhatsApp product.",
           "Copy Phone Number ID and generate a permanent access token.",

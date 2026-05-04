@@ -1,4 +1,6 @@
+import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import type { ChannelMessage } from "./channel-router.js";
+import { effectiveSignalAccountNumber, effectiveSignalApiUrl } from "./channel-runtime-config.js";
 
 type SignalWebhookPayload = {
   envelope?: {
@@ -12,6 +14,8 @@ type SignalWebhookPayload = {
 };
 
 export class SignalChannelAdapter {
+  constructor(private readonly getSettings?: () => AppSettings) {}
+
   async ingestSignalEvent(payload: unknown): Promise<ChannelMessage[]> {
     const parsed = payload as SignalWebhookPayload;
     const from = parsed.envelope?.sourceNumber ?? parsed.sourceNumber ?? "";
@@ -30,8 +34,9 @@ export class SignalChannelAdapter {
   }
 
   async sendMessage(to: string, text: string): Promise<void> {
-    const baseUrl = process.env.SIGNAL_API_URL;
-    const account = process.env.SIGNAL_ACCOUNT_NUMBER;
+    const settings = this.getSettings?.();
+    const baseUrl = settings ? effectiveSignalApiUrl(settings) : (process.env.SIGNAL_API_URL ?? "").trim();
+    const account = settings ? effectiveSignalAccountNumber(settings) : (process.env.SIGNAL_ACCOUNT_NUMBER ?? "").trim();
     if (!baseUrl || !account) {
       console.log(`signal send skipped (missing SIGNAL_API_URL/SIGNAL_ACCOUNT_NUMBER) => ${to}: ${text}`);
       return;
