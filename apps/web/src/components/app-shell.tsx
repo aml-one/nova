@@ -186,7 +186,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
         <div className={cn("absolute bottom-2 left-2 right-2", navCollapsed ? "" : "")}>
           <div className={cn("mb-1 flex items-center gap-1", navCollapsed ? "justify-center" : "justify-end")}>
-            <TextScaleToggle />
+            <TextScaleToggle compact={navCollapsed} />
             <ThemeToggle />
           </div>
           {!navCollapsed ? <div className="text-center text-[11px] text-muted">Made by AmL</div> : null}

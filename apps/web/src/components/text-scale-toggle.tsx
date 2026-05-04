@@ -23,7 +23,7 @@ function applyScale(scale: TextScale): void {
   document.documentElement.setAttribute("data-text-scale", scale);
 }
 
-export function TextScaleToggle() {
+export function TextScaleToggle({ compact = false }: { compact?: boolean }) {
   const [mounted, setMounted] = useState(false);
   const [scale, setScale] = useState<TextScale>("normal");
 
@@ -104,12 +104,14 @@ export function TextScaleToggle() {
           }
         })();
       }}
-      className="inline-flex h-8 min-w-[2.9rem] items-center justify-center rounded-ui px-2 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-500/10 dark:text-slate-300 dark:hover:bg-slate-400/10"
+      className={`inline-flex h-8 items-center justify-center rounded-ui text-[11px] font-semibold text-slate-600 transition hover:bg-slate-500/10 dark:text-slate-300 dark:hover:bg-slate-400/10 ${
+        compact ? "w-8 px-0" : "min-w-[2.9rem] px-2"
+      }`}
       title={`Text size: ${currentLabel} (${scale === "normal" ? "100%" : scale === "medium" ? "125%" : "150%"}). Click for ${nextLabel}.`}
       aria-label={`Text size ${currentLabel}. Click for ${nextLabel}.`}
     >
-      <span className="mr-1 text-xs">A</span>
-      <span>{currentLabel}</span>
+      <span className={compact ? "text-[13px] leading-none" : "mr-1 text-xs"}>A</span>
+      {!compact ? <span>{currentLabel}</span> : null}
     </button>
   );
 }

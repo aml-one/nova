@@ -1022,7 +1022,19 @@ export default function SettingsPage() {
       <div className="space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-semibold">Settings</h1>
+            <h1 className="flex items-center gap-2 text-2xl font-semibold">
+              <span>Settings</span>
+              <span
+                className={`inline-flex h-5 min-w-[68px] items-center justify-center rounded-full px-2 text-[10px] font-semibold ${
+                  loading
+                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                    : "invisible"
+                }`}
+                aria-live="polite"
+              >
+                Loading...
+              </span>
+            </h1>
             <p className="text-sm text-muted">Modern control center with setup guidance and live status.</p>
           </div>
           <div className="flex min-w-[220px] flex-col items-end gap-1">
@@ -1032,7 +1044,6 @@ export default function SettingsPage() {
             </span>
           </div>
         </div>
-        {loading ? <Card>Loading...</Card> : null}
         <div className="grid items-start gap-4 lg:grid-cols-[220px_1fr]">
           <Card className="h-fit self-start lg:sticky lg:top-0">
             <div className="mb-2 flex items-center justify-between">

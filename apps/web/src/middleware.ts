@@ -34,17 +34,13 @@ export async function middleware(request: NextRequest) {
   const authState = await fetchAgentAuthState(request);
   const loginEnabled = authState?.loginEnabled ?? true;
 
-  if (!loginEnabled && pathname === "/") {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
-  }
-
   if (loginEnabled && !session && protectedPath) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
   if (pathname.startsWith("/login")) {
     if (!loginEnabled) {
-      return NextResponse.redirect(new URL("/dashboard", request.url));
+      return NextResponse.redirect(new URL("/", request.url));
     }
     if (session) {
       try {
