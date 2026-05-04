@@ -5,6 +5,8 @@ export async function POST(request: Request) {
   const payload = (await request.json().catch(() => ({}))) as {
     signalApiUrl?: string;
     signalAccountNumber?: string;
+    captcha?: string;
+    useVoice?: boolean;
   };
   const response = await fetch(`${getAgentBaseUrl(request)}/v1/setup/channels/signal/register`, {
     method: "POST",

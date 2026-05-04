@@ -9,7 +9,8 @@
   --muted: 221 20% 40%;
   --border: 220 26% 84%;
   --pastel-blue: 211 85% 73%;
-  --pastel-orange: 27 92% 73%;
+  /* Slightly deeper orange on light theme for badge/tab contrast */
+  --pastel-orange: 27 88% 68%;
   --pastel-pink: 329 78% 78%;
   --pastel-green: 145 55% 71%;
   --pastel-red: 358 75% 74%;

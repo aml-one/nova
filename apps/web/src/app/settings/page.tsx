@@ -438,6 +438,8 @@ export default function SettingsPage() {
   const [channelsSetupMode, setChannelsSetupMode] = useState<"signal" | "whatsapp" | "both">("both");
   const [signalVerificationCode, setSignalVerificationCode] = useState("");
   const [signalRegisterStatus, setSignalRegisterStatus] = useState<SetupCheckResult | null>(null);
+  const [signalRegistrationCaptcha, setSignalRegistrationCaptcha] = useState("");
+  const [signalRegistrationUseVoice, setSignalRegistrationUseVoice] = useState(false);
   const [whatsAppWebStatus, setWhatsAppWebStatus] = useState<WhatsAppWebBridgeStatus | null>(null);
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
@@ -917,10 +919,16 @@ export default function SettingsPage() {
     const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
     const signalApiUrl = values.signalApiUrl ?? "http://127.0.0.1:8085";
     const signalAccountNumber = values.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "";
+    const captcha = signalRegistrationCaptcha.trim();
     const response = await apiFetch("/api/setup/channels/signal/register", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ signalApiUrl, signalAccountNumber })
+      body: JSON.stringify({
+        signalApiUrl,
+        signalAccountNumber,
+        ...(captcha ? { captcha } : {}),
+        ...(signalRegistrationUseVoice ? { useVoice: true } : {})
+      })
     });
     const data = (await response.json()) as { detail?: string; endpointTried?: string; error?: string };
     if (!response.ok) {
@@ -934,6 +942,7 @@ export default function SettingsPage() {
       ok: true,
       detail: "Register/link started"
     });
+    setSignalRegistrationCaptcha("");
     setStatus("Signal registration started. Enter the verification code below, then click Verify code.");
   }
 
@@ -1261,7 +1270,7 @@ export default function SettingsPage() {
                   type="button"
                   tone={tab === item.id ? item.tone ?? "blue" : "neutral"}
                   onClick={() => setTab(item.id)}
-                  className="w-full justify-start text-left"
+                  className={`w-full justify-start text-left ${tab === item.id ? "font-semibold shadow-sm ring-1 ring-black/[0.07] dark:ring-white/12" : ""}`}
                   title={item.label}
                 >
                   <span className="flex w-full items-center justify-between gap-2">
@@ -2424,8 +2433,8 @@ export default function SettingsPage() {
                 <span
                   className={`inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-semibold ${
                     signalSetupCheck.ok
-                      ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-200"
-                      : "border-amber-400/60 bg-amber-400/10 text-amber-200"
+                      ? "border-emerald-600/35 bg-emerald-50 text-emerald-900 dark:border-emerald-400/60 dark:bg-emerald-400/10 dark:text-emerald-200"
+                      : "border-amber-600/40 bg-amber-50 text-amber-950 dark:border-amber-400/60 dark:bg-amber-400/10 dark:text-amber-200"
                   }`}
                   aria-live="polite"
                 >
@@ -2442,7 +2451,37 @@ export default function SettingsPage() {
                   placeholder="Code from Signal/SMS"
                 />
               </label>
-              <div className="flex flex-wrap items-center gap-2">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-text">
+                <Checkbox
+                  checked={signalRegistrationUseVoice}
+                  onChange={(e) => setSignalRegistrationUseVoice(e.target.checked)}
+                />
+                Use voice call for verification (optional; useful if SMS is unreliable)
+              </label>
+              <label className="grid gap-1 text-xs">
+                Signal captcha token (only if registration asks for captcha)
+                <Textarea
+                  value={signalRegistrationCaptcha}
+                  onChange={(e) => setSignalRegistrationCaptcha(e.target.value)}
+                  placeholder="Paste token after solving captcha (token only — not the signalcaptcha:// link)"
+                  rows={2}
+                  className="font-mono text-[11px]"
+                />
+              </label>
+              <p className="text-[11px] leading-snug text-muted">
+                If you see “Captcha required”: open{" "}
+                <a
+                  className="font-medium text-sky-700 underline hover:text-sky-900 dark:text-sky-300 dark:hover:text-sky-200"
+                  href="https://signalcaptchas.org/registration/generate.html"
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  signalcaptchas.org registration captcha
+                </a>
+                , solve it, then right‑click “Open Signal”, copy the link, and paste only the captcha token part into the field above.
+                Retry <strong>Start register/link</strong> with the token filled.
+              </p>
+              <div className="flex flex-wrap items-start gap-2">
                 <Button type="button" tone="purple" onClick={() => void runSignalRegisterStart()}>
                   Start register/link
                 </Button>
@@ -2451,14 +2490,14 @@ export default function SettingsPage() {
                 </Button>
                 {signalRegisterStatus ? (
                   <span
-                    className={`inline-flex max-w-full items-center rounded-full border px-2 py-1 text-[11px] font-semibold ${
+                    className={`inline-flex max-w-full min-w-0 flex-1 items-center rounded-lg border px-2 py-1.5 text-xs font-semibold leading-snug sm:flex-initial sm:rounded-full ${
                       signalRegisterStatus.ok
-                        ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-200"
-                        : "border-rose-400/60 bg-rose-400/10 text-rose-200"
+                        ? "border-emerald-600/35 bg-emerald-50 text-emerald-900 dark:border-emerald-400/60 dark:bg-emerald-400/10 dark:text-emerald-200"
+                        : "border-rose-600/40 bg-rose-50 text-rose-900 dark:border-rose-400/60 dark:bg-rose-400/10 dark:text-rose-200"
                     }`}
                     aria-live="polite"
                   >
-                    <span className="truncate">
+                    <span className="break-words">
                       Register/link: {signalRegisterStatus.ok ? "OK" : "Failed"} — {signalRegisterStatus.detail}
                     </span>
                   </span>
@@ -2516,9 +2555,9 @@ export default function SettingsPage() {
             <div className="rounded-ui border bg-surface p-3 space-y-2">
               <h3 className="text-sm font-semibold">Tier control (fixed policy)</h3>
               <div className="overflow-auto">
-                <table className="w-full min-w-[620px] text-xs">
+                <table className="w-full min-w-[620px] text-[13px] leading-snug">
                   <thead>
-                    <tr className="text-left text-muted">
+                    <tr className="text-left text-slate-600 dark:text-muted">
                       <th className="px-2 py-1">Tier</th>
                       <th className="px-2 py-1">Capabilities</th>
                       <th className="px-2 py-1">Notes</th>

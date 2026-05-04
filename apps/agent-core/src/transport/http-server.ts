@@ -688,7 +688,12 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         return sendJson(response, 200, { status, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/register") {
-        const payload = (await readJson(request)) as { signalApiUrl?: string; signalAccountNumber?: string };
+        const payload = (await readJson(request)) as {
+          signalApiUrl?: string;
+          signalAccountNumber?: string;
+          captcha?: string;
+          useVoice?: boolean;
+        };
         const signalApiUrl = normalizeSignalRestBase(
           payload.signalApiUrl?.trim() || process.env.SIGNAL_API_URL?.trim() || "http://127.0.0.1:8085"
         );
@@ -698,7 +703,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         if (!signalAccountNumber) {
           return sendJson(response, 400, { error: "SIGNAL_ACCOUNT_NUMBER is required", correlationId });
         }
-        const result = await startSignalRegistration(signalApiUrl, signalAccountNumber);
+        const captcha = typeof payload.captcha === "string" ? payload.captcha.trim() : "";
+        const result = await startSignalRegistration(signalApiUrl, signalAccountNumber, {
+          captcha: captcha || undefined,
+          useVoice: payload.useVoice === true
+        });
         return sendJson(response, result.ok ? 200 : 400, { ...result, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/verify") {
@@ -2903,17 +2912,38 @@ async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string
   }
 }
 
+function buildSignalRegisterJsonBody(opts?: { captcha?: string; useVoice?: boolean }): Record<string, unknown> | undefined {
+  if (!opts) {
+    return undefined;
+  }
+  const captcha = opts.captcha?.trim();
+  const useVoice = opts.useVoice === true;
+  if (!captcha && !useVoice) {
+    return undefined;
+  }
+  const body: Record<string, unknown> = {};
+  if (captcha) {
+    body.captcha = captcha;
+  }
+  if (useVoice) {
+    body.use_voice = true;
+  }
+  return body;
+}
+
 async function startSignalRegistration(
   signalApiUrl: string,
-  signalAccountNumber: string
+  signalAccountNumber: string,
+  registerOpts?: { captcha?: string; useVoice?: boolean }
 ): Promise<{ ok: boolean; detail: string; endpointTried?: string }> {
   /** Stock bbernhard/signal-cli-rest-api only exposes POST /v1/register/{number} (see src/main.go). */
+  const jsonBody = buildSignalRegisterJsonBody(registerOpts);
   const candidates = signalRegisterPostCandidates(signalApiUrl, signalAccountNumber);
   let last = "registration request failed";
   let lastTried = candidates[candidates.length - 1] ?? "";
   for (const endpoint of candidates) {
     lastTried = endpoint;
-    const attempt = await postSignalCliJson(endpoint);
+    const attempt = await postSignalCliJson(endpoint, jsonBody);
     if (attempt.ok) {
       return {
         ok: true,
@@ -3031,17 +3061,26 @@ function normalizeSignalAccountNumber(raw: string): string {
 }
 
 /**
- * signal-cli-rest-api examples use POST + Content-Type: application/json with an empty body (no JSON `{}`).
+ * signal-cli-rest-api: POST + `Content-Type: application/json`.
+ * Registration without captcha uses an empty body; with captcha use `{"captcha":"..."}` (optional `use_voice`).
  */
-async function postSignalCliJson(url: string, headers?: HeadersInit): Promise<{ ok: boolean; detail: string }> {
+async function postSignalCliJson(
+  url: string,
+  jsonBody?: Record<string, unknown>,
+  headers?: HeadersInit
+): Promise<{ ok: boolean; detail: string }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12_000);
   try {
-    const response = await fetch(url, {
+    const init: RequestInit = {
       method: "POST",
       headers: { "content-type": "application/json", ...(headers ?? {}) },
       signal: controller.signal
-    });
+    };
+    if (jsonBody !== undefined && Object.keys(jsonBody).length > 0) {
+      init.body = JSON.stringify(jsonBody);
+    }
+    const response = await fetch(url, init);
     if (!response.ok) {
       let suffix = "";
       try {
