@@ -34,10 +34,11 @@ function buildReceiveWebSocketUrl(signalApiBase: string, account: string): strin
 const dedupe = new Map<string, number>();
 const DEDUPE_TTL_MS = 120_000;
 
-function dedupeKey(envelope: { sourceNumber?: string; source?: string; timestamp?: number } | undefined, text: string): string {
-  const from = envelope?.sourceNumber ?? envelope?.source ?? "";
-  const ts = typeof envelope?.timestamp === "number" ? envelope.timestamp : 0;
-  return `${from}|${ts}|${text.slice(0, 120)}`;
+function dedupeKey(chunk: unknown, message: { from: string; text: string }): string {
+  const env = (chunk as { envelope?: { sourceNumber?: string; source?: string; timestamp?: number } }).envelope;
+  const from = message.from.trim() || env?.sourceNumber?.trim() || (typeof env?.source === "string" ? env.source.trim() : "") || "";
+  const ts = typeof env?.timestamp === "number" ? env.timestamp : 0;
+  return `${from}|${ts}|${message.text.slice(0, 120)}`;
 }
 
 function shouldProcess(key: string): boolean {
@@ -60,27 +61,52 @@ function parseWsPayload(raw: WebSocket.RawData): unknown[] {
   if (!trimmed) {
     return [];
   }
-  const out: unknown[] = [];
-  for (const line of trimmed.split(/\n+/)) {
-    const t = line.trim();
-    if (!t) continue;
-    try {
-      const v = JSON.parse(t) as unknown;
-      if (Array.isArray(v)) {
-        out.push(...v);
-      } else {
-        out.push(v);
-      }
-    } catch {
+  try {
+    const v = JSON.parse(trimmed) as unknown;
+    if (Array.isArray(v)) {
+      return [...v];
+    }
+    return [v];
+  } catch {
+    // NDJSON / line-delimited fallback (must be one JSON object per line)
+    const out: unknown[] = [];
+    for (const line of trimmed.split(/\n+/)) {
+      const t = line.trim();
+      if (!t) continue;
       try {
-        out.push(JSON.parse(trimmed) as unknown);
-        break;
+        const v = JSON.parse(t) as unknown;
+        if (Array.isArray(v)) {
+          out.push(...v);
+        } else {
+          out.push(v);
+        }
       } catch {
-        // ignore non-json noise
+        // skip bad line
       }
     }
+    return out;
   }
-  return out;
+}
+
+let lastReceiveWsNonDmLogAt = 0;
+const RECEIVE_WS_DEBUG_THROTTLE_MS = 12_000;
+
+function maybeLogReceiveWsNonTextDm(preview: string): void {
+  const now = Date.now();
+  if (now - lastReceiveWsNonDmLogAt < RECEIVE_WS_DEBUG_THROTTLE_MS) {
+    return;
+  }
+  lastReceiveWsNonDmLogAt = now;
+  pushChannelDebug({
+    channel: "signal",
+    direction: "in",
+    transport: "receive_ws",
+    correlationId: "signal-ws",
+    peer: "",
+    textPreview: previewChannelText(preview, 220),
+    trace: ["receive_ws_frame", "parsed_zero_text_dm_or_receipt"],
+    error: "WebSocket delivered JSON but no inbound text DM was extracted — expand signal ingest or check payload shape."
+  });
 }
 
 /**
@@ -142,11 +168,22 @@ export function startSignalReceiveWsPoller(deps: {
     });
 
     ws.on("message", async (raw) => {
+      const rawStr = typeof raw === "string" ? raw : raw.toString("utf8");
       const chunks = parseWsPayload(raw);
+      if (chunks.length === 0 && rawStr.trim().length > 2) {
+        maybeLogReceiveWsNonTextDm(rawStr);
+        return;
+      }
       for (const chunk of chunks) {
         const messages = deps.router.normalizeBatch(await deps.signal.ingestSignalEvent(chunk));
-        const env = (chunk as { envelope?: { sourceNumber?: string; source?: string; timestamp?: number } }).envelope;
-        const filtered = messages.filter((m) => shouldProcess(dedupeKey(env, m.text)));
+        if (messages.length === 0) {
+          const preview = typeof chunk === "object" && chunk !== null ? JSON.stringify(chunk) : String(chunk);
+          if (preview.length > 20) {
+            maybeLogReceiveWsNonTextDm(preview);
+          }
+          continue;
+        }
+        const filtered = messages.filter((m) => shouldProcess(dedupeKey(chunk, m)));
         if (filtered.length === 0) {
           continue;
         }
