@@ -96,15 +96,42 @@ function stripMarkdownForTts(raw: string): string {
   visible = visible.replace(/\[nova:[^\]]+\]([\s\S]*?)\[\/nova\]/gi, "$1");
   visible = visible.replace(/\[\/nova\]/gi, " ");
   visible = visible.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  visible = visible.replace(/\r\n?/g, "\n");
   visible = visible.replace(/[\uFEFF\u200B-\u200D]/g, "");
   visible = visible.replace(/[\u2013\u2014]/g, ", ");
   visible = visible.replace(/[#*_>`]+/g, " ");
+
+  const lines = visible
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length > 1) {
+    visible = lines
+      .map((line) => {
+        const isBullet = /^[-*•]\s+/.test(line);
+        const isOrdered = /^\d+[\.\)]\s+/.test(line);
+        const isLettered = /^[A-Za-z][\)]\s+/.test(line);
+        const isListLike = isBullet || isOrdered || isLettered;
+        let cleanedLine = line;
+        if (isBullet) {
+          cleanedLine = line.replace(/^[-*•]\s+/, "");
+        }
+        if (isListLike && !/[.!?…:;]$/.test(cleanedLine)) {
+          cleanedLine = `${cleanedLine}.`;
+        }
+        return cleanedLine;
+      })
+      .join(" ");
+  }
+
   visible = visible.replace(/\s+/g, " ").trim();
   return visible.slice(0, 8000);
 }
 
 /** Max distinct synthesized clips kept in memory per chat session (replay without calling speak-audio again). */
 const MAX_SESSION_TTS_AUDIO_CACHE = 10;
+const CHAT_TTS_CHUNK_TARGET_CHARS = 190;
+const CHAT_TTS_CHUNK_MIN_CHARS = 120;
 
 /** Skip server transcribe for accidental empty/stop blobs (avoids STT misconfig spam). */
 const NOVA_CHAT_STT_MIN_AUDIO_BYTES = 900;
@@ -143,6 +170,75 @@ function rememberChatTtsBlob(
     const oldest = order.shift();
     if (oldest) map.delete(oldest);
   }
+}
+
+function looksLikeNoiseHallucination(text: string): boolean {
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  if (words.length < 6) return false;
+  const unique = new Set(words).size;
+  const uniqueRatio = unique / words.length;
+  return uniqueRatio < 0.38;
+}
+
+function splitTextForTts(raw: string): string[] {
+  const text = raw.trim();
+  if (!text) return [];
+  if (text.length <= CHAT_TTS_CHUNK_TARGET_CHARS + 24) return [text];
+
+  const sentenceLike = text.match(/[^.!?]+[.!?]+(?:["')\]]+)?|[^.!?]+$/g) ?? [text];
+  const parts: string[] = [];
+  let buffer = "";
+
+  const pushBuffer = (): void => {
+    const v = buffer.trim();
+    if (v) parts.push(v);
+    buffer = "";
+  };
+
+  for (const rawPiece of sentenceLike) {
+    const piece = rawPiece.trim();
+    if (!piece) continue;
+    if (!buffer) {
+      buffer = piece;
+      continue;
+    }
+    const joined = `${buffer} ${piece}`;
+    if (joined.length <= CHAT_TTS_CHUNK_TARGET_CHARS) {
+      buffer = joined;
+      continue;
+    }
+    if (buffer.length >= CHAT_TTS_CHUNK_MIN_CHARS) {
+      pushBuffer();
+      buffer = piece;
+    } else {
+      buffer = joined;
+      if (buffer.length >= CHAT_TTS_CHUNK_TARGET_CHARS + 80) {
+        pushBuffer();
+      }
+    }
+  }
+  pushBuffer();
+
+  if (parts.length <= 1) return [text];
+
+  const merged: string[] = [];
+  for (const part of parts) {
+    if (!merged.length) {
+      merged.push(part);
+      continue;
+    }
+    const prev = merged[merged.length - 1]!;
+    if (prev.length < CHAT_TTS_CHUNK_MIN_CHARS) {
+      merged[merged.length - 1] = `${prev} ${part}`;
+    } else {
+      merged.push(part);
+    }
+  }
+  return merged;
 }
 
 function getMicCapabilityError(): string | null {
@@ -486,6 +582,12 @@ export default function HomePage() {
   const orbVoiceAttachAttemptRef = useRef(0);
   /** Voice-reactive level (0–1), asymmetric attack/release. */
   const novaOrbVoiceLevelRef = useRef(0);
+  /** Recent analyser instant level (for onset detection). */
+  const novaOrbPrevInstantRef = useRef(0);
+  /** Short transient burst on speech onsets (word-like spikes). */
+  const novaOrbWordSpikeRef = useRef(0);
+  /** Debounce rotation flips so they track words, not every frame. */
+  const novaOrbLastFlipAtRef = useRef(0);
   /** Agent `/v1/voice/stt-status`: whether server mic transcription is available. */
   const sttServerConfiguredRef = useRef<boolean | null>(null);
   const lastWebSpeechEndAtRef = useRef(0);
@@ -495,6 +597,7 @@ export default function HomePage() {
   const chatSttChunksRef = useRef<BlobPart[]>([]);
   const chatMicSilenceRafRef = useRef<number | null>(null);
   const chatMicSilenceCtxRef = useRef<AudioContext | null>(null);
+  const sttWebAcceptedChunksRef = useRef<string[]>([]);
   const ttsOrbDirectionTimerRef = useRef<number | null>(null);
   const ttsOrbDirectionActiveRef = useRef(false);
   const chatSttWebRecognitionRef = useRef<SpeechRecognition | null>(null);
@@ -939,6 +1042,9 @@ export default function HomePage() {
       chatTtsOrbRafRef.current = null;
     }
     novaOrbVoiceLevelRef.current = 0;
+    novaOrbPrevInstantRef.current = 0;
+    novaOrbWordSpikeRef.current = 0;
+    novaOrbLastFlipAtRef.current = 0;
     const meter = novaTtsOrbMeterRef.current;
     if (meter) {
       meter.style.removeProperty("transform");
@@ -1053,7 +1159,25 @@ export default function HomePage() {
         }
         novaOrbVoiceLevelRef.current = level;
 
-        const s = Math.min(1, Math.max(0, level));
+        const prevInstant = novaOrbPrevInstantRef.current;
+        const rise = gated - prevInstant;
+        novaOrbPrevInstantRef.current = gated;
+
+        // Detect short speech onsets (close to per-word energy bursts).
+        const nowMs = performance.now();
+        const onset = gated > 0.11 && rise > 0.055;
+        if (onset) {
+          const burst = Math.min(1, gated * 1.28 + rise * 2.1 + 0.16);
+          novaOrbWordSpikeRef.current = Math.max(novaOrbWordSpikeRef.current, burst);
+          if (nowMs - novaOrbLastFlipAtRef.current > 115) {
+            novaOrbLastFlipAtRef.current = nowMs;
+            novaThreeSpeakingOrbRef.current?.randomizeDirection();
+          }
+        }
+        // Fast decay so next onset produces another visible "word spike".
+        novaOrbWordSpikeRef.current *= 0.62;
+
+        const s = Math.min(1, Math.max(0, level * 0.72 + novaOrbWordSpikeRef.current * 0.98));
         m.style.removeProperty("transform");
         novaThreeSpeakingOrbRef.current?.setSpeechLevel(s);
 
@@ -1326,73 +1450,111 @@ export default function HomePage() {
       const order = chatTtsCacheOrderRef.current;
       const cached = map.get(key);
       stopChatTtsPlayback();
-      if (cached) {
-        touchChatTtsCacheOrder(order, key);
-        const url = URL.createObjectURL(cached.blob.slice());
-        chatTtsObjectUrlRef.current = url;
-        const el = chatTtsAudioRef.current;
-        if (!el) {
-          URL.revokeObjectURL(url);
+
+      const playBlobChunk = async (el: HTMLAudioElement, blob: Blob, runAc: AbortController): Promise<void> => {
+        if (chatTtsObjectUrlRef.current) {
+          URL.revokeObjectURL(chatTtsObjectUrlRef.current);
           chatTtsObjectUrlRef.current = null;
-          return;
         }
-        el.src = url;
-        setTtsPlayingTurnId(turnId);
+        const objectUrl = URL.createObjectURL(blob);
+        chatTtsObjectUrlRef.current = objectUrl;
+        el.src = objectUrl;
         el.onplaying = () => {
           setTtsPlaybackActive(true);
           requestAnimationFrame(() => {
             requestAnimationFrame(() => attachTtsVoiceOrbDriver(el));
           });
         };
-        el.onended = () => {
+        await loadAudioElementThenPlay(el);
+        await new Promise<void>((resolve, reject) => {
+          const onEnded = () => {
+            cleanup();
+            resolve();
+          };
+          const onError = () => {
+            cleanup();
+            reject(new Error("tts playback failed"));
+          };
+          const onAbort = () => {
+            cleanup();
+            reject(new DOMException("Aborted", "AbortError"));
+          };
+          const cleanup = () => {
+            el.removeEventListener("ended", onEnded);
+            el.removeEventListener("error", onError);
+            runAc.signal.removeEventListener("abort", onAbort);
+          };
+          el.addEventListener("ended", onEnded, { once: true });
+          el.addEventListener("error", onError, { once: true });
+          runAc.signal.addEventListener("abort", onAbort, { once: true });
+        });
+      };
+
+      const fetchTtsBlob = async (text: string, runAc: AbortController): Promise<{ blob: Blob; mime: string }> => {
+        const response = await apiFetch("/api/voice/speak-audio", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text }),
+          signal: runAc.signal
+        });
+        if (!response.ok) {
+          throw new Error(`tts request failed (${response.status})`);
+        }
+        const mime = response.headers.get("content-type") ?? "audio/wav";
+        const blob = await response.blob();
+        return { blob, mime };
+      };
+
+      if (cached) {
+        touchChatTtsCacheOrder(order, key);
+        const el = chatTtsAudioRef.current;
+        if (!el) {
+          return;
+        }
+        const ac = new AbortController();
+        chatTtsFetchAbortRef.current = ac;
+        setTtsPlayingTurnId(turnId);
+        try {
+          await playBlobChunk(el, cached.blob.slice(), ac);
           stopChatTtsPlayback({ naturalTtsEnd: true });
-        };
-        el.onerror = () => {
-          stopChatTtsPlayback();
-        };
-        await loadAudioElementThenPlay(el).catch(() => stopChatTtsPlayback());
+        } catch (err) {
+          const aborted = err instanceof DOMException && err.name === "AbortError";
+          if (!aborted) stopChatTtsPlayback();
+        } finally {
+          if (chatTtsFetchAbortRef.current === ac) {
+            chatTtsFetchAbortRef.current = null;
+          }
+        }
         return;
       }
+
+      const chunks = splitTextForTts(cleaned);
       const ac = new AbortController();
       chatTtsFetchAbortRef.current = ac;
       setTtsGeneratingTurnId(turnId);
       try {
-        const response = await apiFetch("/api/voice/speak-audio", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text: cleaned }),
-          signal: ac.signal
-        });
-        if (!response.ok) {
-          setTtsGeneratingTurnId(null);
-          return;
-        }
         const el = chatTtsAudioRef.current;
         if (!el) {
           setTtsGeneratingTurnId(null);
           return;
         }
-        el.onplaying = () => {
-          setTtsPlaybackActive(true);
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => attachTtsVoiceOrbDriver(el));
-          });
-        };
-        el.onended = () => {
-          stopChatTtsPlayback({ naturalTtsEnd: true });
-        };
-        el.onerror = () => {
-          stopChatTtsPlayback();
-        };
-        const mime = response.headers.get("content-type") ?? "audio/wav";
+        let currentFetch = fetchTtsBlob(chunks[0]!, ac);
+        const cachedParts: Blob[] = [];
+        let mime = "audio/wav";
         setTtsGeneratingTurnId(null);
         setTtsPlayingTurnId(turnId);
-        const blob = await response.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        el.src = objectUrl;
-        await loadAudioElementThenPlay(el).catch(() => stopChatTtsPlayback());
-        chatTtsObjectUrlRef.current = objectUrl;
+        for (let i = 0; i < chunks.length; i++) {
+          const current = await currentFetch;
+          cachedParts.push(current.blob.slice());
+          mime = current.mime || mime;
+          const nextIndex = i + 1;
+          currentFetch =
+            nextIndex < chunks.length ? fetchTtsBlob(chunks[nextIndex]!, ac) : Promise.resolve(current);
+          await playBlobChunk(el, current.blob, ac);
+        }
+        const blob = new Blob(cachedParts, { type: mime });
         rememberChatTtsBlob(map, order, key, { blob: blob.slice(), mime });
+        stopChatTtsPlayback({ naturalTtsEnd: true });
       } catch (err) {
         const aborted = err instanceof DOMException && err.name === "AbortError";
         if (!aborted) {
@@ -1620,23 +1782,36 @@ export default function HomePage() {
           }
           chatSttWebRecognitionRef.current = null;
           sttWebSpeechPrefixRef.current = message.trimEnd();
+          sttWebAcceptedChunksRef.current = [];
           {
             const gapSinceLastEnd = Date.now() - lastWebSpeechEndAtRef.current;
             await new Promise((r) => setTimeout(r, gapSinceLastEnd < 3200 ? 200 : 55));
           }
           const rec = new SpeechRecCtor();
           rec.continuous = true;
-          rec.interimResults = true;
+          rec.interimResults = false;
           rec.lang = navigator.language || "en-US";
           rec.onresult = (event: SpeechRecognitionEvent) => {
-            let line = "";
-            for (let i = 0; i < event.results.length; i++) {
-              line += event.results[i]![0]!.transcript;
+            let changed = false;
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+              const result = event.results[i];
+              if (!result || !result.isFinal) continue;
+              const alt = result[0];
+              const spoken = (alt?.transcript ?? "").trim();
+              if (!spoken) continue;
+              if (!/[a-z0-9]/i.test(spoken)) continue;
+              const confidence = typeof alt?.confidence === "number" ? alt.confidence : NaN;
+              if (Number.isFinite(confidence) && confidence < 0.5) continue;
+              if (spoken.length < 3) continue;
+              if (looksLikeNoiseHallucination(spoken)) continue;
+              sttWebAcceptedChunksRef.current.push(spoken);
+              changed = true;
             }
+            if (!changed) return;
             const prefix = sttWebSpeechPrefixRef.current;
-            const spoken = line.trim();
+            const spoken = sttWebAcceptedChunksRef.current.join(" ").trim();
             const next = spoken ? (prefix ? `${prefix} ${spoken}` : spoken) : prefix;
-            setMessage(next);
+            setMessage(next.trim());
           };
           rec.onerror = (event: SpeechRecognitionErrorEvent) => {
             if (event.error === "aborted") return;
@@ -2556,9 +2731,12 @@ export default function HomePage() {
                         }}
                       >
                         {ttsPlayingTurnId === turn.id ? (
-                          <span className="text-[10px] font-semibold uppercase tracking-wide text-cyan-200">Speaking</span>
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-cyan-200">
+                            <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] bg-current" aria-hidden />
+                            <span>Speaking</span>
+                          </span>
                         ) : ttsGeneratingTurnId === turn.id ? (
-                          <span className="inline-block h-3.5 w-3.5 shrink-0 rounded-[2px] bg-current" aria-hidden />
+                          <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-[2px] bg-current" aria-hidden />
                         ) : (
                           <FaVolumeHigh className="h-3.5 w-3.5" />
                         )}
