@@ -3066,6 +3066,15 @@ async function checkSignalConnectionForBase(baseUrl: string): Promise<{ ok: bool
   return { ok: false, detail: "endpoint returned 404 (tried /v1/about, /about, and base URL)" };
 }
 
+function isLoopbackWebOrigin(hostname: string): boolean {
+  const h = hostname.toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
+}
+
+/**
+ * Browser sends Settings origin for webhook URL. Inside Docker, `localhost` is the container,
+ * not the Mac host — same-machine setups must use host.docker.internal to reach agent-core.
+ */
 function buildReceiveWebhookUrlFromBootstrap(webhookPublicOrigin?: string): string | undefined {
   const o = typeof webhookPublicOrigin === "string" ? webhookPublicOrigin.trim() : "";
   if (!o) {
@@ -3076,6 +3085,10 @@ function buildReceiveWebhookUrlFromBootstrap(webhookPublicOrigin?: string): stri
     const u = new URL(withProto);
     if (!u.hostname) {
       return undefined;
+    }
+    if (isLoopbackWebOrigin(u.hostname)) {
+      const agentPort = process.env.NOVA_AGENT_PORT?.trim() || "8787";
+      return `http://host.docker.internal:${agentPort}/v1/webhooks/signal`;
     }
     return `${u.origin}/api/webhooks/signal`;
   } catch {

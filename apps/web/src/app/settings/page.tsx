@@ -2694,8 +2694,10 @@ export default function SettingsPage() {
                 Only <strong className="text-foreground">Signal/WhatsApp</strong> webhook traffic (not browser chat). In-memory; clears when agent-core restarts.
               </p>
               <p className="text-[11px] text-muted leading-snug">
-                The bridge must POST to the <em>same</em> agent this UI uses — typically <code className="text-[10px]">https://…/api/webhooks/signal</code> or{" "}
-                <code className="text-[10px]">http://&lt;host&gt;:8787/v1/webhooks/signal</code> if reachable from the container.
+                <strong className="text-foreground">All on one Mac:</strong> Signal bridge runs in Docker; use{" "}
+                <code className="text-[10px]">http://host.docker.internal:8787/v1/webhooks/signal</code> (default) so the container posts to agent-core on the host — not{" "}
+                <code className="text-[10px]">http://localhost:3000/…</code> (inside Docker, <code className="text-[10px]">localhost</code> is the container). Bootstrap applies this when you open Settings from{" "}
+                <code className="text-[10px]">localhost</code>. Public hostnames still use <code className="text-[10px]">https://…/api/webhooks/signal</code>.
               </p>
               <p className="text-[11px] text-muted leading-snug">
                 Rows: <strong className="text-foreground">none</strong> = no POST here · <code className="text-[10px]">signature_invalid</code> ·{" "}
@@ -2704,7 +2706,7 @@ export default function SettingsPage() {
               <p className="text-[11px] text-muted leading-snug">
                 <strong className="text-foreground">next_proxy</strong> rows = Next could not reach the agent or the agent returned an error body.{" "}
                 <strong className="text-foreground">receive_ws</strong> = inbound over the Signal REST WebSocket (works when webhooks cannot reach this agent).{" "}
-                <strong className="text-foreground">Docker</strong> = last lines from <code className="text-[10px]">nova-signal-bridge</code> on the <em>agent host</em> only (empty if Docker runs elsewhere, e.g. only on your Mac).
+                <strong className="text-foreground">Docker</strong> = last lines from <code className="text-[10px]">nova-signal-bridge</code> on this machine (same Mac as agent-core).
               </p>
               <div className="flex flex-wrap gap-3 text-[11px]">
                 <span className="inline-flex items-center gap-1">
