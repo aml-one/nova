@@ -5,6 +5,7 @@ import { AIVoiceOrb, type VoiceOrbPresetName } from "../lib/ai-voice-orb/AIVoice
 
 export type NovaThreeSpeakingOrbHandle = {
   setSpeechLevel: (level: number) => void;
+  randomizeDirection: () => void;
 };
 
 type Props = {
@@ -27,6 +28,9 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
   useImperativeHandle(ref, () => ({
     setSpeechLevel: (level: number) => {
       orbRef.current?.setSpeechLevel(level);
+    },
+    randomizeDirection: () => {
+      orbRef.current?.randomizeDirection();
     }
   }));
 

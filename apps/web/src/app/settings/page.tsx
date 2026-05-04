@@ -1068,55 +1068,6 @@ export default function SettingsPage() {
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.loginEnabled} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, loginEnabled: e.target.checked } }))} /> Enable Web login</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.hideProviderModelInStats} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, hideProviderModelInStats: e.target.checked } }))} /> Hide provider/model in chat statistics</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.sendOnEnter} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, sendOnEnter: e.target.checked } }))} /> Send message on Enter (Shift+Enter for newline)</label>
-            <div className="rounded-xl border border-border bg-surface/90 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div className="text-xs font-medium text-text">Voice auto-send silence</div>
-                  <p className="mt-0.5 max-w-md text-[10px] leading-snug text-muted">
-                    When “Auto-send after silence” is on in the chat options menu, Nova waits this long after the composer stops changing, then sends the message.
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="tabular-nums text-sm font-semibold text-text">{settings.web.voiceDictationSilenceSec}s</span>
-                  {voiceSilenceSaveState === "saving" ? (
-                    <span className="text-[10px] text-muted">Saving…</span>
-                  ) : voiceSilenceSaveState === "saved" ? (
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Saved</span>
-                  ) : voiceSilenceSaveState === "error" ? (
-                    <span className="text-[10px] text-rose-500">Error</span>
-                  ) : null}
-                </div>
-              </div>
-              <div className="mt-3 px-0.5">
-                <input
-                  type="range"
-                  className="voice-silence-slider"
-                  min={1}
-                  max={4}
-                  step={1}
-                  value={settings.web.voiceDictationSilenceSec}
-                  aria-valuemin={1}
-                  aria-valuemax={4}
-                  aria-valuenow={settings.web.voiceDictationSilenceSec}
-                  aria-label="Seconds of silence before auto-sending dictated chat"
-                  onChange={(e) =>
-                    setSettings((p) => ({
-                      ...p,
-                      web: {
-                        ...p.web,
-                        voiceDictationSilenceSec: Math.min(4, Math.max(1, Number(e.target.value) || 2))
-                      }
-                    }))
-                  }
-                />
-                <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted">
-                  <span>1s</span>
-                  <span>2s</span>
-                  <span>3s</span>
-                  <span>4s</span>
-                </div>
-              </div>
-            </div>
             <label className="flex items-center gap-2"><Checkbox checked={settings.web.chatStyle.bubbleBackgroundEnabled} onChange={(e) => setSettings((p) => ({ ...p, web: { ...p.web, chatStyle: { ...p.web.chatStyle, bubbleBackgroundEnabled: e.target.checked } } }))} /> Enable bubble backgrounds in chat</label>
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2 rounded-ui border bg-surface p-3">
@@ -2368,6 +2319,55 @@ export default function SettingsPage() {
                 <code className="text-[11px]">/settings?tab=voice</code>
                 ).
               </p>
+            </div>
+            <div className="rounded-xl border border-border bg-surface/90 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-medium text-text">Voice auto-send silence</div>
+                  <p className="mt-0.5 max-w-md text-[10px] leading-snug text-muted">
+                    When “Auto-send after silence” is on in the chat options menu, Nova waits this long after the composer stops changing, then sends the message. The same duration stops server microphone capture after you finish speaking.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="tabular-nums text-sm font-semibold text-text">{settings.web.voiceDictationSilenceSec}s</span>
+                  {voiceSilenceSaveState === "saving" ? (
+                    <span className="text-[10px] text-muted">Saving…</span>
+                  ) : voiceSilenceSaveState === "saved" ? (
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Saved</span>
+                  ) : voiceSilenceSaveState === "error" ? (
+                    <span className="text-[10px] text-rose-500">Error</span>
+                  ) : null}
+                </div>
+              </div>
+              <div className="mt-3 px-0.5">
+                <input
+                  type="range"
+                  className="voice-silence-slider"
+                  min={1}
+                  max={4}
+                  step={1}
+                  value={settings.web.voiceDictationSilenceSec}
+                  aria-valuemin={1}
+                  aria-valuemax={4}
+                  aria-valuenow={settings.web.voiceDictationSilenceSec}
+                  aria-label="Seconds of silence before auto-sending dictated chat"
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      web: {
+                        ...p.web,
+                        voiceDictationSilenceSec: Math.min(4, Math.max(1, Number(e.target.value) || 2))
+                      }
+                    }))
+                  }
+                />
+                <div className="mt-1 flex justify-between text-[10px] tabular-nums text-muted">
+                  <span>1s</span>
+                  <span>2s</span>
+                  <span>3s</span>
+                  <span>4s</span>
+                </div>
+              </div>
             </div>
             <VoiceWakeWordPanel />
             <div className="rounded-ui border border-border bg-surface/80 p-3 space-y-3">

@@ -107,9 +107,12 @@ export class AIVoiceOrb {
             float wave1 = sin(position.y * 5.0 + uTime * 1.8) * 0.06;
             float wave2 = sin(position.x * 7.5 - uTime * 2.4) * 0.05;
             float wave3 = sin((position.z + position.x) * 9.0 + uTime * 2.0) * 0.035;
-            float pulse = (wave1 + wave2 + wave3) * (0.5 + uSpeak * 1.7);
+            float pulse = (wave1 + wave2 + wave3) * (0.42 + uSpeak * 2.45);
+            float spike = sin(position.y * 16.0 + uTime * 11.0) * uSpeak * 0.062
+              + sin(position.x * 14.0 - uTime * 9.0) * uSpeak * 0.052
+              + sin((position.z * 1.7 + position.y) * 18.0 + uTime * 13.0) * uSpeak * 0.038;
 
-            vec3 displaced = position + normal * pulse;
+            vec3 displaced = position + normal * (pulse + spike);
             vPos = displaced;
 
             gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
@@ -223,6 +226,9 @@ export class AIVoiceOrb {
     const v = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5);
     if (v.lengthSq() > 0) {
       this.targetDirection.copy(v.normalize());
+    }
+    if (Math.random() < 0.5) {
+      this.targetDirection.multiplyScalar(-1);
     }
   }
 

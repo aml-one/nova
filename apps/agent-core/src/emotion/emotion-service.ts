@@ -44,8 +44,8 @@ export class EmotionService {
     }
     const previous = this.getState(userId);
     const appraisal = appraiseInput(text, settings.mirrorUserValence);
-    const valence = clamp(previous.valence * 0.6 + appraisal.valenceDelta);
-    const arousal = clamp(previous.arousal * 0.6 + appraisal.arousalDelta);
+    const valence = clamp(previous.valence * 0.52 + appraisal.valenceDelta);
+    const arousal = clamp(previous.arousal * 0.52 + appraisal.arousalDelta);
     const label = deriveLabel(valence, arousal, appraisal.hintLabel);
     const next: EmotionState = { valence, arousal, label };
     this.repository.upsert({
@@ -227,14 +227,14 @@ function appraiseInput(
   if (/(lost my job|passed away|sad|depressed|hurt)/.test(lower)) {
     return { valenceDelta: -0.6, arousalDelta: -0.2, hintLabel: "empathetic" };
   }
-  if (/(great|awesome|perfect|thanks|saved me)/.test(lower)) {
-    return { valenceDelta: 0.7, arousalDelta: 0.5, hintLabel: "joyful" };
+  if (/\b(great|awesome|perfect|thanks|thank you|saved me)\b/.test(lower)) {
+    return { valenceDelta: 0.55, arousalDelta: 0.42, hintLabel: "joyful" };
   }
   if (/(why|how|curious|interesting|explain)/.test(lower)) {
     return { valenceDelta: 0.2, arousalDelta: 0.4, hintLabel: "curious" };
   }
   if (!mirrorUserValence) {
-    return { valenceDelta: 0.05, arousalDelta: 0.05, hintLabel: "neutral" };
+    return { valenceDelta: 0, arousalDelta: 0, hintLabel: "neutral" };
   }
   return { valenceDelta: 0, arousalDelta: 0 };
 }
@@ -243,8 +243,8 @@ function deriveLabel(valence: number, arousal: number, hint?: EmotionState["labe
   if (hint) {
     return hint;
   }
-  if (valence > 0.4 && arousal > 0.3) return "joyful";
-  if (valence > 0.1 && arousal > 0.5) return "curious";
+  if (valence > 0.5 && arousal > 0.36) return "joyful";
+  if (valence > 0.12 && arousal > 0.52) return "curious";
   if (valence < -0.4 && arousal > 0.4) return "frustrated";
   if (valence < -0.3 && arousal < 0.2) return "empathetic";
   if (valence < -0.2 && arousal > 0.2) return "anxious";
