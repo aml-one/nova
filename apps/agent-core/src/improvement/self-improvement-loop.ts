@@ -11,6 +11,7 @@ import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 import { ModelRouter } from "../providers/router.js";
 import type { ChatMessage } from "@nova/sdk/provider";
 import { CuriosityStore } from "./curiosity-store.js";
+import { getDatabase } from "../storage/sqlite.js";
 
 type Outcome = {
   runId: string;
@@ -37,6 +38,7 @@ type ImprovementPolicy = {
 
 export class SelfImprovementLoop {
   private readonly outcomes: Outcome[] = [];
+  private readonly outcomeRunIds = new Set<string>();
   private readonly learningLog = new LearningLog();
   private readonly curiosity = new CuriosityStore();
   private readonly policy: ImprovementPolicy;
@@ -55,9 +57,14 @@ export class SelfImprovementLoop {
     }
   ) {
     this.policy = loadPolicy();
+    this.hydrateOutcomesFromRunHistory();
   }
 
   recordOutcome(outcome: Outcome): void {
+    if (this.outcomeRunIds.has(outcome.runId)) {
+      return;
+    }
+    this.outcomeRunIds.add(outcome.runId);
     this.outcomes.push(outcome);
     this.learningLog.append(
       `Outcome recorded for task: ${outcome.task}`,
@@ -332,6 +339,44 @@ export class SelfImprovementLoop {
     const at = Date.parse(last.at);
     if (!Number.isFinite(at)) return null;
     return Math.max(0, (Date.now() - at) / 3_600_000);
+  }
+
+  private hydrateOutcomesFromRunHistory(): void {
+    try {
+      const rows = getDatabase()
+        .prepare(
+          `
+          SELECT run_id, user_id, input_text, success
+          FROM run_history
+          ORDER BY datetime(created_at) DESC
+          LIMIT 250
+          `
+        )
+        .all() as Array<{ run_id?: string; user_id?: string; input_text?: string; success?: number }>;
+      for (const row of rows.reverse()) {
+        const runId = (row.run_id ?? "").trim();
+        if (!runId || this.outcomeRunIds.has(runId)) {
+          continue;
+        }
+        this.outcomeRunIds.add(runId);
+        this.outcomes.push({
+          runId,
+          userId: (row.user_id ?? "web").trim() || "web",
+          task: (row.input_text ?? "").trim().slice(0, 300),
+          success: Number(row.success ?? 0) === 1
+        });
+      }
+      if (this.outcomes.length > 0) {
+        this.learningLog.append(
+          "Seeded improvement outcomes from run history",
+          true,
+          `loaded=${this.outcomes.length}`,
+          "proposal"
+        );
+      }
+    } catch {
+      // Keep startup resilient if history read fails.
+    }
   }
 }
 

@@ -867,7 +867,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/improvement/cycle") {
-        const result = await options.improvement.runIdleLearningCycle();
+        const learning = options.settings.get().learning;
+        const result = await options.improvement.runIdleLearningCycle({
+          enabled: learning.enabled,
+          minFailuresForAutoImprove: learning.minFailuresForAutoImprove
+        });
         return sendJson(response, 200, { ok: true, result, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/chat") {
