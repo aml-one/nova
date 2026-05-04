@@ -61,6 +61,7 @@ import { MobilePushService } from "../mobile/push-service.js";
 import { LearningDaemon } from "../improvement/learning-daemon.js";
 import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 import { expandUserPath, invalidateSentiCoreOrchestrationCache } from "../emotion/senti-core-loader.js";
+import { buildMemoryKnowledgeGraph } from "../knowledge/memory-graph.js";
 const execAsync = promisify(execCallback);
 
 type HttpServerOptions = {
@@ -1054,6 +1055,16 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           correlationId
         });
       }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/debug/runtime-log") {
+        const limit = Math.max(1, Math.min(500, Number(parsedUrl.searchParams.get("limit") ?? "200")));
+        const { getRuntimeLogLines } = await import("../debug/runtime-log-buffer.js");
+        const all = getRuntimeLogLines();
+        return sendJson(response, 200, {
+          lines: [...all].slice(-limit),
+          total: all.length,
+          correlationId
+        });
+      }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/emotion/state") {
         const state = options.orchestrator.getEmotionState();
         return sendJson(response, 200, { userId: NOVA_PRIMARY_EMOTION_USER_ID, state, correlationId });
@@ -1799,26 +1810,10 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const rows = getDatabase()
           .prepare("SELECT user_id, content FROM long_term_memory ORDER BY created_at DESC LIMIT 400")
           .all() as Array<{ user_id?: string; content?: string }>;
-        const nodeMap = new Map<string, { id: string; label: string; count: number }>();
-        const edges = new Map<string, { source: string; target: string; weight: number }>();
-        for (const row of rows) {
-          const text = (row.content ?? "").toLowerCase();
-          const tokens = Array.from(new Set(text.match(/[a-z][a-z0-9_-]{3,}/g) ?? [])).slice(0, 10);
-          for (const token of tokens) {
-            const n = nodeMap.get(token) ?? { id: token, label: token, count: 0 };
-            n.count += 1;
-            nodeMap.set(token, n);
-          }
-          for (let i = 0; i < tokens.length - 1; i += 1) {
-            const key = `${tokens[i]}->${tokens[i + 1]}`;
-            const edge = edges.get(key) ?? { source: tokens[i], target: tokens[i + 1], weight: 0 };
-            edge.weight += 1;
-            edges.set(key, edge);
-          }
-        }
+        const { nodes, edges } = buildMemoryKnowledgeGraph(rows);
         return sendJson(response, 200, {
-          nodes: [...nodeMap.values()].sort((a, b) => b.count - a.count).slice(0, 150),
-          edges: [...edges.values()].sort((a, b) => b.weight - a.weight).slice(0, 300),
+          nodes,
+          edges,
           correlationId
         });
       }

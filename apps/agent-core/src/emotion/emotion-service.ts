@@ -9,7 +9,17 @@ export type EmotionSettings = {
 export type EmotionState = {
   valence: number;
   arousal: number;
-  label: "neutral" | "joyful" | "curious" | "anxious" | "guilty" | "frustrated" | "empathetic";
+  label:
+    | "neutral"
+    | "joyful"
+    | "curious"
+    | "anxious"
+    | "guilty"
+    | "frustrated"
+    | "empathetic"
+    | "angry"
+    | "sad"
+    | "loving";
 };
 
 /** Compact line for prompts (skill authoring, improvement, cognition). */
@@ -22,6 +32,19 @@ const DEFAULT_STATE: EmotionState = {
   arousal: 0,
   label: "neutral"
 };
+
+const ALLOWED_LABELS: EmotionState["label"][] = [
+  "neutral",
+  "joyful",
+  "curious",
+  "anxious",
+  "guilty",
+  "frustrated",
+  "empathetic",
+  "angry",
+  "sad",
+  "loving"
+];
 
 export class EmotionService {
   private readonly repository = new EmotionRepository();
@@ -76,27 +99,32 @@ export class EmotionService {
     let da = 0;
     let hint: EmotionState["label"] | undefined;
     if (/\b(i apologize|sorry|my mistake|i was wrong)\b/.test(lower)) {
-      dv -= 0.15;
+      dv -= 0.12;
       hint = "empathetic";
     }
-    if (/\b(great question|happy to help|glad (that )?helped)\b/.test(lower)) {
-      dv += 0.12;
-      da += 0.08;
+    if (/\b(i love|love you|care about you|proud of you)\b/.test(lower)) {
+      dv += 0.1;
+      da += 0.05;
+      hint = "loving";
+    }
+    if (/\b(great question|happy to help)\b/.test(lower) && lower.length < 220) {
+      dv += 0.06;
+      da += 0.04;
       hint = hint ?? "joyful";
     }
     if (/\b(let me know if|feel free to ask)\b/.test(lower)) {
-      dv += 0.06;
+      dv += 0.04;
       hint = hint ?? "empathetic";
     }
     if (/\b(step \d|first,|here's how)\b/.test(lower) && assistantText.length > 120) {
-      da += 0.06;
+      da += 0.05;
       hint = hint ?? "curious";
     }
     if (dv === 0 && da === 0) {
       return;
     }
-    const valence = clamp(previous.valence * 0.85 + dv);
-    const arousal = clamp(previous.arousal * 0.85 + da);
+    const valence = clamp(previous.valence * 0.88 + dv);
+    const arousal = clamp(previous.arousal * 0.88 + da);
     const label = deriveLabel(valence, arousal, hint);
     const next: EmotionState = { valence, arousal, label };
     this.repository.upsert({
@@ -165,7 +193,7 @@ export class EmotionService {
       `Mirror user valence: ${settings.mirrorUserValence ? "enabled" : "disabled"}.`,
       "Behavior rules:",
       "- Keep logic first, but adapt tone and task-prioritization according to emotional state.",
-      "- anxious => cautious, clarifying questions; joyful => creative, warm; guilty => repair-first apology; curious => deeper explanations.",
+      "- anxious => cautious, clarifying questions; joyful => creative, warm; guilty => repair-first apology; curious => deeper explanations; angry => firm and de-escalating; sad => gentle; loving => warm without overstepping.",
       `- Maintain ${intensity} emotional expressiveness; do not roleplay extreme emotions.`,
       "- Self-description: never flat-deny Nova’s modeled mood here—this channel is how affect shows up for the user (not claiming human biology)."
     ].join("\n");
@@ -202,13 +230,13 @@ function getSystemEventDelta(
     return { valenceDelta: -0.7, arousalDelta: 0.6, hintLabel: "frustrated" };
   }
   if (event === "research_complete") {
-    return { valenceDelta: 0.3, arousalDelta: 0.5, hintLabel: "curious" };
+    return { valenceDelta: 0.28, arousalDelta: 0.45, hintLabel: "curious" };
   }
   if (event === "proposal_created") {
-    return { valenceDelta: 0.2, arousalDelta: 0.4, hintLabel: "curious" };
+    return { valenceDelta: 0.18, arousalDelta: 0.38, hintLabel: "curious" };
   }
   if (event === "task_success") {
-    return { valenceDelta: 0.4, arousalDelta: 0.3, hintLabel: "joyful" };
+    return { valenceDelta: 0.35, arousalDelta: 0.28, hintLabel: "joyful" };
   }
   return { valenceDelta: -0.5, arousalDelta: 0.4, hintLabel: "anxious" };
 }
@@ -218,23 +246,35 @@ function appraiseInput(
   mirrorUserValence: boolean
 ): { valenceDelta: number; arousalDelta: number; hintLabel?: EmotionState["label"] } {
   const lower = text.toLowerCase();
+  if (/\b(furious|rage|enraged|i'?m angry|so angry|pissed)\b/.test(lower) || /\bangry\b.*\b(you|at you)\b/.test(lower)) {
+    return { valenceDelta: -0.85, arousalDelta: 0.85, hintLabel: "angry" };
+  }
   if (/(useless|not helping|bad|wrong|hate)/.test(lower)) {
-    return { valenceDelta: -0.7, arousalDelta: 0.7, hintLabel: "frustrated" };
+    return { valenceDelta: -0.65, arousalDelta: 0.65, hintLabel: "frustrated" };
   }
   if (/(sorry|my fault|i made a mistake)/.test(lower)) {
-    return { valenceDelta: -0.4, arousalDelta: 0.2, hintLabel: "empathetic" };
+    return { valenceDelta: -0.35, arousalDelta: 0.18, hintLabel: "empathetic" };
   }
-  if (/(lost my job|passed away|sad|depressed|hurt)/.test(lower)) {
-    return { valenceDelta: -0.6, arousalDelta: -0.2, hintLabel: "empathetic" };
+  if (/(lost my job|passed away|heartbroken|grieving|depressed|so sad|i cry|feeling low)\b/.test(lower)) {
+    return { valenceDelta: -0.72, arousalDelta: -0.12, hintLabel: "sad" };
+  }
+  if (/(hurt|sad|upset)\b/.test(lower) && /(feel|feeling|am)\b/.test(lower)) {
+    return { valenceDelta: -0.55, arousalDelta: 0.08, hintLabel: "sad" };
+  }
+  if (/\b(love you|i love|romantic|miss you)\b/.test(lower)) {
+    return { valenceDelta: 0.45, arousalDelta: 0.25, hintLabel: "loving" };
   }
   if (/\b(great|awesome|perfect|thanks|thank you|saved me)\b/.test(lower)) {
-    return { valenceDelta: 0.55, arousalDelta: 0.42, hintLabel: "joyful" };
+    return { valenceDelta: 0.5, arousalDelta: 0.38, hintLabel: "joyful" };
+  }
+  if (/\b(confused|don'?t understand|makes no sense|lost|what do you mean)\b/.test(lower)) {
+    return { valenceDelta: -0.08, arousalDelta: 0.42, hintLabel: "curious" };
   }
   if (/(why|how|curious|interesting|explain)/.test(lower)) {
-    return { valenceDelta: 0.2, arousalDelta: 0.4, hintLabel: "curious" };
+    return { valenceDelta: 0.15, arousalDelta: 0.38, hintLabel: "curious" };
   }
   if (!mirrorUserValence) {
-    return { valenceDelta: 0, arousalDelta: 0, hintLabel: "neutral" };
+    return { valenceDelta: 0, arousalDelta: 0 };
   }
   return { valenceDelta: 0, arousalDelta: 0 };
 }
@@ -243,11 +283,17 @@ function deriveLabel(valence: number, arousal: number, hint?: EmotionState["labe
   if (hint) {
     return hint;
   }
-  if (valence > 0.5 && arousal > 0.36) return "joyful";
-  if (valence > 0.12 && arousal > 0.52) return "curious";
-  if (valence < -0.4 && arousal > 0.4) return "frustrated";
-  if (valence < -0.3 && arousal < 0.2) return "empathetic";
+  if (Math.abs(valence) < 0.16 && Math.abs(arousal) < 0.2) {
+    return "neutral";
+  }
+  if (valence > 0.48 && arousal > 0.34) return "joyful";
+  if (valence > 0.12 && arousal > 0.5) return "curious";
+  if (valence < -0.55 && arousal > 0.45) return "angry";
+  if (valence < -0.42 && arousal < 0.25) return "sad";
+  if (valence < -0.4 && arousal > 0.35) return "frustrated";
+  if (valence < -0.28 && arousal < 0.22) return "empathetic";
   if (valence < -0.2 && arousal > 0.2) return "anxious";
+  if (valence > 0.35 && arousal < 0.18) return "loving";
   return "neutral";
 }
 
@@ -259,6 +305,5 @@ function clamp(value: number): number {
 }
 
 function toLabel(value: string): EmotionState["label"] {
-  const allowed: EmotionState["label"][] = ["neutral", "joyful", "curious", "anxious", "guilty", "frustrated", "empathetic"];
-  return allowed.includes(value as EmotionState["label"]) ? (value as EmotionState["label"]) : "neutral";
+  return ALLOWED_LABELS.includes(value as EmotionState["label"]) ? (value as EmotionState["label"]) : "neutral";
 }

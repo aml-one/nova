@@ -131,6 +131,13 @@ const ENDPOINTS: EndpointItem[] = [
     note: "Learning history grouped by date."
   },
   {
+    category: "observability",
+    title: "Agent runtime log (debug)",
+    method: "GET",
+    path: "/api/debug/runtime-log?limit=200",
+    note: "Tail of agent-core console capture since process start. Open the Debug page for a readable view."
+  },
+  {
     category: "persona-memory",
     title: "Persona file",
     method: "GET",

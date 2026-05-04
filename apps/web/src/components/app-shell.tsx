@@ -26,7 +26,8 @@ import {
   FaChevronLeft,
   FaChevronRight,
   FaShareNodes,
-  FaWindowRestore
+  FaWindowRestore,
+  FaScrewdriverWrench
 } from "react-icons/fa6";
 import { ThemeToggle } from "./theme-toggle";
 import { TextScaleToggle } from "./text-scale-toggle";
@@ -39,6 +40,7 @@ const links: NavLink[] = [
   { href: "/", label: "Chat", icon: FaMessage, subtitle: "Main conversation and media chat with Nova." },
   { href: "/dashboard", label: "Dashboard", icon: FaChartLine, subtitle: "Run telemetry, latency, throughput, and cost overview." },
   { href: "/thoughts", label: "Thoughts", icon: FaFolderOpen, subtitle: "Live stream of internal thought events." },
+  { href: "/debug", label: "Debug", icon: FaScrewdriverWrench, subtitle: "Agent runtime log tail and this tab’s console mirror." },
   { href: "/emotion", label: "Emotion", icon: FaHeart, subtitle: "Emotion timeline and state transitions." },
   { href: "/memory", label: "Memory", icon: FaDatabase, subtitle: "Pin and manage durable memory cards for Nova." },
   { href: "/knowledge", label: "Knowledge", icon: FaRoute, subtitle: "Entity and relationship graph from long-term memory." },

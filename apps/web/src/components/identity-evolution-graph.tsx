@@ -80,7 +80,7 @@ export function buildIdentityTimeline(input: {
   }
   const learningDates = Object.keys(input.improvementHistoryByDate).sort((a, b) => Date.parse(a) - Date.parse(b));
   let cumulativeKnowledge = 0;
-  learningDates.slice(-8).forEach((dateKey, index) => {
+  learningDates.slice(-3).forEach((dateKey, index) => {
     const dayItems = input.improvementHistoryByDate[dateKey] ?? [];
     const researched = dayItems.filter((item) => item.category === "research").length;
     const improvements = dayItems.filter((item) => item.category === "improvement").length;
@@ -123,7 +123,10 @@ export function buildIdentityTimeline(input: {
   const sorted = items
     .filter((item) => Number.isFinite(Date.parse(item.at)))
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
-  if (!sorted.length || sorted[sorted.length - 1]?.title !== "Awakening Persona") {
+  const hasAwakeningLike = sorted.some(
+    (item) => item.kind === "awakening" || (item.kind === "persona" && item.title.toLowerCase().includes("awakening"))
+  );
+  if (!hasAwakeningLike) {
     sorted.push({
       id: "origin-awakening-fallback",
       at: "1970-01-01T00:00:00.000Z",

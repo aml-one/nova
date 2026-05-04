@@ -1,4 +1,5 @@
 import "./env-dotenv.js";
+import { installRuntimeConsoleCapture } from "./debug/runtime-log-buffer.js";
 import { TaskOrchestrator } from "./orchestrator/task-orchestrator.js";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
@@ -29,6 +30,7 @@ import { UpdateManager } from "./update/update-manager.js";
 import { InstallStateService } from "./update/install-state.js";
 
 async function bootstrap(): Promise<void> {
+  installRuntimeConsoleCapture();
   runMobileSetupDiagnostics();
   const settings = new SettingsService();
   registerCopilotSettingsSource(() => settings.get());

@@ -77,7 +77,7 @@ export function augmentOrpheusSpeechForMood(
     /\b(wow|oh no|what\?|wait[,!]?|unexpected|can't believe|cannot believe|seriously\??)\b/i.test(result);
 
   const hmmThinking =
-    (mood.label === "curious" || mood.label === "neutral") &&
+    (mood.label === "curious" || mood.label === "neutral" || mood.label === "sad") &&
     result.length > 35 &&
     !alreadyHmmPrefixed(result) &&
     (thinkingCue || (mood.arousal > 0.22 && stableRoll(trimmed, 41) < 0.22));
@@ -138,7 +138,16 @@ export function augmentOrpheusSpeechForMood(
   ) {
     result = `<groan> ${result}`;
   } else if (
-    (mood.label === "empathetic" || mood.label === "anxious" || mood.label === "guilty") &&
+    mood.label === "angry" &&
+    mood.valence < -0.1 &&
+    negRoll < 0.32 &&
+    result.length > 18 &&
+    !/<groan>/i.test(result) &&
+    !hasLeadingNonverbPrefix(result)
+  ) {
+    result = `<groan> ${result}`;
+  } else if (
+    (mood.label === "empathetic" || mood.label === "anxious" || mood.label === "guilty" || mood.label === "sad") &&
     mood.valence < -0.05 &&
     negRoll < 0.28 &&
     result.length > 28 &&

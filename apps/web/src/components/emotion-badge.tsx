@@ -18,13 +18,19 @@ function moodAccent(label: string): { dot: string; glow: string } {
     case "joyful":
       return { dot: "bg-emerald-400", glow: "shadow-[0_0_12px_rgba(52,211,153,0.45)]" };
     case "curious":
-      return { dot: "bg-sky-400", glow: "shadow-[0_0_12px_rgba(56,189,248,0.4)]" };
+      return { dot: "bg-amber-300", glow: "shadow-[0_0_12px_rgba(253,224,71,0.45)]" };
     case "empathetic":
-      return { dot: "bg-violet-400", glow: "shadow-[0_0_12px_rgba(167,139,250,0.4)]" };
+      return { dot: "bg-fuchsia-400", glow: "shadow-[0_0_12px_rgba(232,121,249,0.4)]" };
+    case "loving":
+      return { dot: "bg-pink-400", glow: "shadow-[0_0_12px_rgba(244,114,182,0.45)]" };
+    case "sad":
+      return { dot: "bg-violet-500", glow: "shadow-[0_0_12px_rgba(139,92,246,0.45)]" };
+    case "angry":
+      return { dot: "bg-red-500", glow: "shadow-[0_0_14px_rgba(248,113,113,0.55)]" };
     case "frustrated":
       return { dot: "bg-rose-400", glow: "shadow-[0_0_12px_rgba(251,113,133,0.4)]" };
     case "anxious":
-      return { dot: "bg-amber-400", glow: "shadow-[0_0_12px_rgba(251,191,36,0.35)]" };
+      return { dot: "bg-purple-400", glow: "shadow-[0_0_12px_rgba(192,132,252,0.4)]" };
     case "guilty":
       return { dot: "bg-orange-400", glow: "shadow-[0_0_12px_rgba(251,146,60,0.35)]" };
     default:
@@ -42,13 +48,28 @@ function moodChrome(label: string): { bg: string; border: string } {
       };
     case "curious":
       return {
-        bg: "from-sky-500/22 via-sky-400/10 to-white/[0.06] dark:from-sky-500/25 dark:via-sky-400/12 dark:to-white/[0.04]",
-        border: "border-sky-400/30 dark:border-sky-400/22"
+        bg: "from-amber-400/24 via-yellow-300/12 to-white/[0.06] dark:from-amber-500/22 dark:via-yellow-400/10 dark:to-white/[0.04]",
+        border: "border-amber-300/35 dark:border-amber-400/25"
       };
     case "empathetic":
       return {
-        bg: "from-violet-500/22 via-violet-400/10 to-white/[0.06] dark:from-violet-500/25 dark:via-violet-400/12 dark:to-white/[0.04]",
-        border: "border-violet-400/30 dark:border-violet-400/22"
+        bg: "from-fuchsia-500/22 via-pink-400/10 to-white/[0.06] dark:from-fuchsia-500/25 dark:via-pink-400/12 dark:to-white/[0.04]",
+        border: "border-fuchsia-400/30 dark:border-fuchsia-400/22"
+      };
+    case "loving":
+      return {
+        bg: "from-pink-500/24 via-rose-300/12 to-white/[0.06] dark:from-pink-500/26 dark:via-rose-400/12 dark:to-white/[0.04]",
+        border: "border-pink-400/35 dark:border-pink-400/24"
+      };
+    case "sad":
+      return {
+        bg: "from-violet-600/24 via-purple-500/12 to-white/[0.06] dark:from-violet-600/26 dark:via-purple-500/12 dark:to-white/[0.04]",
+        border: "border-violet-500/30 dark:border-violet-400/22"
+      };
+    case "angry":
+      return {
+        bg: "from-red-600/26 via-rose-500/14 to-white/[0.06] dark:from-red-600/28 dark:via-rose-500/14 dark:to-white/[0.04]",
+        border: "border-red-500/35 dark:border-red-400/28"
       };
     case "frustrated":
       return {
@@ -57,8 +78,8 @@ function moodChrome(label: string): { bg: string; border: string } {
       };
     case "anxious":
       return {
-        bg: "from-amber-500/22 via-amber-400/10 to-white/[0.06] dark:from-amber-500/25 dark:via-amber-400/12 dark:to-white/[0.04]",
-        border: "border-amber-400/30 dark:border-amber-400/22"
+        bg: "from-purple-500/22 via-violet-400/10 to-white/[0.06] dark:from-purple-500/25 dark:via-violet-400/12 dark:to-white/[0.04]",
+        border: "border-purple-400/30 dark:border-purple-400/22"
       };
     case "guilty":
       return {
@@ -67,8 +88,8 @@ function moodChrome(label: string): { bg: string; border: string } {
       };
     default:
       return {
-        bg: "from-slate-400/14 via-slate-400/6 to-white/[0.06] dark:from-slate-500/18 dark:via-slate-500/8 dark:to-white/[0.03]",
-        border: "border-slate-300/30 dark:border-white/[0.1]"
+        bg: "from-sky-400/16 via-slate-400/6 to-white/[0.06] dark:from-sky-500/18 dark:via-slate-500/8 dark:to-white/[0.03]",
+        border: "border-sky-300/28 dark:border-white/[0.1]"
       };
   }
 }

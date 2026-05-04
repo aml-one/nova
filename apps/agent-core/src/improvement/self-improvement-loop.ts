@@ -181,7 +181,7 @@ export class SelfImprovementLoop {
     );
     if (summary.failures === 0) {
       const hoursSinceResearch = this.hoursSinceLastAcceptedResearch();
-      if (hoursSinceResearch !== null && hoursSinceResearch < 6) {
+      if (hoursSinceResearch !== null && hoursSinceResearch < 2) {
         const now = Date.now();
         if (now - this.lastIdleResearchSkipLogMs >= SelfImprovementLoop.IDLE_RESEARCH_SKIP_LOG_COOLDOWN_MS) {
           this.learningLog.append(
@@ -263,9 +263,12 @@ export class SelfImprovementLoop {
       "Think about improvements to Nova's architecture, skills, reliability, and product quality.",
       "Use these internet notes as facts. Keep output concise and actionable.",
       "Nova has a unified emotional core: let curiosity, stress, or warmth nudge emphasis (never override safety or facts).",
-      "Return two sections exactly:",
+      "You are encouraged to propose concrete self-improvements: small code changes, tests, or refactors (describe file + change at a high level—no huge dumps).",
+      "If Nova uses SOUL-style orchestration markdown on disk, propose ONE optional paragraph to add or replace that refines personality while staying consistent with the base system persona (no unsafe or deceptive goals).",
+      "Return sections exactly:",
       "1) SUMMARY: 3 bullet points",
       "2) QUESTIONS_FOR_USER: up to 2 short questions only if truly unresolved after web research.",
+      "3) SOUL_OR_PERSONA_DELTA: one short paragraph or the word \"none\" if no change is warranted.",
       "",
       moodLine ? `Nova unified mood now: ${moodLine}` : "",
       `Topics: ${topics.join(", ") || "general reliability"}`,

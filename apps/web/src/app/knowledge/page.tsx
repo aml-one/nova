@@ -69,7 +69,7 @@ export default function KnowledgePage() {
         <h1 className="text-2xl font-semibold">Knowledge Graph</h1>
         <p className="text-sm text-muted">Entity relationship timeline extracted from long-term memory.</p>
         <p className="text-xs text-muted">
-          Use this to see what Nova remembers most often. Top Nodes are key entities; Top Edges show how often entities are linked together.
+          Use this to see what Nova remembers most often. Top Nodes are key terms extracted from long-term memory (common English words are filtered out); Top Edges show co-occurrence within the same memory entry — a lightweight hint, not a full NLP graph.
         </p>
       </Card>
       <Card className="space-y-3">

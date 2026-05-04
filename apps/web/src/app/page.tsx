@@ -26,7 +26,7 @@ import { Select } from "../components/ui/select";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { cn } from "../lib/cn";
-import { dispatchNovaEmotionRefresh } from "../lib/emotion-user";
+import { dispatchNovaEmotionRefresh, NOVA_EMOTION_REFRESH_EVENT, WEB_CHAT_EMOTION_USER_ID } from "../lib/emotion-user";
 import { ChatMarkdown } from "../components/chat-markdown";
 import { triggerBlobDownload } from "../lib/audio-download";
 import { loadAudioElementThenPlay } from "../lib/audio-play";
@@ -167,6 +167,40 @@ function lerpHexColor(a: string, b: string, t: number): string {
   const g = Math.round(ag + (bg - ag) * u);
   const bch = Math.round(ab + (bb - ab) * u);
   return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${bch.toString(16).padStart(2, "0")}`;
+}
+
+/** TTS orb accent follows Nova unified emotion (not raw audio crest). */
+function orbMoodPaletteForEmotionLabel(label: string): {
+  a: string;
+  b: string;
+  shell: string;
+  glow: string;
+} {
+  const L = label.trim().toLowerCase();
+  switch (L) {
+    case "angry":
+      return { a: "#ff3355", b: "#ffc0c8", shell: "#cc2233", glow: "#ff4455" };
+    case "frustrated":
+      return { a: "#6d28d9", b: "#ddd6fe", shell: "#5b21b6", glow: "#a78bfa" };
+    case "sad":
+    case "anxious":
+    case "guilty":
+      return { a: "#7e22ce", b: "#e9d5ff", shell: "#581c87", glow: "#c084fc" };
+    case "loving":
+    case "empathetic":
+      return { a: "#ec4899", b: "#fce7f3", shell: "#be185d", glow: "#f472b6" };
+    case "joyful":
+      return { a: "#22c55e", b: "#bbf7d0", shell: "#166534", glow: "#4ade80" };
+    case "curious":
+      return { a: "#eab308", b: "#fef9c3", shell: "#a16207", glow: "#fde047" };
+    default:
+      return {
+        a: NOVA_ORB_MOOD_DEFAULT_A,
+        b: NOVA_ORB_MOOD_DEFAULT_B,
+        shell: NOVA_ORB_MOOD_DEFAULT_SHELL,
+        glow: NOVA_ORB_MOOD_DEFAULT_GLOW
+      };
+  }
 }
 
 function chatTtsCacheKey(turnId: string, cleaned: string): string {
@@ -620,6 +654,8 @@ export default function HomePage() {
   /** Outer wrapper scale: whisper 0.7, normal 1, loud up to ~1.5. */
   const novaOrbDisplayScaleRef = useRef(1);
   const novaOrbFreqBufRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  /** Latest unified emotion label (drives TTS orb palette). */
+  const chatTtsOrbEmotionLabelRef = useRef<string>("neutral");
   /** Agent `/v1/voice/stt-status`: whether server mic transcription is available. */
   const sttServerConfiguredRef = useRef<boolean | null>(null);
   const lastWebSpeechEndAtRef = useRef(0);
@@ -1067,6 +1103,29 @@ export default function HomePage() {
     readAloudRef.current = readAloudMessages;
   }, [readAloudMessages]);
 
+  useEffect(() => {
+    const pull = async (): Promise<void> => {
+      try {
+        const response = await fetch(`/api/emotion/state?userId=${encodeURIComponent(WEB_CHAT_EMOTION_USER_ID)}`, {
+          credentials: "include"
+        });
+        const data = (await response.json()) as { state?: { label?: string } | null };
+        const next = (data.state?.label ?? "neutral").trim().toLowerCase();
+        chatTtsOrbEmotionLabelRef.current = next.length ? next : "neutral";
+      } catch {
+        // Keep last label on transient failures.
+      }
+    };
+    void pull();
+    const onRefresh = (): void => {
+      void pull();
+    };
+    window.addEventListener(NOVA_EMOTION_REFRESH_EVENT, onRefresh);
+    return () => {
+      window.removeEventListener(NOVA_EMOTION_REFRESH_EVENT, onRefresh);
+    };
+  }, []);
+
   const detachTtsOrbAnalyser = useCallback(() => {
     ttsOrbDirectionActiveRef.current = false;
     if (ttsOrbDirectionTimerRef.current != null) {
@@ -1230,6 +1289,7 @@ export default function HomePage() {
       novaOrbDisplayScaleRef.current = 1;
 
       const tick = () => {
+        try {
         const analyser = chatTtsAnalyserRef.current;
         const m = novaTtsOrbMeterRef.current;
         const ctxLive = chatTtsAudioContextRef.current;
@@ -1325,31 +1385,25 @@ export default function HomePage() {
         m.style.transformOrigin = "center center";
         m.style.transform = `scale(${ds})`;
 
-        const crest = peak / (rms + 1e-5);
-        let anger = Math.min(1, Math.max(0, (crest - 2.05) * 0.4)) * Math.min(1, combined * 3.6);
-        const calmEnergy = Math.min(1, combined * 2.15);
-        let colorA = NOVA_ORB_MOOD_DEFAULT_A;
-        let colorB = NOVA_ORB_MOOD_DEFAULT_B;
-        let shell = NOVA_ORB_MOOD_DEFAULT_SHELL;
-        let glow = NOVA_ORB_MOOD_DEFAULT_GLOW;
-        if (anger > 0.1) {
-          const t = Math.min(1, anger);
-          colorA = lerpHexColor(colorA, "#ff3355", t * 0.92);
-          colorB = lerpHexColor(colorB, "#ffb3c1", t * 0.86);
-          shell = lerpHexColor(shell, "#ff5555", t * 0.78);
-          glow = lerpHexColor(glow, "#ff2233", t * 0.9);
-        } else {
-          const play = calmEnergy * (1 - anger * 0.55);
-          colorA = lerpHexColor(colorA, "#fde047", play * 0.3);
-          colorA = lerpHexColor(colorA, "#86efac", play * 0.2);
-          colorB = lerpHexColor(colorB, "#f9a8d4", play * 0.34);
-          colorB = lerpHexColor(colorB, "#fef08a", play * 0.14);
-          shell = lerpHexColor(shell, "#5eead4", play * 0.16);
-          glow = lerpHexColor(glow, "#f472b6", play * 0.22);
+        const basePal = orbMoodPaletteForEmotionLabel(chatTtsOrbEmotionLabelRef.current);
+        const gloss = Math.min(0.14, combined * 0.11);
+        const colorA = lerpHexColor(basePal.a, "#ffffff", gloss);
+        const colorB = lerpHexColor(basePal.b, "#ffffff", gloss * 0.85);
+        const shell = lerpHexColor(basePal.shell, "#ffffff", gloss * 0.55);
+        const glow = lerpHexColor(basePal.glow, "#ffffff", gloss * 0.6);
+        try {
+          novaThreeSpeakingOrbRef.current?.setMoodPalette(colorA, colorB, shell, glow);
+        } catch {
+          // Orb can be mid-dispose; ignore palette errors.
         }
-        novaThreeSpeakingOrbRef.current?.setMoodPalette(colorA, colorB, shell, glow);
 
         chatTtsOrbRafRef.current = requestAnimationFrame(tick);
+        } catch {
+          // Keep RAF alive so a transient analyser/DOM glitch does not kill the driver.
+          if (!el.paused && !el.ended) {
+            chatTtsOrbRafRef.current = requestAnimationFrame(tick);
+          }
+        }
       };
 
       try {
@@ -1404,6 +1458,9 @@ export default function HomePage() {
   );
 
   const stopChatTtsPlayback = useCallback((opts?: { naturalTtsEnd?: boolean }) => {
+    if (!opts?.naturalTtsEnd) {
+      preferServerSttAfterTtsRef.current = false;
+    }
     detachTtsOrbAnalyser();
     orbVoiceAttachAttemptRef.current = 0;
     chatTtsFetchAbortRef.current?.abort();
@@ -1857,6 +1914,7 @@ export default function HomePage() {
   async function transcribeBlobToMessage(blob: Blob): Promise<void> {
     setSttError(null);
     setSttTranscribing(true);
+    sttTranscribingRef.current = true;
     try {
       const form = new FormData();
       form.append("audio", blob, `nova-mic-${Date.now()}.webm`);
@@ -1883,6 +1941,7 @@ export default function HomePage() {
       setSttError("Could not transcribe audio.");
     } finally {
       setSttTranscribing(false);
+      sttTranscribingRef.current = false;
     }
   }
 
@@ -1908,6 +1967,7 @@ export default function HomePage() {
       recorder.stream.getTracks().forEach((t) => t.stop());
       chatSttRecorderRef.current = null;
       setSttRecording(false);
+      sttRecordingRef.current = false;
       if (blob.size >= NOVA_CHAT_STT_MIN_AUDIO_BYTES) {
         void transcribeBlobToMessage(blob);
       }
@@ -1915,6 +1975,7 @@ export default function HomePage() {
     recorder.start();
     armChatMicSilenceMonitor(stream, recorder);
     setSttRecording(true);
+    sttRecordingRef.current = true;
   }
 
   async function startMicTranscription(): Promise<void> {
@@ -1998,6 +2059,7 @@ export default function HomePage() {
             }
             disarmWebSpeechEnergyGate();
             setSttRecording(false);
+            sttRecordingRef.current = false;
             if (event.error === "not-allowed") {
               setSttError("Microphone permission denied. Allow mic access for this site.");
               return;
@@ -2035,6 +2097,7 @@ export default function HomePage() {
             disarmWebSpeechEnergyGate();
             if (!chatSttRecorderRef.current) {
               setSttRecording(false);
+              sttRecordingRef.current = false;
             }
           };
           chatSttWebRecognitionRef.current = rec;
@@ -2056,6 +2119,7 @@ export default function HomePage() {
             }
           }
           setSttRecording(true);
+          sttRecordingRef.current = true;
           return;
         } catch {
           try {
@@ -2087,6 +2151,7 @@ export default function HomePage() {
         web.stop();
       } catch {
         setSttRecording(false);
+        sttRecordingRef.current = false;
       }
       return;
     }
@@ -2097,6 +2162,7 @@ export default function HomePage() {
       if (recorder.state !== "inactive") recorder.stop();
     } catch {
       setSttRecording(false);
+      sttRecordingRef.current = false;
     }
   }
 
@@ -2108,8 +2174,10 @@ export default function HomePage() {
     }
     const viaVoiceAutoSend = voiceDictationAutoSubmitRef.current;
     voiceDictationAutoSubmitRef.current = false;
-    const viaActiveMic = sttRecordingRef.current || sttTranscribingRef.current;
-    replyChainsVoiceListeningRef.current = viaVoiceAutoSend || viaActiveMic;
+    sttRecordingRef.current = sttRecording;
+    sttTranscribingRef.current = sttTranscribing;
+    const viaActiveMic = sttRecording || sttTranscribing;
+    replyChainsVoiceListeningRef.current = Boolean(viaVoiceAutoSend || viaActiveMic);
     stopMicTranscription();
     const trimmed = message.trim();
     if (!trimmed || loading) return;
@@ -3161,7 +3229,7 @@ export default function HomePage() {
         >
           <div
             ref={novaTtsOrbMeterRef}
-            className="h-[538px] w-[538px] shrink-0 origin-center drop-shadow-[0_0_36px_rgba(56,189,248,0.3)]"
+            className="h-[377px] w-[377px] shrink-0 origin-center drop-shadow-[0_0_36px_rgba(56,189,248,0.3)]"
           >
             <NovaThreeSpeakingOrb ref={novaThreeSpeakingOrbRef} className="h-full w-full" preset="speaking" baseColor="#5ec8ff" />
           </div>

@@ -63,7 +63,8 @@ export class LearningDaemon {
       this.recordIdleReason("Recent user activity");
       return;
     }
-    if (now - this.lastCycleAt < idleMs) {
+    const minGapBetweenCyclesMs = Math.min(120_000, Math.max(45_000, Math.floor(idleMs / 4)));
+    if (now - this.lastCycleAt < minGapBetweenCyclesMs) {
       this.recordIdleReason("Waiting cooldown");
       return;
     }
