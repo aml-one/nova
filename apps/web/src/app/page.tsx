@@ -139,6 +139,9 @@ const NOVA_CHAT_STT_MIN_AUDIO_BYTES = 900;
 const NOVA_CHAT_MIC_SILENCE_RMS_THRESHOLD = 0.012;
 /** Avoid cutting off the very start of an utterance before auto-stop can fire. */
 const NOVA_CHAT_MIC_SILENCE_MIN_RECORD_MS = 520;
+/** Web Speech anti-hallucination: only accept text near detected speech energy. */
+const NOVA_CHAT_WEB_SPEECH_ENERGY_RMS_THRESHOLD = 0.018;
+const NOVA_CHAT_WEB_SPEECH_ENERGY_WINDOW_MS = 2200;
 const NOVA_CHAT_STT_SERVER_HINT =
   "Server speech-to-text is not configured on the agent (set OPENAI_API_KEY or NOVA_STT_COMMAND). Use Chrome or Edge for in-browser dictation, or configure the agent.";
 
@@ -597,6 +600,10 @@ export default function HomePage() {
   const chatSttChunksRef = useRef<BlobPart[]>([]);
   const chatMicSilenceRafRef = useRef<number | null>(null);
   const chatMicSilenceCtxRef = useRef<AudioContext | null>(null);
+  const chatWebSpeechEnergyRafRef = useRef<number | null>(null);
+  const chatWebSpeechEnergyCtxRef = useRef<AudioContext | null>(null);
+  const chatWebSpeechEnergyStreamRef = useRef<MediaStream | null>(null);
+  const chatWebSpeechLastVoiceAtRef = useRef(0);
   const sttWebAcceptedChunksRef = useRef<string[]>([]);
   const ttsOrbDirectionTimerRef = useRef<number | null>(null);
   const ttsOrbDirectionActiveRef = useRef(false);
@@ -1074,6 +1081,61 @@ export default function HomePage() {
   const teardownChatTtsWebAudioRef = useRef(teardownChatTtsWebAudio);
   teardownChatTtsWebAudioRef.current = teardownChatTtsWebAudio;
 
+  const disarmWebSpeechEnergyGate = useCallback(() => {
+    if (chatWebSpeechEnergyRafRef.current != null) {
+      cancelAnimationFrame(chatWebSpeechEnergyRafRef.current);
+      chatWebSpeechEnergyRafRef.current = null;
+    }
+    const stream = chatWebSpeechEnergyStreamRef.current;
+    chatWebSpeechEnergyStreamRef.current = null;
+    if (stream) {
+      try {
+        stream.getTracks().forEach((t) => t.stop());
+      } catch {
+        // Ignore stream stop failures.
+      }
+    }
+    const ctx = chatWebSpeechEnergyCtxRef.current;
+    chatWebSpeechEnergyCtxRef.current = null;
+    if (ctx) {
+      void ctx.close().catch(() => {
+        // Ignore close failures.
+      });
+    }
+    chatWebSpeechLastVoiceAtRef.current = 0;
+  }, []);
+
+  const armWebSpeechEnergyGate = useCallback(async () => {
+    disarmWebSpeechEnergyGate();
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    chatWebSpeechEnergyStreamRef.current = stream;
+    const win = typeof window !== "undefined" ? window : undefined;
+    const AudioCtor = win?.AudioContext ?? (win as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioCtor) return;
+    const ctx = new AudioCtor();
+    chatWebSpeechEnergyCtxRef.current = ctx;
+    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    analyser.smoothingTimeConstant = 0.22;
+    source.connect(analyser);
+    const buf = new Float32Array(analyser.fftSize);
+    const tick = (): void => {
+      analyser.getFloatTimeDomainData(buf);
+      let sumSq = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const v = buf[i] ?? 0;
+        sumSq += v * v;
+      }
+      const rms = Math.sqrt(sumSq / Math.max(1, buf.length));
+      if (rms > NOVA_CHAT_WEB_SPEECH_ENERGY_RMS_THRESHOLD) {
+        chatWebSpeechLastVoiceAtRef.current = performance.now();
+      }
+      chatWebSpeechEnergyRafRef.current = requestAnimationFrame(tick);
+    };
+    chatWebSpeechEnergyRafRef.current = requestAnimationFrame(tick);
+  }, [disarmWebSpeechEnergyGate]);
+
   const refreshSttServerConfigured = useCallback(async (force = false): Promise<boolean> => {
     if (!force && sttServerConfiguredRef.current !== null) {
       return sttServerConfiguredRef.current;
@@ -1414,6 +1476,7 @@ export default function HomePage() {
         cancelAnimationFrame(chatMicSilenceRafRef.current);
         chatMicSilenceRafRef.current = null;
       }
+      disarmWebSpeechEnergyGate();
       void chatMicSilenceCtxRef.current?.close().catch(() => {
         // Ignore close failures.
       });
@@ -1430,7 +1493,7 @@ export default function HomePage() {
       }
       chatSttWebRecognitionRef.current = null;
     },
-    []
+    [disarmWebSpeechEnergyGate]
   );
 
   useEffect(() => {
@@ -1791,6 +1854,7 @@ export default function HomePage() {
           rec.continuous = true;
           rec.interimResults = false;
           rec.lang = navigator.language || "en-US";
+          await armWebSpeechEnergyGate();
           rec.onresult = (event: SpeechRecognitionEvent) => {
             let changed = false;
             for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -1804,6 +1868,8 @@ export default function HomePage() {
               if (Number.isFinite(confidence) && confidence < 0.5) continue;
               if (spoken.length < 3) continue;
               if (looksLikeNoiseHallucination(spoken)) continue;
+              const msSinceVoice = performance.now() - chatWebSpeechLastVoiceAtRef.current;
+              if (msSinceVoice > NOVA_CHAT_WEB_SPEECH_ENERGY_WINDOW_MS) continue;
               sttWebAcceptedChunksRef.current.push(spoken);
               changed = true;
             }
@@ -1818,6 +1884,7 @@ export default function HomePage() {
             if (chatSttWebRecognitionRef.current === rec) {
               chatSttWebRecognitionRef.current = null;
             }
+            disarmWebSpeechEnergyGate();
             setSttRecording(false);
             if (event.error === "not-allowed") {
               setSttError("Microphone permission denied. Allow mic access for this site.");
@@ -1853,6 +1920,7 @@ export default function HomePage() {
             if (chatSttWebRecognitionRef.current === rec) {
               chatSttWebRecognitionRef.current = null;
             }
+            disarmWebSpeechEnergyGate();
             if (!chatSttRecorderRef.current) {
               setSttRecording(false);
             }
@@ -1883,6 +1951,7 @@ export default function HomePage() {
           } catch {
             /* ignore */
           }
+          disarmWebSpeechEnergyGate();
           chatSttWebRecognitionRef.current = null;
         }
       }
@@ -1901,6 +1970,7 @@ export default function HomePage() {
   function stopMicTranscription(): void {
     const web = chatSttWebRecognitionRef.current;
     if (web) {
+      disarmWebSpeechEnergyGate();
       try {
         web.stop();
       } catch {
