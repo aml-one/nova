@@ -4,7 +4,6 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { FaChevronDown, FaCopy, FaPenToSquare, FaRotateRight } from "react-icons/fa6";
-import QRCode from "qrcode";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -498,6 +497,7 @@ export default function SettingsPage() {
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
   const lastSavedVoiceSilenceSecRef = useRef<number>(DEFAULT_SETTINGS.web.voiceDictationSilenceSec);
+  const whatsAppQrBlobUrlRef = useRef<string | null>(null);
   const [chatStyleSaveState, setChatStyleSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [voiceSilenceSaveState, setVoiceSilenceSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [sentiCoreModalOpen, setSentiCoreModalOpen] = useState(false);
@@ -1208,20 +1208,48 @@ export default function SettingsPage() {
   useEffect(() => {
     const raw = whatsAppWebStatus?.qr?.trim();
     if (!raw) {
+      if (whatsAppQrBlobUrlRef.current) {
+        URL.revokeObjectURL(whatsAppQrBlobUrlRef.current);
+        whatsAppQrBlobUrlRef.current = null;
+      }
       setWhatsAppQrDataUrl(null);
       return;
     }
+    const ac = new AbortController();
     let cancelled = false;
-    void QRCode.toDataURL(raw, { margin: 2, width: 300, errorCorrectionLevel: "M" }).then(
-      (url) => {
-        if (!cancelled) setWhatsAppQrDataUrl(url);
-      },
-      () => {
+    void (async () => {
+      try {
+        const res = await apiFetch("/api/setup/channels/whatsapp-pairing-qr", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ raw }),
+          signal: ac.signal
+        });
+        if (!res.ok || cancelled) return;
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        if (cancelled) {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        if (whatsAppQrBlobUrlRef.current) {
+          URL.revokeObjectURL(whatsAppQrBlobUrlRef.current);
+        }
+        whatsAppQrBlobUrlRef.current = url;
+        setWhatsAppQrDataUrl(url);
+      } catch (e) {
+        if (cancelled || (e instanceof DOMException && e.name === "AbortError")) return;
         if (!cancelled) setWhatsAppQrDataUrl(null);
       }
-    );
+    })();
     return () => {
       cancelled = true;
+      ac.abort();
+      if (whatsAppQrBlobUrlRef.current) {
+        URL.revokeObjectURL(whatsAppQrBlobUrlRef.current);
+        whatsAppQrBlobUrlRef.current = null;
+      }
+      setWhatsAppQrDataUrl(null);
     };
   }, [whatsAppWebStatus?.qr]);
 
