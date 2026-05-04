@@ -689,7 +689,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/register") {
         const payload = (await readJson(request)) as { signalApiUrl?: string; signalAccountNumber?: string };
-        const signalApiUrl = payload.signalApiUrl?.trim() || "http://127.0.0.1:8085";
+        const signalApiUrl = normalizeSignalRestBase(
+          payload.signalApiUrl?.trim() || process.env.SIGNAL_API_URL?.trim() || "http://127.0.0.1:8085"
+        );
         const signalAccountNumber = normalizeSignalAccountNumber(
           payload.signalAccountNumber?.trim() || process.env.SIGNAL_ACCOUNT_NUMBER?.trim() || ""
         );
@@ -701,7 +703,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/verify") {
         const payload = (await readJson(request)) as { signalApiUrl?: string; signalAccountNumber?: string; code?: string };
-        const signalApiUrl = payload.signalApiUrl?.trim() || "http://127.0.0.1:8085";
+        const signalApiUrl = normalizeSignalRestBase(
+          payload.signalApiUrl?.trim() || process.env.SIGNAL_API_URL?.trim() || "http://127.0.0.1:8085"
+        );
         const signalAccountNumber = normalizeSignalAccountNumber(
           payload.signalAccountNumber?.trim() || process.env.SIGNAL_ACCOUNT_NUMBER?.trim() || ""
         );
@@ -2829,7 +2833,11 @@ async function checkSignalConnection(): Promise<{ ok: boolean; detail: string }>
 }
 
 async function checkSignalConnectionForBase(baseUrl: string): Promise<{ ok: boolean; detail: string }> {
-  const trimmed = baseUrl.trim().replace(/\/$/, "");
+  const raw = baseUrl.trim();
+  if (!raw) {
+    return { ok: false, detail: "SIGNAL_API_URL missing" };
+  }
+  const trimmed = normalizeSignalRestBase(raw);
   const candidates = [
     `${trimmed}/v1/about`,
     `${trimmed}/about`,
@@ -2899,15 +2907,12 @@ async function startSignalRegistration(
   signalApiUrl: string,
   signalAccountNumber: string
 ): Promise<{ ok: boolean; detail: string; endpointTried?: string }> {
-  const base = signalApiUrl.trim().replace(/\/$/, "");
-  const encoded = encodeURIComponent(signalAccountNumber);
-  const candidates = [
-    `${base}/v1/register/${encoded}`,
-    `${base}/register/${encoded}`,
-    `${base}/v1/accounts/${encoded}/register`
-  ];
+  /** Stock bbernhard/signal-cli-rest-api only exposes POST /v1/register/{number} (see src/main.go). */
+  const candidates = signalRegisterPostCandidates(signalApiUrl, signalAccountNumber);
   let last = "registration request failed";
+  let lastTried = candidates[candidates.length - 1] ?? "";
   for (const endpoint of candidates) {
+    lastTried = endpoint;
     const attempt = await postSignalCliJson(endpoint);
     if (attempt.ok) {
       return {
@@ -2918,7 +2923,7 @@ async function startSignalRegistration(
     }
     last = attempt.detail;
   }
-  return { ok: false, detail: `Could not start registration: ${last}`, endpointTried: candidates[candidates.length - 1] };
+  return { ok: false, detail: `Could not start registration: ${last}`, endpointTried: lastTried };
 }
 
 async function verifySignalRegistration(
@@ -2926,23 +2931,18 @@ async function verifySignalRegistration(
   signalAccountNumber: string,
   code: string
 ): Promise<{ ok: boolean; detail: string; endpointTried?: string }> {
-  const base = signalApiUrl.trim().replace(/\/$/, "");
-  const encoded = encodeURIComponent(signalAccountNumber);
-  const safeCode = encodeURIComponent(code);
-  const candidates = [
-    `${base}/v1/register/${encoded}/verify/${safeCode}`,
-    `${base}/register/${encoded}/verify/${safeCode}`,
-    `${base}/v1/accounts/${encoded}/verify/${safeCode}`
-  ];
+  const candidates = signalVerifyPostCandidates(signalApiUrl, signalAccountNumber, code);
   let last = "verification request failed";
+  let lastTried = candidates[candidates.length - 1] ?? "";
   for (const endpoint of candidates) {
+    lastTried = endpoint;
     const attempt = await postSignalCliJson(endpoint);
     if (attempt.ok) {
       return { ok: true, detail: "Signal number verified and linked.", endpointTried: endpoint };
     }
     last = attempt.detail;
   }
-  return { ok: false, detail: `Could not verify Signal code: ${last}`, endpointTried: candidates[candidates.length - 1] };
+  return { ok: false, detail: `Could not verify Signal code: ${last}`, endpointTried: lastTried };
 }
 
 async function pingUrl(url: string, headers?: HeadersInit): Promise<{ ok: boolean; detail: string }> {
@@ -2966,6 +2966,52 @@ async function pingUrl(url: string, headers?: HeadersInit): Promise<{ ok: boolea
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Base URL for bbernhard/signal-cli-rest-api (origin + optional reverse-proxy path prefix).
+ * If the user pasted a health/about URL, strip that suffix so /v1/register/... resolves correctly.
+ */
+function normalizeSignalRestBase(raw: string): string {
+  const trimmed = raw.trim().replace(/\/$/, "");
+  if (!trimmed) {
+    return "http://127.0.0.1:8085";
+  }
+  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  try {
+    const u = new URL(withScheme);
+    let path = u.pathname.replace(/\/+$/, "");
+    const suffixes = ["/v1/about", "/about", "/v1/health", "/health"];
+    for (const suf of suffixes) {
+      if (path.endsWith(suf)) {
+        path = path.slice(0, -suf.length).replace(/\/+$/, "");
+        break;
+      }
+    }
+    const origin = `${u.protocol}//${u.host}`;
+    if (!path) {
+      return origin;
+    }
+    return `${origin}${path}`;
+  } catch {
+    return trimmed.replace(/\/$/, "");
+  }
+}
+
+function signalRegisterPostCandidates(baseRaw: string, e164Number: string): string[] {
+  const base = normalizeSignalRestBase(baseRaw);
+  const enc = encodeURIComponent(e164Number);
+  return [`${base}/v1/register/${e164Number}`, `${base}/v1/register/${enc}`];
+}
+
+function signalVerifyPostCandidates(baseRaw: string, e164Number: string, verificationCode: string): string[] {
+  const base = normalizeSignalRestBase(baseRaw);
+  const encPhone = encodeURIComponent(e164Number);
+  const encCode = encodeURIComponent(verificationCode);
+  return [
+    `${base}/v1/register/${e164Number}/verify/${verificationCode}`,
+    `${base}/v1/register/${encPhone}/verify/${encCode}`
+  ];
 }
 
 /**
