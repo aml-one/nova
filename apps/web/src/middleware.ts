@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { fetchAgentAuthState } from "./lib/auth-login-policy";
 
 function forwardCookieHeader(request: NextRequest): HeadersInit {
   const cookie = request.headers.get("cookie");
@@ -30,18 +31,8 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/emotion") ||
     pathname.startsWith("/security") ||
     pathname.startsWith("/services");
-  let loginEnabled = true;
-  try {
-    const response = await fetch(new URL("/api/auth/state", request.url), {
-      headers: forwardCookieHeader(request)
-    });
-    if (response.ok) {
-      const payload = (await response.json()) as { loginEnabled?: boolean };
-      loginEnabled = payload.loginEnabled !== false;
-    }
-  } catch {
-    loginEnabled = true;
-  }
+  const authState = await fetchAgentAuthState(request);
+  const loginEnabled = authState?.loginEnabled ?? true;
 
   if (!loginEnabled && pathname === "/") {
     return NextResponse.redirect(new URL("/dashboard", request.url));

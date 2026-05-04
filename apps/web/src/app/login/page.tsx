@@ -10,11 +10,19 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [agentUnreachable, setAgentUnreachable] = useState(false);
 
   useEffect(() => {
     void (async () => {
       const stateResponse = await fetch("/api/auth/state");
-      const stateData = (await stateResponse.json()) as { needsSetup?: boolean; loginEnabled?: boolean };
+      const stateData = (await stateResponse.json()) as {
+        needsSetup?: boolean;
+        loginEnabled?: boolean;
+        agentUnreachable?: boolean;
+      };
+      if (stateData.agentUnreachable) {
+        setAgentUnreachable(true);
+      }
       if (stateData.loginEnabled === false) {
         router.push("/dashboard");
         return;
@@ -60,6 +68,13 @@ export default function LoginPage() {
       <h1>Nova Access</h1>
       <p style={{ marginTop: -6, color: "#666" }}>Nova by AmL</p>
       <p>{mode === "setup" ? "Create admin credentials" : "Sign in with your admin credentials"}</p>
+      {agentUnreachable ? (
+        <p style={{ marginTop: 10, color: "#856404", fontSize: 13, background: "#fff3cd", padding: "8px 10px", borderRadius: 6 }}>
+          Nova could not read auth settings from the agent (check <code>NOVA_AGENT_API_URL</code> and that agent-core is running).
+          Login is required until the agent responds. To temporarily open the UI, set{" "}
+          <code>NOVA_WEB_LOGIN_ENABLED=false</code> on the web server (homelab only).
+        </p>
+      ) : null}
       <form onSubmit={onSubmit} style={{ display: "grid", gap: 10, marginTop: 16 }}>
         <input
           type="email"
