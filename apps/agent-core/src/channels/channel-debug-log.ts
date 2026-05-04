@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-export type ChannelDebugTransport = "webhook" | "baileys" | "dispatcher" | "next_proxy";
+export type ChannelDebugTransport = "webhook" | "baileys" | "dispatcher" | "next_proxy" | "receive_ws";
 
 export type ChannelDebugEntry = {
   id: string;

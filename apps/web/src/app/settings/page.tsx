@@ -52,7 +52,7 @@ type ChannelDebugEntry = {
   at: string;
   channel: "signal" | "whatsapp";
   direction: "in" | "out";
-  transport?: "webhook" | "baileys" | "dispatcher" | "next_proxy";
+  transport?: "webhook" | "baileys" | "dispatcher" | "next_proxy" | "receive_ws";
   correlationId: string;
   peer: string;
   textPreview: string;
@@ -197,6 +197,8 @@ type SignalBootstrapResult = {
   bridge?: SetupCheckResult;
   detail?: string;
   executedCommand?: string;
+  receiveWebhookUrl?: string;
+  dockerSnippet?: string;
   nextStep?: string;
   suggestedEnv?: string;
   error?: string;
@@ -910,10 +912,11 @@ export default function SettingsPage() {
     setStatus(null);
     const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
     const signalAccountNumber = values.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "";
+    const webhookPublicOrigin = typeof window !== "undefined" ? window.location.origin : "";
     const response = await apiFetch("/api/setup/channels/signal/bootstrap", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ signalAccountNumber })
+      body: JSON.stringify({ signalAccountNumber, webhookPublicOrigin })
     });
     const data = (await response.json()) as SignalBootstrapResult;
     if (!response.ok) {
@@ -928,7 +931,9 @@ export default function SettingsPage() {
       signalApiUrl: "http://127.0.0.1:8085",
       signalAccountNumber
     });
-    setStatus("Signal bridge bootstrap completed. Finish one-time registration/link, then run Validate.");
+    const hook = data.receiveWebhookUrl ? ` Webhook: ${data.receiveWebhookUrl}` : "";
+    const snippet = data.dockerSnippet ? `\n\nIf Docker runs on another machine, run:\n${data.dockerSnippet}` : "";
+    setStatus(`Signal bridge bootstrap completed.${hook}${snippet}`.trim());
   }
 
   async function runSignalRegisterStart(): Promise<void> {
@@ -2698,9 +2703,14 @@ export default function SettingsPage() {
               </p>
               <p className="text-[11px] text-muted leading-snug">
                 <strong className="text-foreground">next_proxy</strong> rows = Next could not reach the agent or the agent returned an error body.{" "}
+                <strong className="text-foreground">receive_ws</strong> = inbound over the Signal REST WebSocket (works when webhooks cannot reach this agent).{" "}
                 <strong className="text-foreground">Docker</strong> = last lines from <code className="text-[10px]">nova-signal-bridge</code> on the <em>agent host</em> only (empty if Docker runs elsewhere, e.g. only on your Mac).
               </p>
               <div className="flex flex-wrap gap-3 text-[11px]">
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-3 w-3 shrink-0 rounded-sm border border-cyan-600/60 bg-cyan-600/35" aria-hidden />
+                  receive_ws
+                </span>
                 <span className="inline-flex items-center gap-1">
                   <span className="inline-block h-3 w-3 shrink-0 rounded-sm border border-violet-500/60 bg-violet-500/35" aria-hidden />
                   Next proxy
@@ -3590,6 +3600,9 @@ export default function SettingsPage() {
 function channelDebugRowAccent(entry: ChannelDebugEntry): string {
   if (entry.transport === "next_proxy") {
     return "border-l-[4px] border-violet-500 bg-violet-500/[0.08] dark:bg-violet-500/15";
+  }
+  if (entry.transport === "receive_ws") {
+    return "border-l-[4px] border-cyan-600 bg-cyan-600/[0.08] dark:bg-cyan-950/30";
   }
   if (entry.channel === "signal") {
     return entry.direction === "in"

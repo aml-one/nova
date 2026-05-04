@@ -16,6 +16,8 @@ import {
 import { getWhatsAppWebBridgeStatus, startWhatsAppWebBridge, stopWhatsAppWebBridge } from "../channels/whatsapp-web-bridge.js";
 import { mapInboundIdentity } from "../channels/identity-mapping.js";
 import { listChannelDebugEntries, previewChannelText, pushChannelDebug } from "../channels/channel-debug-log.js";
+import { dispatchSignalInboundMessages } from "../channels/signal-inbound-dispatch.js";
+import { startSignalReceiveWsPoller } from "../channels/signal-receive-ws-poller.js";
 import { ChannelRouter } from "../channels/channel-router.js";
 import {
   verifyInternalAuthHeader,
@@ -696,18 +698,30 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/bootstrap") {
-        const payload = (await readJson(request)) as { signalAccountNumber?: string };
+        const payload = (await readJson(request)) as { signalAccountNumber?: string; webhookPublicOrigin?: string };
         const number = payload.signalAccountNumber?.trim() || "";
-        const bootstrap = await ensureSignalDockerBridge();
+        const webhookOverride = buildReceiveWebhookUrlFromBootstrap(payload.webhookPublicOrigin);
+        const bootstrap = await ensureSignalDockerBridge(webhookOverride);
         const afterCheck = await checkSignalConnectionForBase("http://127.0.0.1:8085");
         const nextStep = number
           ? `Bridge is up. Next: register/link ${number} in signal-cli-rest-api (one-time human verification), then re-run Validate.`
           : "Bridge is up. Next: register/link your Signal number in signal-cli-rest-api (one-time human verification), then re-run Validate.";
+        const receiveUrl = bootstrap.receiveWebhookUrl ?? resolveSignalReceiveWebhookUrl();
+        const dockerSnippet = [
+          "docker rm -f nova-signal-bridge 2>/dev/null || true",
+          "docker run -d --restart unless-stopped --name nova-signal-bridge -p 8085:8080 \\",
+          "  -e MODE=json-rpc \\",
+          `  -e RECEIVE_WEBHOOK_URL=${receiveUrl} \\`,
+          "  -v nova-signal-cli-config:/home/.local/share/signal-cli \\",
+          "  bbernhard/signal-cli-rest-api:latest"
+        ].join("\n");
         return sendJson(response, 200, {
           ok: bootstrap.ok && afterCheck.ok,
           bridge: afterCheck,
           detail: bootstrap.detail,
           executedCommand: bootstrap.executedCommand,
+          receiveWebhookUrl: receiveUrl,
+          dockerSnippet,
           nextStep,
           suggestedEnv: [
             "SIGNAL_API_URL=http://127.0.0.1:8085",
@@ -1372,71 +1386,13 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
               "No message extracted from webhook payload — configure signal-cli-rest-api to POST inbound messages here, or verify payload shape."
           });
         }
-        for (const message of messages) {
-          const msgCorr = randomUUID();
-          const trace: string[] = ["webhook_received", "parsed_inbound"];
-          try {
-            const accessProfile = resolveChannelAccess("signal", message.phoneNumber, options.settings.get());
-            trace.push(accessProfile.allowed ? "access_allowed" : `access_denied(role=${accessProfile.role})`);
-            if (!accessProfile.allowed) {
-              pushChannelDebug({
-                channel: "signal",
-                direction: "in",
-                transport: "webhook",
-                correlationId: msgCorr,
-                peer: message.from,
-                textPreview: previewChannelText(message.text),
-                trace,
-                reachedNova: false,
-                error: "Blocked by channel access policy"
-              });
-              continue;
-            }
-            const reply = await options.orchestrator.handleChannelMessage({
-              channel: "signal",
-              phoneNumber: message.phoneNumber,
-              text: message.text,
-              correlationId: msgCorr,
-              accessProfile
-            });
-            trace.push("orchestrator_ok", "queued_outbound_reply");
-            pushChannelDebug({
-              channel: "signal",
-              direction: "in",
-              transport: "webhook",
-              correlationId: msgCorr,
-              peer: message.from,
-              textPreview: previewChannelText(message.text),
-              trace,
-              reachedNova: true
-            });
-            dispatcher.enqueue("signal", message.from, reply, msgCorr);
-            pushChannelDebug({
-              channel: "signal",
-              direction: "out",
-              transport: "webhook",
-              correlationId: msgCorr,
-              peer: message.from,
-              textPreview: previewChannelText(reply),
-              trace: ["reply_enqueued"]
-            });
-            replies.push({ to: message.from, reply, delivered: true });
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            trace.push("orchestrator_error");
-            pushChannelDebug({
-              channel: "signal",
-              direction: "in",
-              transport: "webhook",
-              correlationId: msgCorr,
-              peer: message.from,
-              textPreview: previewChannelText(message.text),
-              trace,
-              reachedNova: false,
-              error: msg
-            });
-          }
-        }
+        const dispatched = await dispatchSignalInboundMessages(messages, {
+          orchestrator: options.orchestrator,
+          settings: options.settings,
+          dispatcher,
+          transport: "webhook"
+        });
+        replies.push(...dispatched);
         return sendJson(response, 200, { handled: replies.length, replies, correlationId });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/history") {
@@ -2618,6 +2574,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       resolve();
     });
   });
+
+  startSignalReceiveWsPoller({
+    orchestrator: options.orchestrator,
+    settings: options.settings,
+    dispatcher,
+    router,
+    signal
+  });
 }
 
 async function readJson(request: IncomingMessage): Promise<unknown> {
@@ -3102,14 +3066,37 @@ async function checkSignalConnectionForBase(baseUrl: string): Promise<{ ok: bool
   return { ok: false, detail: "endpoint returned 404 (tried /v1/about, /about, and base URL)" };
 }
 
-async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string; executedCommand?: string }> {
-  const webhookUrl = resolveSignalReceiveWebhookUrl();
+function buildReceiveWebhookUrlFromBootstrap(webhookPublicOrigin?: string): string | undefined {
+  const o = typeof webhookPublicOrigin === "string" ? webhookPublicOrigin.trim() : "";
+  if (!o) {
+    return undefined;
+  }
+  try {
+    const withProto = /^https?:\/\//i.test(o) ? o : `https://${o}`;
+    const u = new URL(withProto);
+    if (!u.hostname) {
+      return undefined;
+    }
+    return `${u.origin}/api/webhooks/signal`;
+  } catch {
+    return undefined;
+  }
+}
+
+async function ensureSignalDockerBridge(webhookOverride?: string): Promise<{
+  ok: boolean;
+  detail: string;
+  executedCommand?: string;
+  receiveWebhookUrl: string;
+}> {
+  const webhookUrl = (webhookOverride?.trim() || resolveSignalReceiveWebhookUrl()).trim();
   try {
     await runLocalCommand("docker --version");
   } catch (err) {
     return {
       ok: false,
-      detail: `Docker is not available: ${err instanceof Error ? err.message : "unknown error"}`
+      detail: `Docker is not available: ${err instanceof Error ? err.message : "unknown error"}`,
+      receiveWebhookUrl: webhookUrl
     };
   }
 
@@ -3130,13 +3117,18 @@ async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string
         }
         const running = await runLocalCommand('docker ps --filter "name=^/nova-signal-bridge$" --format "{{.Names}}"');
         if ((running.stdout ?? "").trim().includes("nova-signal-bridge")) {
-          return { ok: true, detail: `Signal bridge container already running (webhook: ${webhookUrl}).` };
+          return {
+            ok: true,
+            detail: `Signal bridge container already running (webhook: ${webhookUrl}).`,
+            receiveWebhookUrl: webhookUrl
+          };
         }
         await runLocalCommand("docker start nova-signal-bridge");
         return {
           ok: true,
           detail: `Started existing Signal bridge container (webhook: ${webhookUrl}).`,
-          executedCommand: "docker start nova-signal-bridge"
+          executedCommand: "docker start nova-signal-bridge",
+          receiveWebhookUrl: webhookUrl
         };
       }
     }
@@ -3159,7 +3151,8 @@ async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string
     return {
       ok: true,
       detail: `Started Signal bridge container (webhook: ${webhookUrl}).`,
-      executedCommand: startCmd
+      executedCommand: startCmd,
+      receiveWebhookUrl: webhookUrl
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown error";
@@ -3171,15 +3164,21 @@ async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string
           // Ignore restart policy update failures.
         }
         await runLocalCommand("docker start nova-signal-bridge");
-        return { ok: true, detail: "Started existing Signal bridge container.", executedCommand: "docker start nova-signal-bridge" };
+        return {
+          ok: true,
+          detail: "Started existing Signal bridge container.",
+          executedCommand: "docker start nova-signal-bridge",
+          receiveWebhookUrl: webhookUrl
+        };
       } catch (startErr) {
         return {
           ok: false,
-          detail: `Container exists but could not be started: ${startErr instanceof Error ? startErr.message : "unknown error"}`
+          detail: `Container exists but could not be started: ${startErr instanceof Error ? startErr.message : "unknown error"}`,
+          receiveWebhookUrl: webhookUrl
         };
       }
     }
-    return { ok: false, detail: `Could not start Signal bridge: ${message}` };
+    return { ok: false, detail: `Could not start Signal bridge: ${message}`, receiveWebhookUrl: webhookUrl };
   }
 }
 
@@ -3187,6 +3186,15 @@ function resolveSignalReceiveWebhookUrl(): string {
   const explicit = process.env.SIGNAL_RECEIVE_WEBHOOK_URL?.trim();
   if (explicit) {
     return explicit;
+  }
+  for (const key of ["NOVA_PUBLIC_APP_URL", "NEXT_PUBLIC_APP_URL"] as const) {
+    const pub = process.env[key]?.trim();
+    if (pub) {
+      const base = pub.replace(/\/+$/, "");
+      if (base) {
+        return `${base}/api/webhooks/signal`;
+      }
+    }
   }
   // Docker Desktop (Windows/macOS) resolves host.docker.internal to the host machine.
   return "http://host.docker.internal:8787/v1/webhooks/signal";
