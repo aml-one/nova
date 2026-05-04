@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import makeWASocket, { DisconnectReason, useMultiFileAuthState, type WASocket } from "@whiskeysockets/baileys";
 import pino from "pino";
@@ -25,17 +25,40 @@ class WhatsAppWebBridge {
   private lastEventAt = "";
   private inboundHandler: InboundHandler | null = null;
 
-  async start(inboundHandler: InboundHandler): Promise<Status> {
+  private authDir(): string {
+    return resolve(process.cwd(), "data", "state", "whatsapp-baileys-auth");
+  }
+
+  async start(inboundHandler: InboundHandler, opts?: { resetAuth?: boolean }): Promise<Status> {
     this.inboundHandler = inboundHandler;
-    if (this.socket) {
-      return this.getStatus();
+
+    if (opts?.resetAuth === true) {
+      await this.stop();
+      const dir = this.authDir();
+      if (existsSync(dir)) {
+        rmSync(dir, { recursive: true, force: true });
+      }
+      mkdirSync(dir, { recursive: true });
+      this.startedAt = new Date().toISOString();
+    } else if (this.socket) {
+      const snap = this.getStatus();
+      if (snap.state === "connected" || (snap.state === "qr" && snap.qr)) {
+        return snap;
+      }
+      try {
+        this.socket.ws.close();
+      } catch {
+        // ignore
+      }
+      this.socket = null;
     }
+
     this.state = "starting";
     this.detail = "Starting WhatsApp Web bridge...";
     this.touch();
     if (!this.startedAt) this.startedAt = new Date().toISOString();
 
-    const authDir = resolve(process.cwd(), "data", "state", "whatsapp-baileys-auth");
+    const authDir = this.authDir();
     mkdirSync(authDir, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const logger = pino({ level: "silent" });
@@ -60,13 +83,14 @@ class WhatsAppWebBridge {
         this.touch();
       }
       if (update.connection === "close") {
+        const stillActive = this.socket === sock;
         const statusCode = (update.lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode;
         const loggedOut = statusCode === DisconnectReason.loggedOut;
         this.state = loggedOut ? "logged_out" : "reconnecting";
         this.detail = loggedOut ? "Logged out. Re-scan QR to reconnect." : "Connection closed. Reconnecting...";
         this.touch();
         this.socket = null;
-        if (!loggedOut) {
+        if (!loggedOut && stillActive) {
           void this.start(inboundHandler).catch((error) => {
             this.state = "error";
             this.detail = error instanceof Error ? error.message : "Bridge reconnect failed";
@@ -139,8 +163,11 @@ class WhatsAppWebBridge {
 
 const globalBridge = new WhatsAppWebBridge();
 
-export async function startWhatsAppWebBridge(inboundHandler: InboundHandler): Promise<Status> {
-  return globalBridge.start(inboundHandler);
+export async function startWhatsAppWebBridge(
+  inboundHandler: InboundHandler,
+  opts?: { resetAuth?: boolean }
+): Promise<Status> {
+  return globalBridge.start(inboundHandler, opts);
 }
 
 export async function stopWhatsAppWebBridge(): Promise<Status> {

@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { FaChevronDown, FaCopy, FaPenToSquare, FaRotateRight } from "react-icons/fa6";
+import QRCode from "qrcode";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -487,6 +488,10 @@ export default function SettingsPage() {
   const [signalCaptchaPasteDraft, setSignalCaptchaPasteDraft] = useState("");
   const [signalCaptchaBusy, setSignalCaptchaBusy] = useState(false);
   const [whatsAppQrDataUrl, setWhatsAppQrDataUrl] = useState<string | null>(null);
+  const [whatsAppQrRenderError, setWhatsAppQrRenderError] = useState<string | null>(null);
+  const [whatsAppLinkRunning, setWhatsAppLinkRunning] = useState(false);
+  const [whatsAppInlineHint, setWhatsAppInlineHint] = useState<string | null>(null);
+  const [whatsAppPollError, setWhatsAppPollError] = useState<string | null>(null);
   const [whatsAppWebStatus, setWhatsAppWebStatus] = useState<WhatsAppWebBridgeStatus | null>(null);
   const [channelDebugEntries, setChannelDebugEntries] = useState<ChannelDebugEntry[]>([]);
   const [channelDebugError, setChannelDebugError] = useState<string | null>(null);
@@ -497,7 +502,6 @@ export default function SettingsPage() {
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
   const lastSavedVoiceSilenceSecRef = useRef<number>(DEFAULT_SETTINGS.web.voiceDictationSilenceSec);
-  const whatsAppQrBlobUrlRef = useRef<string | null>(null);
   const [chatStyleSaveState, setChatStyleSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [voiceSilenceSaveState, setVoiceSilenceSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [sentiCoreModalOpen, setSentiCoreModalOpen] = useState(false);
@@ -1131,13 +1135,15 @@ export default function SettingsPage() {
     }
   }
 
-  async function fetchWhatsAppWebStatusOnly(): Promise<WhatsAppWebBridgeStatus | null> {
+  async function fetchWhatsAppWebStatusOnly(): Promise<
+    { ok: true; status: WhatsAppWebBridgeStatus } | { ok: false; detail: string }
+  > {
     const response = await apiFetch("/api/setup/channels/whatsapp/web/status");
+    const data = (await response.json().catch(() => ({}))) as { status?: WhatsAppWebBridgeStatus; error?: string };
     if (!response.ok) {
-      return null;
+      return { ok: false, detail: data.error ?? `HTTP ${response.status}` };
     }
-    const data = (await response.json()) as { status?: WhatsAppWebBridgeStatus };
-    return data.status ?? null;
+    return { ok: true, status: data.status ?? {} };
   }
 
   async function refreshWhatsAppWebStatus(): Promise<void> {
@@ -1208,93 +1214,91 @@ export default function SettingsPage() {
   useEffect(() => {
     const raw = whatsAppWebStatus?.qr?.trim();
     if (!raw) {
-      if (whatsAppQrBlobUrlRef.current) {
-        URL.revokeObjectURL(whatsAppQrBlobUrlRef.current);
-        whatsAppQrBlobUrlRef.current = null;
-      }
       setWhatsAppQrDataUrl(null);
+      setWhatsAppQrRenderError(null);
       return;
     }
-    const ac = new AbortController();
     let cancelled = false;
-    void (async () => {
-      try {
-        const res = await apiFetch("/api/setup/channels/whatsapp-pairing-qr", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ raw }),
-          signal: ac.signal
-        });
-        if (!res.ok || cancelled) return;
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        if (cancelled) {
-          URL.revokeObjectURL(url);
-          return;
+    setWhatsAppQrRenderError(null);
+    void QRCode.toDataURL(raw, { margin: 2, width: 320, errorCorrectionLevel: "M" }).then(
+      (url) => {
+        if (!cancelled) setWhatsAppQrDataUrl(url);
+      },
+      () => {
+        if (!cancelled) {
+          setWhatsAppQrDataUrl(null);
+          setWhatsAppQrRenderError("Could not draw the QR (check that dependencies are installed).");
         }
-        if (whatsAppQrBlobUrlRef.current) {
-          URL.revokeObjectURL(whatsAppQrBlobUrlRef.current);
-        }
-        whatsAppQrBlobUrlRef.current = url;
-        setWhatsAppQrDataUrl(url);
-      } catch (e) {
-        if (cancelled || (e instanceof DOMException && e.name === "AbortError")) return;
-        if (!cancelled) setWhatsAppQrDataUrl(null);
       }
-    })();
+    );
     return () => {
       cancelled = true;
-      ac.abort();
-      if (whatsAppQrBlobUrlRef.current) {
-        URL.revokeObjectURL(whatsAppQrBlobUrlRef.current);
-        whatsAppQrBlobUrlRef.current = null;
-      }
-      setWhatsAppQrDataUrl(null);
     };
   }, [whatsAppWebStatus?.qr]);
 
-  async function startWhatsAppWebBridge(): Promise<void> {
+  async function linkWhatsAppWithFreshQr(): Promise<void> {
     setError(null);
-    const response = await apiFetch("/api/setup/channels/whatsapp/web/start", { method: "POST" });
-    const data = (await response.json()) as { status?: WhatsAppWebBridgeStatus; error?: string };
-    if (!response.ok) {
-      setError(data.error ?? "Could not start WhatsApp Web bridge.");
-      return;
-    }
-    let status = data.status ?? null;
-    setWhatsAppWebStatus(status);
-    if (status?.qr) {
-      setStatus("Scan this QR in WhatsApp → Settings → Linked devices → Link new device.");
-      return;
-    }
-    if (status?.state === "connected") {
-      setStatus("WhatsApp Web is already connected on this host.");
-      return;
-    }
-    setStatus("Starting WhatsApp… waiting for pairing QR (Baileys can take a few seconds).");
-    const deadline = Date.now() + 90_000;
-    while (Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, 1500));
-      const next = await fetchWhatsAppWebStatusOnly();
-      if (!next) {
-        continue;
-      }
-      status = next;
-      setWhatsAppWebStatus(next);
-      if (next.qr) {
-        setStatus("Scan this QR in WhatsApp → Settings → Linked devices → Link new device.");
+    setWhatsAppPollError(null);
+    setWhatsAppInlineHint(
+      "Resetting any saved Web session on the agent host and starting a new link. A QR will appear below when ready (usually a few seconds)."
+    );
+    setWhatsAppLinkRunning(true);
+    try {
+      const response = await apiFetch("/api/setup/channels/whatsapp/web/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ forceNewPairing: true })
+      });
+      const data = (await response.json()) as { status?: WhatsAppWebBridgeStatus; error?: string };
+      if (!response.ok) {
+        setWhatsAppInlineHint(null);
+        setError(data.error ?? "Could not start WhatsApp Web bridge. Is agent-core running where Settings expects it?");
         return;
       }
-      if (next.state === "connected") {
-        setStatus("WhatsApp Web connected.");
+      let status = data.status ?? null;
+      setWhatsAppWebStatus(status ?? null);
+      if (status?.qr) {
+        setWhatsAppInlineHint("Scan this QR with WhatsApp → Settings → Linked devices → Link a device.");
+        setStatus(null);
         return;
       }
-      if (next.state === "error" || next.state === "logged_out" || next.state === "idle") {
-        setStatus(next.detail ?? "WhatsApp bridge stopped or needs attention. Try again or check logs.");
+      if (status?.state === "connected") {
+        setWhatsAppInlineHint("Already connected on this host — no QR needed.");
+        setStatus(null);
         return;
       }
+      const deadline = Date.now() + 90_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 1500));
+        const polled = await fetchWhatsAppWebStatusOnly();
+        if (!polled.ok) {
+          setWhatsAppPollError(polled.detail);
+          continue;
+        }
+        setWhatsAppPollError(null);
+        status = polled.status;
+        setWhatsAppWebStatus(polled.status);
+        if (polled.status.qr) {
+          setWhatsAppInlineHint("Scan this QR with WhatsApp → Settings → Linked devices → Link a device.");
+          setStatus(null);
+          return;
+        }
+        if (polled.status.state === "connected") {
+          setWhatsAppInlineHint("WhatsApp Web connected.");
+          setStatus(null);
+          return;
+        }
+        if (polled.status.state === "error" || polled.status.state === "logged_out" || polled.status.state === "idle") {
+          setWhatsAppInlineHint(polled.status.detail ?? "Bridge stopped or needs attention.");
+          setStatus(null);
+          return;
+        }
+      }
+      setWhatsAppInlineHint("No QR yet after 90s. Confirm agent-core is running on the same machine (or reachable), then try again or Refresh status.");
+      setStatus(null);
+    } finally {
+      setWhatsAppLinkRunning(false);
     }
-    setStatus("Still no QR after 90s. Click Refresh status, or stop and start again.");
   }
 
   async function signalCaptchaReadClipboard(): Promise<void> {
@@ -1333,6 +1337,8 @@ export default function SettingsPage() {
 
   async function stopWhatsAppWebBridgeAction(): Promise<void> {
     setError(null);
+    setWhatsAppInlineHint(null);
+    setWhatsAppPollError(null);
     const response = await apiFetch("/api/setup/channels/whatsapp/web/stop", { method: "POST" });
     const data = (await response.json()) as { status?: WhatsAppWebBridgeStatus; error?: string };
     if (!response.ok) {
@@ -2654,21 +2660,30 @@ export default function SettingsPage() {
                   <div>
                     <h4 className="text-xs font-semibold text-foreground">WhatsApp Web (same phone app)</h4>
                     <p className="mt-0.5 text-[11px] leading-snug text-muted">
-                      One click starts the bridge and waits until a pairing QR appears (Baileys can take a few seconds). Then scan with WhatsApp → Settings → Linked devices → Link a device.
+                      Clears the saved Baileys session on the <strong className="text-foreground">agent-core host</strong>, then shows a new pairing QR. You must scan within the timeout shown in WhatsApp. Agent-core and Next must point at the same machine (or a reachable agent URL).
                     </p>
                   </div>
+                  {whatsAppInlineHint ? (
+                    <div className="rounded-ui border border-sky-500/35 bg-sky-500/10 px-3 py-2 text-[12px] font-medium leading-snug text-sky-950 dark:text-sky-100">
+                      {whatsAppLinkRunning ? <span className="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-sky-600 border-t-transparent align-middle" aria-hidden /> : null}
+                      {whatsAppInlineHint}
+                    </div>
+                  ) : null}
+                  {whatsAppPollError ? (
+                    <p className="text-[11px] font-medium text-amber-800 dark:text-amber-200">Status poll: {whatsAppPollError}</p>
+                  ) : null}
                   <div className="text-[11px] text-muted">
                     Status: <strong className="text-foreground">{whatsAppWebStatus?.state ?? "unknown"}</strong>
                     {whatsAppWebStatus?.detail ? ` — ${whatsAppWebStatus.detail}` : ""}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button type="button" tone="blue" onClick={() => void startWhatsAppWebBridge()}>
-                      Link WhatsApp — show QR
+                    <Button type="button" tone="blue" disabled={whatsAppLinkRunning} onClick={() => void linkWhatsAppWithFreshQr()}>
+                      {whatsAppLinkRunning ? "Working…" : "Link WhatsApp — show QR"}
                     </Button>
-                    <Button type="button" tone="neutral" onClick={() => void refreshWhatsAppWebStatus()}>
+                    <Button type="button" tone="neutral" disabled={whatsAppLinkRunning} onClick={() => void refreshWhatsAppWebStatus()}>
                       Refresh status
                     </Button>
-                    <Button type="button" tone="red" onClick={() => void stopWhatsAppWebBridgeAction()}>
+                    <Button type="button" tone="red" disabled={whatsAppLinkRunning} onClick={() => void stopWhatsAppWebBridgeAction()}>
                       Stop bridge
                     </Button>
                   </div>
@@ -2687,6 +2702,7 @@ export default function SettingsPage() {
                       ) : (
                         <p className="text-[11px] text-muted">Rendering QR…</p>
                       )}
+                      {whatsAppQrRenderError ? <p className="text-[11px] text-rose-600 dark:text-rose-400">{whatsAppQrRenderError}</p> : null}
                     </div>
                   ) : null}
                 </div>

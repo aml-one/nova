@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { getAgentBaseUrl, getAgentHeaders } from "../../../../../../../lib/agent-core";
 
 export async function POST(request: Request) {
+  const payload = (await request.json().catch(() => ({}))) as { forceNewPairing?: boolean };
   const response = await fetch(`${getAgentBaseUrl(request)}/v1/setup/channels/whatsapp/web/start`, {
     method: "POST",
     headers: { "content-type": "application/json", ...getAgentHeaders(request) },
-    body: "{}"
+    body: JSON.stringify(payload && typeof payload === "object" ? payload : {})
   });
   const data = (await response.json().catch(() => ({}))) as Record<string, unknown> & { error?: string };
   if (!response.ok) {

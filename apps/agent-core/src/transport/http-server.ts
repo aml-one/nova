@@ -787,7 +787,10 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         return sendJson(response, 200, { status: getWhatsAppWebBridgeStatus(), correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/start") {
-        const status = await startWhatsAppWebBridge(baileysInboundHandler);
+        const payload = (await readJson(request)) as { forceNewPairing?: boolean };
+        const status = await startWhatsAppWebBridge(baileysInboundHandler, {
+          resetAuth: payload.forceNewPairing === true
+        });
         return sendJson(response, 200, { status, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/stop") {
