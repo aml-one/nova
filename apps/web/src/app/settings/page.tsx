@@ -422,7 +422,7 @@ export default function SettingsPage() {
   });
   const [restoringPersonaVersion, setRestoringPersonaVersion] = useState<number | null>(null);
   const [websites, setWebsites] = useState<WebsiteProject[]>([]);
-  const [channelsSetupOutput, setChannelsSetupOutput] = useState<string>("");
+  const [signalSetupCheck, setSignalSetupCheck] = useState<SetupCheckResult | null>(null);
   const [copilotSetupOutput, setCopilotSetupOutput] = useState<string>("");
   const [copilotDeviceLoginSessionId, setCopilotDeviceLoginSessionId] = useState<string>("");
   const [copilotDeviceLoginState, setCopilotDeviceLoginState] = useState<
@@ -437,6 +437,7 @@ export default function SettingsPage() {
   const [modelPingError, setModelPingError] = useState<string | null>(null);
   const [channelsSetupMode, setChannelsSetupMode] = useState<"signal" | "whatsapp" | "both">("both");
   const [signalVerificationCode, setSignalVerificationCode] = useState("");
+  const [signalRegisterStatus, setSignalRegisterStatus] = useState<SetupCheckResult | null>(null);
   const [whatsAppWebStatus, setWhatsAppWebStatus] = useState<WhatsAppWebBridgeStatus | null>(null);
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
@@ -879,9 +880,7 @@ export default function SettingsPage() {
       setError(data.error ?? "Channel setup test failed");
       return;
     }
-    const signalLine = `Signal: ${data.signal?.ok ? "OK" : "Needs attention"} - ${data.signal?.detail ?? "-"}`;
-    const waLine = `WhatsApp: ${data.whatsApp?.ok ? "OK" : "Needs attention"} - ${data.whatsApp?.detail ?? "-"}`;
-    setChannelsSetupOutput([signalLine, waLine, "", data.suggestedEnv ?? ""].join("\n"));
+    setSignalSetupCheck(data.signal ?? null);
     setStatus("Channel setup checked. Review result and save settings.");
   }
 
@@ -900,14 +899,10 @@ export default function SettingsPage() {
       setError(data.error ?? "Could not bootstrap Signal bridge.");
       return;
     }
-    const lines = [
-      `Signal bridge: ${data.bridge?.ok ? "OK" : "Needs attention"} - ${data.bridge?.detail ?? data.detail ?? "-"}`,
-      data.executedCommand ? `Command: ${data.executedCommand}` : "",
-      data.nextStep ?? "",
-      "",
-      data.suggestedEnv ?? ""
-    ].filter(Boolean);
-    setChannelsSetupOutput(lines.join("\n"));
+    setSignalSetupCheck({
+      ok: data.bridge?.ok === true,
+      detail: data.bridge?.detail ?? data.detail ?? "Bridge started"
+    });
     updateChannelSetup({
       signalApiUrl: "http://127.0.0.1:8085",
       signalAccountNumber
@@ -918,6 +913,7 @@ export default function SettingsPage() {
   async function runSignalRegisterStart(): Promise<void> {
     setError(null);
     setStatus(null);
+    setSignalRegisterStatus(null);
     const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
     const signalApiUrl = values.signalApiUrl ?? "http://127.0.0.1:8085";
     const signalAccountNumber = values.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "";
@@ -928,30 +924,28 @@ export default function SettingsPage() {
     });
     const data = (await response.json()) as { detail?: string; endpointTried?: string; error?: string };
     if (!response.ok) {
-      setError(data.error ?? "Could not start Signal registration.");
+      const message = data.error ?? "Could not start Signal registration.";
+      setSignalRegisterStatus({ ok: false, detail: message });
+      setError(message);
       return;
     }
-    setChannelsSetupOutput(
-      [
-        "Signal register/link: started.",
-        data.detail ?? "",
-        data.endpointTried ? `Endpoint: ${data.endpointTried}` : "",
-        "",
-        `SIGNAL_API_URL=${signalApiUrl}`,
-        `SIGNAL_ACCOUNT_NUMBER=${signalAccountNumber || "+15550001111"}`
-      ]
-        .filter(Boolean)
-        .join("\n")
-    );
+    setSignalRegisterStatus({ ok: true, detail: data.detail ?? "Registration started" });
+    setSignalSetupCheck({
+      ok: true,
+      detail: "Register/link started"
+    });
     setStatus("Signal registration started. Enter the verification code below, then click Verify code.");
   }
 
   async function runSignalVerifyCode(): Promise<void> {
     setError(null);
     setStatus(null);
+    setSignalRegisterStatus(null);
     const code = signalVerificationCode.trim();
     if (!code) {
-      setError("Enter the Signal verification code first.");
+      const message = "Enter the Signal verification code first.";
+      setSignalRegisterStatus({ ok: false, detail: message });
+      setError(message);
       return;
     }
     const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
@@ -964,21 +958,16 @@ export default function SettingsPage() {
     });
     const data = (await response.json()) as { detail?: string; endpointTried?: string; error?: string };
     if (!response.ok) {
-      setError(data.error ?? "Could not verify Signal code.");
+      const message = data.error ?? "Could not verify Signal code.";
+      setSignalRegisterStatus({ ok: false, detail: message });
+      setError(message);
       return;
     }
-    setChannelsSetupOutput(
-      [
-        "Signal verification: OK.",
-        data.detail ?? "",
-        data.endpointTried ? `Endpoint: ${data.endpointTried}` : "",
-        "",
-        `SIGNAL_API_URL=${signalApiUrl}`,
-        `SIGNAL_ACCOUNT_NUMBER=${signalAccountNumber || "+15550001111"}`
-      ]
-        .filter(Boolean)
-        .join("\n")
-    );
+    setSignalRegisterStatus({ ok: true, detail: data.detail ?? "Verified and linked" });
+    setSignalSetupCheck({
+      ok: true,
+      detail: data.detail ?? "Linked"
+    });
     setSignalVerificationCode("");
     setStatus("Signal number linked successfully. Run Validate and then Save Settings.");
   }
@@ -1015,16 +1004,6 @@ export default function SettingsPage() {
     }
     setWhatsAppWebStatus(data.status ?? null);
     setStatus("WhatsApp Web bridge stopped.");
-  }
-
-  async function copyChannelsSetupOutput(): Promise<void> {
-    if (!channelsSetupOutput.trim()) return;
-    try {
-      await navigator.clipboard.writeText(channelsSetupOutput);
-      setStatus("Copied channel setup output to clipboard.");
-    } catch {
-      setError("Could not copy to clipboard. Please copy manually.");
-    }
   }
 
   async function runCopilotSetupValidation(): Promise<void> {
@@ -2367,11 +2346,15 @@ export default function SettingsPage() {
                     </Button>
                   </div>
                   {whatsAppWebStatus?.qr ? (
-                    <textarea
-                      className="h-20 w-full rounded-ui border border-border bg-surface p-2 font-mono text-[11px] text-text shadow-inner"
-                      readOnly
-                      value={whatsAppWebStatus.qr}
-                    />
+                    <div className="space-y-2 rounded-ui border border-border bg-surface p-3">
+                      <div className="text-[11px] font-semibold text-muted">Scan this QR in WhatsApp {">"} Linked Devices</div>
+                      <img
+                        className="h-56 w-56 rounded-ui border border-border bg-white p-2"
+                        src={`https://quickchart.io/qr?margin=1&ecLevel=M&size=320&text=${encodeURIComponent(whatsAppWebStatus.qr)}`}
+                        alt="WhatsApp Web linking QR code"
+                        loading="lazy"
+                      />
+                    </div>
                   ) : null}
                 </div>
               </div>
@@ -2406,8 +2389,7 @@ export default function SettingsPage() {
                       setError(data.error ?? "Signal setup test failed");
                       return;
                     }
-                    const signalLine = `Signal: ${data.signal?.ok ? "OK" : "Needs attention"} - ${data.signal?.detail ?? "-"}`;
-                    setChannelsSetupOutput([signalLine, "", data.suggestedEnv ?? ""].join("\n"));
+                    setSignalSetupCheck(data.signal ?? null);
                     setStatus("Signal setup checked.");
                     return;
                   }
@@ -2429,18 +2411,29 @@ export default function SettingsPage() {
                       setError(data.error ?? "WhatsApp setup test failed");
                       return;
                     }
-                    const waLine = `WhatsApp: ${data.whatsApp?.ok ? "OK" : "Needs attention"} - ${data.whatsApp?.detail ?? "-"}`;
-                    setChannelsSetupOutput([waLine, "", data.suggestedEnv ?? ""].join("\n"));
+                    setSignalSetupCheck(null);
                     setStatus("WhatsApp setup checked.");
                     return;
                   }
                   await runOneClickChannelSetup();
                 }}
               >
-                Validate selected setup + generate env
+                Validate selected setup
               </Button>
+              {signalSetupCheck ? (
+                <span
+                  className={`inline-flex items-center rounded-full border px-2 py-1 text-[11px] font-semibold ${
+                    signalSetupCheck.ok
+                      ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-200"
+                      : "border-amber-400/60 bg-amber-400/10 text-amber-200"
+                  }`}
+                  aria-live="polite"
+                >
+                  Signal: {signalSetupCheck.ok ? "OK" : "Needs attention"} - {signalSetupCheck.detail || "-"}
+                </span>
+              ) : null}
             </div>
-            <div className="grid gap-2 rounded-ui border bg-surface p-2 md:grid-cols-[1fr_auto_auto] md:items-end">
+            <div className="space-y-2 rounded-ui border bg-surface p-2">
               <label className="grid gap-1 text-xs">
                 Signal verification code
                 <Input
@@ -2449,23 +2442,29 @@ export default function SettingsPage() {
                   placeholder="Code from Signal/SMS"
                 />
               </label>
-              <Button type="button" tone="purple" onClick={() => void runSignalRegisterStart()}>
-                Start register/link
-              </Button>
-              <Button type="button" tone="green" onClick={() => void runSignalVerifyCode()}>
-                Verify code
-              </Button>
-            </div>
-            {channelsSetupOutput ? (
-              <div className="space-y-2">
-                <textarea
-                  className="h-32 w-full rounded-ui border border-border bg-surface2 p-2 font-mono text-xs text-text shadow-inner outline-none ring-pastelBlue/60 focus:ring-2"
-                  value={channelsSetupOutput}
-                  readOnly
-                />
-                <Button type="button" tone="blue" onClick={() => void copyChannelsSetupOutput()}>Copy env block</Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button type="button" tone="purple" onClick={() => void runSignalRegisterStart()}>
+                  Start register/link
+                </Button>
+                <Button type="button" tone="green" onClick={() => void runSignalVerifyCode()}>
+                  Verify code
+                </Button>
+                {signalRegisterStatus ? (
+                  <span
+                    className={`inline-flex max-w-full items-center rounded-full border px-2 py-1 text-[11px] font-semibold ${
+                      signalRegisterStatus.ok
+                        ? "border-emerald-400/60 bg-emerald-400/10 text-emerald-200"
+                        : "border-rose-400/60 bg-rose-400/10 text-rose-200"
+                    }`}
+                    aria-live="polite"
+                  >
+                    <span className="truncate">
+                      Register/link: {signalRegisterStatus.ok ? "OK" : "Failed"} — {signalRegisterStatus.detail}
+                    </span>
+                  </span>
+                ) : null}
               </div>
-            ) : null}
+            </div>
             <div className="rounded-ui border bg-surface p-3 space-y-3">
               <h3 className="text-sm font-semibold">Allowed phone numbers by channel</h3>
               <p className="text-xs text-muted">

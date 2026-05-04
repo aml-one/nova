@@ -597,7 +597,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           whatsAppAppSecret?: string;
         };
         const signalApiUrl = payload.signalApiUrl?.trim() || "";
-        const signalAccountNumber = payload.signalAccountNumber?.trim() || "";
+        const signalAccountNumber = payload.signalAccountNumber?.trim() || process.env.SIGNAL_ACCOUNT_NUMBER?.trim() || "";
         const whatsAppPhoneNumberId = payload.whatsAppPhoneNumberId?.trim() || "";
         const whatsAppToken = payload.whatsAppToken?.trim() || "";
         const whatsAppAppSecret = payload.whatsAppAppSecret?.trim() || "";
@@ -690,7 +690,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/register") {
         const payload = (await readJson(request)) as { signalApiUrl?: string; signalAccountNumber?: string };
         const signalApiUrl = payload.signalApiUrl?.trim() || "http://127.0.0.1:8085";
-        const signalAccountNumber = payload.signalAccountNumber?.trim() || "";
+        const signalAccountNumber = payload.signalAccountNumber?.trim() || process.env.SIGNAL_ACCOUNT_NUMBER?.trim() || "";
         if (!signalAccountNumber) {
           return sendJson(response, 400, { error: "SIGNAL_ACCOUNT_NUMBER is required", correlationId });
         }
