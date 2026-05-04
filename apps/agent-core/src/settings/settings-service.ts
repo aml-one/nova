@@ -75,6 +75,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   messagingAccess: {
     novaPhoneNumber: process.env.NOVA_PHONE_NUMBER ?? "",
     denyUnknownNumbers: true,
+    channelTiers: {
+      signal: [],
+      whatsapp: []
+    },
     systemAdmins: [],
     guests: [],
     importantPeople: []
@@ -331,6 +335,7 @@ export class SettingsService {
       messagingAccess: {
         novaPhoneNumber: update.messagingAccess?.novaPhoneNumber ?? current.messagingAccess.novaPhoneNumber,
         denyUnknownNumbers: update.messagingAccess?.denyUnknownNumbers ?? current.messagingAccess.denyUnknownNumbers,
+        channelTiers: update.messagingAccess?.channelTiers ?? current.messagingAccess.channelTiers,
         systemAdmins: update.messagingAccess?.systemAdmins ?? current.messagingAccess.systemAdmins,
         guests: update.messagingAccess?.guests ?? current.messagingAccess.guests,
         importantPeople: update.messagingAccess?.importantPeople ?? current.messagingAccess.importantPeople
@@ -568,6 +573,7 @@ export class SettingsService {
       messagingAccess: {
         novaPhoneNumber: normalizePhone(settings.messagingAccess?.novaPhoneNumber),
         denyUnknownNumbers: settings.messagingAccess?.denyUnknownNumbers !== false,
+        channelTiers: normalizeChannelTiers(settings.messagingAccess?.channelTiers),
         systemAdmins: normalizePhoneList(settings.messagingAccess?.systemAdmins),
         guests: normalizePhoneList(settings.messagingAccess?.guests),
         importantPeople: normalizeImportantPeople(settings.messagingAccess?.importantPeople)
@@ -801,6 +807,45 @@ function normalizeImportantPeople(
     });
   }
   return result.filter((item, index, all) => all.findIndex((other) => other.phone === item.phone) === index);
+}
+
+function normalizeChannelTiers(
+  values: AppSettings["messagingAccess"]["channelTiers"] | undefined
+): AppSettings["messagingAccess"]["channelTiers"] {
+  const normalizeRows = (rows: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }> | undefined) => {
+    const out: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }> = [];
+    for (const row of rows ?? []) {
+      const phone = normalizePhone(row.phone);
+      if (!phone) continue;
+      const tier =
+        row.tier === "admin" || row.tier === "co_admin" || row.tier === "restricted" || row.tier === "guest"
+          ? row.tier
+          : "guest";
+      if (!out.find((x) => x.phone === phone)) {
+        out.push({ phone, tier });
+      }
+    }
+    return out;
+  };
+  const signal = normalizeRows(values?.signal);
+  const whatsapp = normalizeRows(values?.whatsapp);
+
+  // Safety: exactly one admin maximum globally across channels.
+  let adminTaken = false;
+  const clampAdmin = (rows: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>) =>
+    rows.map((row) => {
+      if (row.tier !== "admin") return row;
+      if (!adminTaken) {
+        adminTaken = true;
+        return row;
+      }
+      return { ...row, tier: "co_admin" as const };
+    });
+
+  return {
+    signal: clampAdmin(signal),
+    whatsapp: clampAdmin(whatsapp)
+  };
 }
 
 function normalizeLabelPrefix(value: string | undefined): string {

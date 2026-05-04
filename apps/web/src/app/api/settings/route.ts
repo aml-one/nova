@@ -82,6 +82,10 @@ type AppSettingsPayload = {
   messagingAccess?: {
     novaPhoneNumber?: string;
     denyUnknownNumbers?: boolean;
+    channelTiers?: {
+      signal?: Array<{ phone?: string; tier?: "admin" | "co_admin" | "restricted" | "guest" }>;
+      whatsapp?: Array<{ phone?: string; tier?: "admin" | "co_admin" | "restricted" | "guest" }>;
+    };
     systemAdmins?: string[];
     guests?: string[];
     importantPeople?: Array<{

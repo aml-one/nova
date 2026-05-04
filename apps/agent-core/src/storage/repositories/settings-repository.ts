@@ -79,6 +79,10 @@ export type AppSettings = {
   messagingAccess: {
     novaPhoneNumber: string;
     denyUnknownNumbers: boolean;
+    channelTiers: {
+      signal: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>;
+      whatsapp: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>;
+    };
     systemAdmins: string[];
     guests: string[];
     importantPeople: Array<{
@@ -337,6 +341,30 @@ export class SettingsRepository {
         messagingAccess: {
           novaPhoneNumber: typeof parsed.messagingAccess?.novaPhoneNumber === "string" ? parsed.messagingAccess.novaPhoneNumber : "",
           denyUnknownNumbers: parsed.messagingAccess?.denyUnknownNumbers !== false,
+          channelTiers: {
+            signal: Array.isArray(parsed.messagingAccess?.channelTiers?.signal)
+              ? parsed.messagingAccess.channelTiers.signal
+                  .filter((item) => typeof item?.phone === "string")
+                  .map((item) => ({
+                    phone: String(item.phone),
+                    tier:
+                      item.tier === "admin" || item.tier === "co_admin" || item.tier === "restricted" || item.tier === "guest"
+                        ? item.tier
+                        : "guest"
+                  }))
+              : [],
+            whatsapp: Array.isArray(parsed.messagingAccess?.channelTiers?.whatsapp)
+              ? parsed.messagingAccess.channelTiers.whatsapp
+                  .filter((item) => typeof item?.phone === "string")
+                  .map((item) => ({
+                    phone: String(item.phone),
+                    tier:
+                      item.tier === "admin" || item.tier === "co_admin" || item.tier === "restricted" || item.tier === "guest"
+                        ? item.tier
+                        : "guest"
+                  }))
+              : []
+          },
           systemAdmins: Array.isArray(parsed.messagingAccess?.systemAdmins)
             ? parsed.messagingAccess?.systemAdmins.filter((item): item is string => typeof item === "string")
             : [],

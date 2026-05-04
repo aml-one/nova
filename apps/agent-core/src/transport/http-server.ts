@@ -115,7 +115,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   if ((process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase() === "baileys") {
     void startWhatsAppWebBridge(async ({ from, text }) => {
       const identity = mapInboundIdentity("whatsapp", from);
-      const accessProfile = resolveChannelAccess(identity, options.settings.get());
+      const accessProfile = resolveChannelAccess("whatsapp", identity, options.settings.get());
       if (!accessProfile.allowed) {
         return;
       }
@@ -544,7 +544,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           phoneNumber?: string;
           text?: string;
         };
-        const accessProfile = resolveChannelAccess(payload.phoneNumber, options.settings.get());
+        const accessProfile = resolveChannelAccess(payload.channel ?? "whatsapp", payload.phoneNumber, options.settings.get());
         const text = payload.text?.toLowerCase() ?? "";
         const checks = {
           canRunShell: accessProfile.capabilities.shellAccess,
@@ -669,7 +669,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/start") {
         const status = await startWhatsAppWebBridge(async ({ from, text }) => {
           const identity = mapInboundIdentity("whatsapp", from);
-          const accessProfile = resolveChannelAccess(identity, options.settings.get());
+          const accessProfile = resolveChannelAccess("whatsapp", identity, options.settings.get());
           if (!accessProfile.allowed) {
             return;
           }
@@ -1139,7 +1139,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const messages = router.normalizeBatch(await wa.ingestWebhook(payload));
         const replies: Array<{ to: string; reply: string; delivered: boolean; error?: string }> = [];
         for (const message of messages) {
-          const accessProfile = resolveChannelAccess(message.phoneNumber, options.settings.get());
+          const accessProfile = resolveChannelAccess("whatsapp", message.phoneNumber, options.settings.get());
           if (!accessProfile.allowed) {
             continue;
           }
@@ -1164,7 +1164,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const messages = router.normalizeBatch(await signal.ingestSignalEvent(payload));
         const replies: Array<{ to: string; reply: string; delivered: boolean; error?: string }> = [];
         for (const message of messages) {
-          const accessProfile = resolveChannelAccess(message.phoneNumber, options.settings.get());
+          const accessProfile = resolveChannelAccess("signal", message.phoneNumber, options.settings.get());
           if (!accessProfile.allowed) {
             continue;
           }

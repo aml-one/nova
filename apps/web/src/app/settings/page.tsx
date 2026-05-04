@@ -124,7 +124,25 @@ type SettingsState = {
     model: string;
     responseFormat: "mp3" | "wav" | "opus" | "pcm" | "flac";
   };
-  messagingAccess: { novaPhoneNumber: string; denyUnknownNumbers: boolean; systemAdmins: string[]; guests: string[] };
+  messagingAccess: {
+    novaPhoneNumber: string;
+    denyUnknownNumbers: boolean;
+    channelTiers: {
+      signal: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>;
+      whatsapp: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>;
+    };
+    systemAdmins: string[];
+    guests: string[];
+    importantPeople: Array<{
+      phone: string;
+      permissions: {
+        cameraAccess: boolean;
+        shellAccess: boolean;
+        securityCenterAccess: boolean;
+        schedulerAccess: boolean;
+      };
+    }>;
+  };
   shell: { timeoutMs: number; maxOutputBytes: number };
   skills: { isolationEnabled: boolean; timeoutMs: number; maxMemoryMb: number; skillAuthoringDisabled: boolean };
   identityBackup: { enabled: boolean; intervalDays: number; labelPrefix: string };
@@ -247,7 +265,14 @@ const DEFAULT_SETTINGS: SettingsState = {
     model: "",
     responseFormat: "wav"
   },
-  messagingAccess: { novaPhoneNumber: "", denyUnknownNumbers: true, systemAdmins: [], guests: [] },
+  messagingAccess: {
+    novaPhoneNumber: "",
+    denyUnknownNumbers: true,
+    channelTiers: { signal: [], whatsapp: [] },
+    systemAdmins: [],
+    guests: [],
+    importantPeople: []
+  },
   shell: { timeoutMs: 30000, maxOutputBytes: 1024 * 1024 },
   skills: { isolationEnabled: false, timeoutMs: 15000, maxMemoryMb: 256, skillAuthoringDisabled: false },
   identityBackup: { enabled: false, intervalDays: 1, labelPrefix: "nova-core" },
@@ -776,6 +801,55 @@ export default function SettingsPage() {
       skillSettings: {
         ...p.skillSettings,
         ["channel-setup"]: { ...(p.skillSettings["channel-setup"] ?? {}), ...patch }
+      }
+    }));
+  }
+
+  function updateChannelTier(
+    channel: "signal" | "whatsapp",
+    index: number,
+    patch: Partial<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>
+  ): void {
+    setSettings((prev) => {
+      const rows = [...prev.messagingAccess.channelTiers[channel]];
+      const row = rows[index];
+      if (!row) return prev;
+      rows[index] = { ...row, ...patch };
+      return {
+        ...prev,
+        messagingAccess: {
+          ...prev.messagingAccess,
+          channelTiers: {
+            ...prev.messagingAccess.channelTiers,
+            [channel]: rows
+          }
+        }
+      };
+    });
+  }
+
+  function addChannelTierRow(channel: "signal" | "whatsapp"): void {
+    setSettings((prev) => ({
+      ...prev,
+      messagingAccess: {
+        ...prev.messagingAccess,
+        channelTiers: {
+          ...prev.messagingAccess.channelTiers,
+          [channel]: [...prev.messagingAccess.channelTiers[channel], { phone: "", tier: "guest" }]
+        }
+      }
+    }));
+  }
+
+  function removeChannelTierRow(channel: "signal" | "whatsapp", index: number): void {
+    setSettings((prev) => ({
+      ...prev,
+      messagingAccess: {
+        ...prev.messagingAccess,
+        channelTiers: {
+          ...prev.messagingAccess.channelTiers,
+          [channel]: prev.messagingAccess.channelTiers[channel].filter((_, i) => i !== index)
+        }
       }
     }));
   }
@@ -2392,6 +2466,90 @@ export default function SettingsPage() {
                 <Button type="button" tone="blue" onClick={() => void copyChannelsSetupOutput()}>Copy env block</Button>
               </div>
             ) : null}
+            <div className="rounded-ui border bg-surface p-3 space-y-3">
+              <h3 className="text-sm font-semibold">Allowed phone numbers by channel</h3>
+              <p className="text-xs text-muted">
+                Assign tiers for messaging channels only (Signal/WhatsApp). Save Settings to apply.
+              </p>
+              <div className="grid gap-3 md:grid-cols-2">
+                {(["signal", "whatsapp"] as const).map((channel) => (
+                  <div key={channel} className="rounded-ui border bg-surface2 p-2 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <strong className="text-sm">{channel === "signal" ? "Signal" : "WhatsApp"}</strong>
+                      <Button type="button" tone="blue" className="h-7 px-2 text-xs" onClick={() => addChannelTierRow(channel)}>
+                        Add
+                      </Button>
+                    </div>
+                    <div className="space-y-1.5">
+                      {settings.messagingAccess.channelTiers[channel].map((row, idx) => (
+                        <div key={`${channel}-${idx}`} className="grid grid-cols-[1fr_130px_auto] gap-1.5">
+                          <Input
+                            value={row.phone}
+                            onChange={(e) => updateChannelTier(channel, idx, { phone: e.target.value })}
+                            placeholder="+15551234567"
+                          />
+                          <Select
+                            value={row.tier}
+                            onChange={(e) =>
+                              updateChannelTier(channel, idx, {
+                                tier: e.target.value as "admin" | "co_admin" | "restricted" | "guest"
+                              })
+                            }
+                          >
+                            <option value="admin">Admin</option>
+                            <option value="co_admin">Co-Admin</option>
+                            <option value="restricted">Restricted</option>
+                            <option value="guest">Guest</option>
+                          </Select>
+                          <Button type="button" tone="red" className="h-9 px-2 text-xs" onClick={() => removeChannelTierRow(channel, idx)}>
+                            Remove
+                          </Button>
+                        </div>
+                      ))}
+                      {settings.messagingAccess.channelTiers[channel].length === 0 ? (
+                        <p className="text-[11px] text-muted">No numbers assigned yet.</p>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-ui border bg-surface p-3 space-y-2">
+              <h3 className="text-sm font-semibold">Tier control (fixed policy)</h3>
+              <div className="overflow-auto">
+                <table className="w-full min-w-[620px] text-xs">
+                  <thead>
+                    <tr className="text-left text-muted">
+                      <th className="px-2 py-1">Tier</th>
+                      <th className="px-2 py-1">Capabilities</th>
+                      <th className="px-2 py-1">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-t border-border/60">
+                      <td className="px-2 py-1 font-semibold">Admin</td>
+                      <td className="px-2 py-1">All channel capabilities</td>
+                      <td className="px-2 py-1 text-muted">Only one Admin is allowed globally across Signal + WhatsApp.</td>
+                    </tr>
+                    <tr className="border-t border-border/60">
+                      <td className="px-2 py-1 font-semibold">Co-Admin</td>
+                      <td className="px-2 py-1">All channel capabilities</td>
+                      <td className="px-2 py-1 text-muted">Operationally same as Admin for channel actions, but intended no admin-account management.</td>
+                    </tr>
+                    <tr className="border-t border-border/60">
+                      <td className="px-2 py-1 font-semibold">Restricted</td>
+                      <td className="px-2 py-1">Skills allowed except system-changing actions; shell blocked</td>
+                      <td className="px-2 py-1 text-muted">No shell, no scheduler, no security-center actions.</td>
+                    </tr>
+                    <tr className="border-t border-border/60">
+                      <td className="px-2 py-1 font-semibold">Guest</td>
+                      <td className="px-2 py-1">Conversation + media assistant tasks only</td>
+                      <td className="px-2 py-1 text-muted">Talk to Nova, ask image/video generation; no system controls.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
             <div className="grid gap-3 md:grid-cols-2">
               <BridgeGuide title="SignalBridge" item={catalog?.setup?.signalBridge} />
               <BridgeGuide title="WhatsAppBridge" item={catalog?.setup?.whatsAppBridge} />
@@ -3392,8 +3550,33 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
     messagingAccess: {
       novaPhoneNumber: value?.messagingAccess?.novaPhoneNumber ?? DEFAULT_SETTINGS.messagingAccess.novaPhoneNumber,
       denyUnknownNumbers: value?.messagingAccess?.denyUnknownNumbers ?? DEFAULT_SETTINGS.messagingAccess.denyUnknownNumbers,
+      channelTiers: {
+        signal: Array.isArray(value?.messagingAccess?.channelTiers?.signal)
+          ? value.messagingAccess.channelTiers.signal
+              .map((row) => ({
+                phone: String(row?.phone ?? "").trim(),
+                tier:
+                  row?.tier === "admin" || row?.tier === "co_admin" || row?.tier === "restricted" || row?.tier === "guest"
+                    ? row.tier
+                    : ("guest" as const)
+              }))
+              .filter((row) => row.phone.length > 0)
+          : DEFAULT_SETTINGS.messagingAccess.channelTiers.signal,
+        whatsapp: Array.isArray(value?.messagingAccess?.channelTiers?.whatsapp)
+          ? value.messagingAccess.channelTiers.whatsapp
+              .map((row) => ({
+                phone: String(row?.phone ?? "").trim(),
+                tier:
+                  row?.tier === "admin" || row?.tier === "co_admin" || row?.tier === "restricted" || row?.tier === "guest"
+                    ? row.tier
+                    : ("guest" as const)
+              }))
+              .filter((row) => row.phone.length > 0)
+          : DEFAULT_SETTINGS.messagingAccess.channelTiers.whatsapp
+      },
       systemAdmins: value?.messagingAccess?.systemAdmins ?? DEFAULT_SETTINGS.messagingAccess.systemAdmins,
-      guests: value?.messagingAccess?.guests ?? DEFAULT_SETTINGS.messagingAccess.guests
+      guests: value?.messagingAccess?.guests ?? DEFAULT_SETTINGS.messagingAccess.guests,
+      importantPeople: value?.messagingAccess?.importantPeople ?? DEFAULT_SETTINGS.messagingAccess.importantPeople
     },
     shell: {
       timeoutMs: value?.shell?.timeoutMs ?? DEFAULT_SETTINGS.shell.timeoutMs,
