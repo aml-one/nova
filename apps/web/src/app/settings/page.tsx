@@ -2647,22 +2647,33 @@ export default function SettingsPage() {
                     <Checkbox checked={channelDebugAutoRefresh} onChange={(e) => setChannelDebugAutoRefresh(e.target.checked)} />
                     Auto-refresh (4s)
                   </label>
-                  <Button
+                  <button
                     type="button"
-                    tone="blue"
-                    className="h-8 gap-1.5 px-2 text-xs"
+                    aria-label="Refresh channel message trace"
+                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted transition hover:bg-black/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-white/10"
                     onClick={() => void refreshChannelDebug()}
                     disabled={channelDebugLoading}
                   >
-                    <FaRotateRight className={`h-3.5 w-3.5 shrink-0 ${channelDebugLoading ? "animate-spin" : ""}`} />
-                    Refresh
-                  </Button>
+                    <FaRotateRight className={`h-4 w-4 ${channelDebugLoading ? "animate-spin" : ""}`} />
+                  </button>
                 </div>
               </div>
               <p className="text-[11px] text-muted leading-snug">
-                In-memory log of recent Signal and WhatsApp traffic (clears when the agent restarts). If you send Signal but never see{" "}
-                <strong className="text-foreground">signal · in</strong> rows, inbound HTTP is probably not reaching Nova — configure signal-cli-rest-api to POST to{" "}
-                <code className="text-[10px]">/v1/webhooks/signal</code> on this host.
+                In-memory log of <strong className="text-foreground">Signal and WhatsApp only</strong> (clears when the agent restarts).{" "}
+                <strong className="text-foreground">Web chat</strong> loads your default model (e.g. Gemma) but does not write here — use this list to debug channel webhooks, not the browser chat.
+              </p>
+              <p className="text-[11px] text-muted leading-snug">
+                <strong className="text-foreground">Signal path:</strong> Signal servers → signal-cli / signal-cli-rest-api → <strong className="text-foreground">HTTP POST to Nova</strong> →
+                signature check → JSON parse → allowed number → orchestrator → outbound send. Nova only sees traffic after that POST. Configure the bridge to call either{" "}
+                <code className="text-[10px]">https://&lt;your-web-host&gt;/api/webhooks/signal</code> (Next forwards to the agent) or{" "}
+                <code className="text-[10px]">http://&lt;agent-host&gt;:8787/v1/webhooks/signal</code> if the agent port is reachable from the bridge.
+              </p>
+              <p className="text-[11px] text-muted leading-snug">
+                <strong className="text-foreground">Where it stops (use the rows below):</strong> no rows at all → POST never hit this agent (wrong URL/port, firewall, or bridge not calling Nova).{" "}
+                <code className="text-[10px]">signature_invalid</code> → <code className="text-[10px]">SIGNAL_WEBHOOK_SECRET</code> / header mismatch.{" "}
+                <code className="text-[10px]">parsed_zero_messages</code> → JSON shape not recognized (receipt-only, or fields differ from what Nova expects).{" "}
+                <code className="text-[10px]">access_denied</code> → number not allowed in channel tiers. <code className="text-[10px]">orchestrator_error</code> → Nova threw while replying.{" "}
+                <code className="text-[10px]">signal · in</code> + Nova handled but no <code className="text-[10px]">signal · out</code> / dispatcher errors → check <code className="text-[10px]">SIGNAL_API_URL</code> send path.
               </p>
               <div className="flex flex-wrap gap-3 text-[11px]">
                 <span className="inline-flex items-center gap-1">
@@ -2683,9 +2694,14 @@ export default function SettingsPage() {
                 </span>
               </div>
               {channelDebugError ? <p className="text-xs text-red-600 dark:text-red-400">{channelDebugError}</p> : null}
-              <div className="max-h-[420px] space-y-1.5 overflow-auto rounded border border-border/60 bg-surface2 p-2">
+              <div className="h-[460px] space-y-1.5 overflow-y-auto overflow-x-hidden rounded border border-border/60 bg-surface2 p-2">
+                {channelDebugEntries.length === 0 && channelDebugLoading ? (
+                  <p className="px-1 py-4 text-center text-xs text-muted">Loading…</p>
+                ) : null}
                 {channelDebugEntries.length === 0 && !channelDebugLoading ? (
-                  <p className="px-1 py-4 text-center text-xs text-muted">No channel debug rows yet. Send a message or trigger a webhook.</p>
+                  <p className="px-1 py-4 text-center text-xs text-muted">
+                    No rows yet. Send on <strong className="text-foreground">Signal/WhatsApp</strong> (or hit the webhooks). Web UI messages never appear here.
+                  </p>
                 ) : null}
                 {channelDebugEntries.map((entry) => (
                   <div

@@ -4,6 +4,8 @@ import { effectiveSignalAccountNumber, effectiveSignalApiUrl } from "./channel-r
 
 type SignalWebhookPayload = {
   envelope?: {
+    /** Some signal-cli / REST payloads use `source` instead of `sourceNumber`. */
+    source?: string;
     sourceNumber?: string;
     dataMessage?: {
       message?: string;
@@ -18,7 +20,11 @@ export class SignalChannelAdapter {
 
   async ingestSignalEvent(payload: unknown): Promise<ChannelMessage[]> {
     const parsed = payload as SignalWebhookPayload;
-    const from = parsed.envelope?.sourceNumber ?? parsed.sourceNumber ?? "";
+    const from =
+      parsed.envelope?.sourceNumber?.trim() ||
+      (typeof parsed.envelope?.source === "string" ? parsed.envelope.source.trim() : "") ||
+      parsed.sourceNumber?.trim() ||
+      "";
     const text = parsed.envelope?.dataMessage?.message ?? parsed.message ?? "";
     if (!from || !text.trim()) {
       return [];

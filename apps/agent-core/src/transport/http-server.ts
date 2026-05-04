@@ -3057,6 +3057,7 @@ async function checkSignalConnectionForBase(baseUrl: string): Promise<{ ok: bool
 }
 
 async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string; executedCommand?: string }> {
+  const webhookUrl = resolveSignalReceiveWebhookUrl();
   try {
     await runLocalCommand("docker --version");
   } catch (err) {
@@ -3067,24 +3068,53 @@ async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string
   }
 
   try {
-    const running = await runLocalCommand('docker ps --filter "name=^/nova-signal-bridge$" --format "{{.Names}}"');
-    if ((running.stdout ?? "").trim().includes("nova-signal-bridge")) {
-      try {
-        await runLocalCommand("docker update --restart unless-stopped nova-signal-bridge");
-      } catch {
-        // Ignore restart policy update failures on older Docker setups.
+    const existing = await runLocalCommand('docker ps -a --filter "name=^/nova-signal-bridge$" --format "{{.Names}}"');
+    if ((existing.stdout ?? "").trim().includes("nova-signal-bridge")) {
+      const inspect = await runLocalCommand('docker inspect nova-signal-bridge --format "{{range .Config.Env}}{{println .}}{{end}}"');
+      const env = inspect.stdout ?? "";
+      const wanted = `RECEIVE_WEBHOOK_URL=${webhookUrl}`;
+      const hasWebhook = env.includes(wanted);
+      if (!hasWebhook) {
+        await runLocalCommand("docker rm -f nova-signal-bridge");
+      } else {
+        try {
+          await runLocalCommand("docker update --restart unless-stopped nova-signal-bridge");
+        } catch {
+          // Ignore restart policy update failures on older Docker setups.
+        }
+        const running = await runLocalCommand('docker ps --filter "name=^/nova-signal-bridge$" --format "{{.Names}}"');
+        if ((running.stdout ?? "").trim().includes("nova-signal-bridge")) {
+          return { ok: true, detail: `Signal bridge container already running (webhook: ${webhookUrl}).` };
+        }
+        await runLocalCommand("docker start nova-signal-bridge");
+        return {
+          ok: true,
+          detail: `Started existing Signal bridge container (webhook: ${webhookUrl}).`,
+          executedCommand: "docker start nova-signal-bridge"
+        };
       }
-      return { ok: true, detail: "Signal bridge container already running." };
     }
   } catch {
-    // Continue to start attempt below.
+    // Continue to (re)start attempt below.
   }
 
-  const startCmd =
-    "docker run -d --restart unless-stopped --name nova-signal-bridge -p 8085:8080 -v nova-signal-cli-config:/home/.local/share/signal-cli bbernhard/signal-cli-rest-api:latest";
+  const startCmd = [
+    "docker run -d",
+    "--restart unless-stopped",
+    "--name nova-signal-bridge",
+    "-p 8085:8080",
+    "-e MODE=json-rpc",
+    `-e RECEIVE_WEBHOOK_URL=${webhookUrl}`,
+    "-v nova-signal-cli-config:/home/.local/share/signal-cli",
+    "bbernhard/signal-cli-rest-api:latest"
+  ].join(" ");
   try {
     await runLocalCommand(startCmd);
-    return { ok: true, detail: "Started Signal bridge container.", executedCommand: startCmd };
+    return {
+      ok: true,
+      detail: `Started Signal bridge container (webhook: ${webhookUrl}).`,
+      executedCommand: startCmd
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown error";
     if (/already in use|is already in use|Conflict/i.test(message)) {
@@ -3105,6 +3135,15 @@ async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string
     }
     return { ok: false, detail: `Could not start Signal bridge: ${message}` };
   }
+}
+
+function resolveSignalReceiveWebhookUrl(): string {
+  const explicit = process.env.SIGNAL_RECEIVE_WEBHOOK_URL?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  // Docker Desktop (Windows/macOS) resolves host.docker.internal to the host machine.
+  return "http://host.docker.internal:8787/v1/webhooks/signal";
 }
 
 function buildSignalRegisterJsonBody(opts?: { captcha?: string; useVoice?: boolean }): Record<string, unknown> | undefined {
