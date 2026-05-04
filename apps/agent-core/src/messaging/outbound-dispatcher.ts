@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { pushChannelDebug, previewChannelText } from "../channels/channel-debug-log.js";
 import { SignalChannelAdapter } from "../channels/signal.js";
 import { WhatsAppChannelAdapter } from "../channels/whatsapp.js";
 import { Logger } from "../observability/logger.js";
@@ -53,8 +55,28 @@ export class OutboundDispatcher {
           await this.signal.sendMessage(job.recipient, job.payload);
         }
         this.queue.markSuccess(job.id);
+        pushChannelDebug({
+          channel: job.channel,
+          direction: "out",
+          transport: "dispatcher",
+          correlationId: job.correlationId ?? randomUUID(),
+          peer: job.recipient,
+          textPreview: previewChannelText(job.payload),
+          trace: ["outbound_send_ok"],
+          reachedNova: undefined
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "dispatch failure";
+        pushChannelDebug({
+          channel: job.channel,
+          direction: "out",
+          transport: "dispatcher",
+          correlationId: job.correlationId ?? randomUUID(),
+          peer: job.recipient,
+          textPreview: previewChannelText(job.payload),
+          trace: ["outbound_send_failed"],
+          error: message
+        });
         this.queue.markRetry(job, message);
         this.logger.error("outbound dispatch failed", {
           correlationId: job.correlationId,

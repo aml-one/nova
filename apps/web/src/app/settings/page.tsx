@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import { FaCopy, FaPenToSquare, FaRotateRight } from "react-icons/fa6";
@@ -46,6 +46,19 @@ type ModelPingResult = {
   chatDetail?: string;
   chatLatencyMs?: number;
   modelTried?: string;
+};
+type ChannelDebugEntry = {
+  id: string;
+  at: string;
+  channel: "signal" | "whatsapp";
+  direction: "in" | "out";
+  transport?: "webhook" | "baileys" | "dispatcher";
+  correlationId: string;
+  peer: string;
+  textPreview: string;
+  trace: string[];
+  reachedNova?: boolean;
+  error?: string;
 };
 type UpdateStatus = {
   installedAt: string;
@@ -441,6 +454,10 @@ export default function SettingsPage() {
   const [signalRegistrationCaptcha, setSignalRegistrationCaptcha] = useState("");
   const [signalRegistrationUseVoice, setSignalRegistrationUseVoice] = useState(false);
   const [whatsAppWebStatus, setWhatsAppWebStatus] = useState<WhatsAppWebBridgeStatus | null>(null);
+  const [channelDebugEntries, setChannelDebugEntries] = useState<ChannelDebugEntry[]>([]);
+  const [channelDebugError, setChannelDebugError] = useState<string | null>(null);
+  const [channelDebugLoading, setChannelDebugLoading] = useState(false);
+  const [channelDebugAutoRefresh, setChannelDebugAutoRefresh] = useState(true);
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
   const lastSavedVoiceSilenceSecRef = useRef<number>(DEFAULT_SETTINGS.web.voiceDictationSilenceSec);
@@ -990,6 +1007,36 @@ export default function SettingsPage() {
     }
     setWhatsAppWebStatus(data.status ?? null);
   }
+
+  const refreshChannelDebug = useCallback(async (): Promise<void> => {
+    setChannelDebugLoading(true);
+    setChannelDebugError(null);
+    try {
+      const response = await apiFetch("/api/setup/channels/message-debug?limit=200");
+      const data = (await response.json()) as { items?: ChannelDebugEntry[]; error?: string };
+      if (!response.ok) {
+        setChannelDebugError(data.error ?? `HTTP ${response.status}`);
+        setChannelDebugEntries([]);
+        return;
+      }
+      setChannelDebugEntries(Array.isArray(data.items) ? data.items : []);
+    } catch (e) {
+      setChannelDebugError(e instanceof Error ? e.message : String(e));
+      setChannelDebugEntries([]);
+    } finally {
+      setChannelDebugLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "channels") return;
+    void refreshChannelDebug();
+    if (!channelDebugAutoRefresh) {
+      return;
+    }
+    const id = window.setInterval(() => void refreshChannelDebug(), 4000);
+    return () => window.clearInterval(id);
+  }, [tab, channelDebugAutoRefresh, refreshChannelDebug]);
 
   async function startWhatsAppWebBridge(): Promise<void> {
     setError(null);
@@ -2592,6 +2639,101 @@ export default function SettingsPage() {
               <BridgeGuide title="SignalBridge" item={catalog?.setup?.signalBridge} />
               <BridgeGuide title="WhatsAppBridge" item={catalog?.setup?.whatsAppBridge} />
             </div>
+            <div className="rounded-ui border bg-surface p-3 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">Channel message trace</h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted">
+                    <Checkbox checked={channelDebugAutoRefresh} onChange={(e) => setChannelDebugAutoRefresh(e.target.checked)} />
+                    Auto-refresh (4s)
+                  </label>
+                  <Button
+                    type="button"
+                    tone="blue"
+                    className="h-8 gap-1.5 px-2 text-xs"
+                    onClick={() => void refreshChannelDebug()}
+                    disabled={channelDebugLoading}
+                  >
+                    <FaRotateRight className={`h-3.5 w-3.5 shrink-0 ${channelDebugLoading ? "animate-spin" : ""}`} />
+                    Refresh
+                  </Button>
+                </div>
+              </div>
+              <p className="text-[11px] text-muted leading-snug">
+                In-memory log of recent Signal and WhatsApp traffic (clears when the agent restarts). If you send Signal but never see{" "}
+                <strong className="text-foreground">signal · in</strong> rows, inbound HTTP is probably not reaching Nova — configure signal-cli-rest-api to POST to{" "}
+                <code className="text-[10px]">/v1/webhooks/signal</code> on this host.
+              </p>
+              <div className="flex flex-wrap gap-3 text-[11px]">
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-3 w-3 shrink-0 rounded-sm border border-blue-500/60 bg-blue-500/35" aria-hidden />
+                  Signal in
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-3 w-3 shrink-0 rounded-sm border border-indigo-600/60 bg-indigo-600/35" aria-hidden />
+                  Signal out
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-3 w-3 shrink-0 rounded-sm border border-emerald-500/60 bg-emerald-500/35" aria-hidden />
+                  WhatsApp in
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-3 w-3 shrink-0 rounded-sm border border-teal-600/60 bg-teal-600/35" aria-hidden />
+                  WhatsApp out
+                </span>
+              </div>
+              {channelDebugError ? <p className="text-xs text-red-600 dark:text-red-400">{channelDebugError}</p> : null}
+              <div className="max-h-[420px] space-y-1.5 overflow-auto rounded border border-border/60 bg-surface2 p-2">
+                {channelDebugEntries.length === 0 && !channelDebugLoading ? (
+                  <p className="px-1 py-4 text-center text-xs text-muted">No channel debug rows yet. Send a message or trigger a webhook.</p>
+                ) : null}
+                {channelDebugEntries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className={`rounded-md border border-border/40 px-2 py-1.5 text-[12px] leading-snug ${channelDebugRowAccent(entry)}`}
+                  >
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <span className="font-mono text-[11px] text-muted">{formatChannelDebugTime(entry.at)}</span>
+                      <strong className="capitalize">{entry.channel}</strong>
+                      <span className="text-muted">·</span>
+                      <span>{entry.direction === "in" ? "in" : "out"}</span>
+                      {entry.transport ? (
+                        <>
+                          <span className="text-muted">·</span>
+                          <span className="text-[11px]">{entry.transport}</span>
+                        </>
+                      ) : null}
+                      {entry.direction === "in" && typeof entry.reachedNova === "boolean" ? (
+                        <span
+                          className={`text-[11px] font-medium ${entry.reachedNova ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}
+                        >
+                          · Nova {entry.reachedNova ? "handled" : "did not handle"}
+                        </span>
+                      ) : null}
+                    </div>
+                    {entry.peer ? (
+                      <div className="truncate text-[11px] text-muted" title={entry.peer}>
+                        Peer: {entry.peer}
+                      </div>
+                    ) : null}
+                    <div className="break-words">{entry.textPreview}</div>
+                    {entry.trace?.length ? (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {entry.trace.map((step, ti) => (
+                          <span key={`${entry.id}-t-${ti}`} className="rounded bg-black/10 px-1.5 py-0 font-mono text-[10px] dark:bg-white/10">
+                            {step}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="mt-1 truncate font-mono text-[10px] text-muted" title={entry.correlationId}>
+                      corr: {entry.correlationId}
+                    </div>
+                    {entry.error ? <div className="mt-1 text-[11px] text-red-600 dark:text-red-400">{entry.error}</div> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
           </Card>
         ) : null}
 
@@ -3382,6 +3524,23 @@ export default function SettingsPage() {
       ) : null}
     </form>
   );
+}
+
+function channelDebugRowAccent(entry: ChannelDebugEntry): string {
+  if (entry.channel === "signal") {
+    return entry.direction === "in"
+      ? "border-l-[4px] border-blue-500 bg-blue-500/[0.08] dark:bg-blue-500/15"
+      : "border-l-[4px] border-indigo-600 bg-indigo-600/[0.09] dark:bg-indigo-950/35";
+  }
+  return entry.direction === "in"
+    ? "border-l-[4px] border-emerald-500 bg-emerald-500/[0.08] dark:bg-emerald-500/15"
+    : "border-l-[4px] border-teal-600 bg-teal-600/[0.09] dark:bg-teal-950/35";
+}
+
+function formatChannelDebugTime(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return iso;
+  return new Date(t).toLocaleString();
 }
 
 function BridgeGuide({ title, item }: { title: string; item?: { configured: boolean; details: string; steps: string[] } }) {

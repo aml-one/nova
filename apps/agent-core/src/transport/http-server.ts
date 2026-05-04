@@ -15,6 +15,7 @@ import {
 } from "../channels/channel-runtime-config.js";
 import { getWhatsAppWebBridgeStatus, startWhatsAppWebBridge, stopWhatsAppWebBridge } from "../channels/whatsapp-web-bridge.js";
 import { mapInboundIdentity } from "../channels/identity-mapping.js";
+import { listChannelDebugEntries, previewChannelText, pushChannelDebug } from "../channels/channel-debug-log.js";
 import { ChannelRouter } from "../channels/channel-router.js";
 import {
   verifyInternalAuthHeader,
@@ -111,28 +112,74 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   const copilotDeviceLoginSessions = new Map<string, CopilotDeviceLoginSession>();
   const thoughtWs = new WebSocketServer({ noServer: true });
   dispatcher.start();
-  scheduler.start(async (payload) => {
-    await options.orchestrator.handleChannelMessage({
-      channel: "web",
-      text: payload,
-      correlationId: randomUUID()
-    });
-  });
-  if ((process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase() === "baileys") {
-    void startWhatsAppWebBridge(async ({ from, text }) => {
-      const identity = mapInboundIdentity("whatsapp", from);
-      const accessProfile = resolveChannelAccess("whatsapp", identity, options.settings.get());
-      if (!accessProfile.allowed) {
-        return;
+  const baileysInboundHandler = async ({ from, text }: { from: string; text: string }) => {
+      const msgCorr = randomUUID();
+      const trace: string[] = ["baileys_inbound"];
+      try {
+        const identity = mapInboundIdentity("whatsapp", from);
+        trace.push(`mapped_identity=${identity}`);
+        const accessProfile = resolveChannelAccess("whatsapp", identity, options.settings.get());
+        trace.push(accessProfile.allowed ? "access_allowed" : `access_denied(role=${accessProfile.role})`);
+        if (!accessProfile.allowed) {
+          pushChannelDebug({
+            channel: "whatsapp",
+            direction: "in",
+            transport: "baileys",
+            correlationId: msgCorr,
+            peer: from,
+            textPreview: previewChannelText(text),
+            trace,
+            reachedNova: false,
+            error: "Number blocked by channel access policy"
+          });
+          return;
+        }
+        const reply = await options.orchestrator.handleChannelMessage({
+          channel: "whatsapp",
+          phoneNumber: identity,
+          text,
+          correlationId: msgCorr,
+          accessProfile
+        });
+        trace.push("orchestrator_ok", "queued_outbound_reply");
+        pushChannelDebug({
+          channel: "whatsapp",
+          direction: "in",
+          transport: "baileys",
+          correlationId: msgCorr,
+          peer: from,
+          textPreview: previewChannelText(text),
+          trace,
+          reachedNova: true
+        });
+        dispatcher.enqueue("whatsapp", identity, reply, msgCorr);
+        pushChannelDebug({
+          channel: "whatsapp",
+          direction: "out",
+          transport: "baileys",
+          correlationId: msgCorr,
+          peer: identity,
+          textPreview: previewChannelText(reply),
+          trace: ["reply_enqueued"]
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        trace.push("handler_error");
+        pushChannelDebug({
+          channel: "whatsapp",
+          direction: "in",
+          transport: "baileys",
+          correlationId: msgCorr,
+          peer: from,
+          textPreview: previewChannelText(text),
+          trace,
+          reachedNova: false,
+          error: msg
+        });
       }
-      const reply = await options.orchestrator.handleChannelMessage({
-        channel: "whatsapp",
-        phoneNumber: identity,
-        text,
-        correlationId: randomUUID()
-      });
-      dispatcher.enqueue("whatsapp", identity, reply, randomUUID());
-    }).catch((error) => {
+  };
+  if ((process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase() === "baileys") {
+    void startWhatsAppWebBridge(baileysInboundHandler).catch((error) => {
       console.warn("[channels] Could not auto-start WhatsApp Web bridge:", error instanceof Error ? error.message : String(error));
     });
   }
@@ -669,24 +716,18 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           correlationId
         });
       }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/setup/channels/message-debug") {
+        const rawLimit = parsedUrl.searchParams.get("limit");
+        const parsed = rawLimit ? Number(rawLimit) : 150;
+        const limit = Number.isFinite(parsed) ? parsed : 150;
+        const items = listChannelDebugEntries(limit);
+        return sendJson(response, 200, { items, correlationId });
+      }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/status") {
         return sendJson(response, 200, { status: getWhatsAppWebBridgeStatus(), correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/start") {
-        const status = await startWhatsAppWebBridge(async ({ from, text }) => {
-          const identity = mapInboundIdentity("whatsapp", from);
-          const accessProfile = resolveChannelAccess("whatsapp", identity, options.settings.get());
-          if (!accessProfile.allowed) {
-            return;
-          }
-          const reply = await options.orchestrator.handleChannelMessage({
-            channel: "whatsapp",
-            phoneNumber: identity,
-            text,
-            correlationId: randomUUID()
-          });
-          dispatcher.enqueue("whatsapp", identity, reply, randomUUID());
-        });
+        const status = await startWhatsAppWebBridge(baileysInboundHandler);
         return sendJson(response, 200, { status, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/stop") {
@@ -1156,50 +1197,199 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       if (request.method === "POST" && parsedUrl.pathname === "/v1/webhooks/whatsapp") {
         const rawBody = await readRawBody(request);
         if (!verifyWhatsAppSignature(rawBody, request.headers["x-hub-signature-256"]?.toString())) {
+          pushChannelDebug({
+            channel: "whatsapp",
+            direction: "in",
+            transport: "webhook",
+            correlationId,
+            peer: "",
+            textPreview: "",
+            trace: ["webhook_received", "signature_invalid"],
+            reachedNova: false,
+            error: "invalid whatsapp signature"
+          });
           return sendJson(response, 401, { error: "invalid whatsapp signature", correlationId });
         }
         const payload = rawBody ? JSON.parse(rawBody) : {};
         const messages = router.normalizeBatch(await wa.ingestWebhook(payload));
         const replies: Array<{ to: string; reply: string; delivered: boolean; error?: string }> = [];
-        for (const message of messages) {
-          const accessProfile = resolveChannelAccess("whatsapp", message.phoneNumber, options.settings.get());
-          if (!accessProfile.allowed) {
-            continue;
-          }
-          const reply = await options.orchestrator.handleChannelMessage({
+        if (messages.length === 0) {
+          pushChannelDebug({
             channel: "whatsapp",
-            phoneNumber: message.phoneNumber,
-            text: message.text,
+            direction: "in",
+            transport: "webhook",
             correlationId,
-            accessProfile
+            peer: "",
+            textPreview: "",
+            trace: ["webhook_received", "parsed_zero_text_messages"],
+            reachedNova: false,
+            error: "No inbound text messages in payload (typing/status-only or unsupported shape)"
           });
-          dispatcher.enqueue("whatsapp", message.from, reply, correlationId);
-          replies.push({ to: message.from, reply, delivered: true });
+        }
+        for (const message of messages) {
+          const msgCorr = randomUUID();
+          const trace: string[] = ["webhook_received", "parsed_inbound"];
+          try {
+            const accessProfile = resolveChannelAccess("whatsapp", message.phoneNumber, options.settings.get());
+            trace.push(accessProfile.allowed ? "access_allowed" : `access_denied(role=${accessProfile.role})`);
+            if (!accessProfile.allowed) {
+              pushChannelDebug({
+                channel: "whatsapp",
+                direction: "in",
+                transport: "webhook",
+                correlationId: msgCorr,
+                peer: message.from,
+                textPreview: previewChannelText(message.text),
+                trace,
+                reachedNova: false,
+                error: "Blocked by channel access policy"
+              });
+              continue;
+            }
+            const reply = await options.orchestrator.handleChannelMessage({
+              channel: "whatsapp",
+              phoneNumber: message.phoneNumber,
+              text: message.text,
+              correlationId: msgCorr,
+              accessProfile
+            });
+            trace.push("orchestrator_ok", "queued_outbound_reply");
+            pushChannelDebug({
+              channel: "whatsapp",
+              direction: "in",
+              transport: "webhook",
+              correlationId: msgCorr,
+              peer: message.from,
+              textPreview: previewChannelText(message.text),
+              trace,
+              reachedNova: true
+            });
+            dispatcher.enqueue("whatsapp", message.from, reply, msgCorr);
+            pushChannelDebug({
+              channel: "whatsapp",
+              direction: "out",
+              transport: "webhook",
+              correlationId: msgCorr,
+              peer: message.from,
+              textPreview: previewChannelText(reply),
+              trace: ["reply_enqueued"]
+            });
+            replies.push({ to: message.from, reply, delivered: true });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            trace.push("orchestrator_error");
+            pushChannelDebug({
+              channel: "whatsapp",
+              direction: "in",
+              transport: "webhook",
+              correlationId: msgCorr,
+              peer: message.from,
+              textPreview: previewChannelText(message.text),
+              trace,
+              reachedNova: false,
+              error: msg
+            });
+          }
         }
         return sendJson(response, 200, { handled: replies.length, replies, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/webhooks/signal") {
         const rawBody = await readRawBody(request);
         if (!verifySignalSignature(rawBody, request.headers["x-signal-signature"]?.toString())) {
+          pushChannelDebug({
+            channel: "signal",
+            direction: "in",
+            transport: "webhook",
+            correlationId,
+            peer: "",
+            textPreview: "",
+            trace: ["webhook_received", "signature_invalid"],
+            reachedNova: false,
+            error: "invalid signal signature"
+          });
           return sendJson(response, 401, { error: "invalid signal signature", correlationId });
         }
         const payload = rawBody ? JSON.parse(rawBody) : {};
         const messages = router.normalizeBatch(await signal.ingestSignalEvent(payload));
         const replies: Array<{ to: string; reply: string; delivered: boolean; error?: string }> = [];
-        for (const message of messages) {
-          const accessProfile = resolveChannelAccess("signal", message.phoneNumber, options.settings.get());
-          if (!accessProfile.allowed) {
-            continue;
-          }
-          const reply = await options.orchestrator.handleChannelMessage({
+        if (messages.length === 0) {
+          pushChannelDebug({
             channel: "signal",
-            phoneNumber: message.phoneNumber,
-            text: message.text,
+            direction: "in",
+            transport: "webhook",
             correlationId,
-            accessProfile
+            peer: "",
+            textPreview: "",
+            trace: ["webhook_received", "parsed_zero_messages"],
+            reachedNova: false,
+            error:
+              "No message extracted from webhook payload — configure signal-cli-rest-api to POST inbound messages here, or verify payload shape."
           });
-          dispatcher.enqueue("signal", message.from, reply, correlationId);
-          replies.push({ to: message.from, reply, delivered: true });
+        }
+        for (const message of messages) {
+          const msgCorr = randomUUID();
+          const trace: string[] = ["webhook_received", "parsed_inbound"];
+          try {
+            const accessProfile = resolveChannelAccess("signal", message.phoneNumber, options.settings.get());
+            trace.push(accessProfile.allowed ? "access_allowed" : `access_denied(role=${accessProfile.role})`);
+            if (!accessProfile.allowed) {
+              pushChannelDebug({
+                channel: "signal",
+                direction: "in",
+                transport: "webhook",
+                correlationId: msgCorr,
+                peer: message.from,
+                textPreview: previewChannelText(message.text),
+                trace,
+                reachedNova: false,
+                error: "Blocked by channel access policy"
+              });
+              continue;
+            }
+            const reply = await options.orchestrator.handleChannelMessage({
+              channel: "signal",
+              phoneNumber: message.phoneNumber,
+              text: message.text,
+              correlationId: msgCorr,
+              accessProfile
+            });
+            trace.push("orchestrator_ok", "queued_outbound_reply");
+            pushChannelDebug({
+              channel: "signal",
+              direction: "in",
+              transport: "webhook",
+              correlationId: msgCorr,
+              peer: message.from,
+              textPreview: previewChannelText(message.text),
+              trace,
+              reachedNova: true
+            });
+            dispatcher.enqueue("signal", message.from, reply, msgCorr);
+            pushChannelDebug({
+              channel: "signal",
+              direction: "out",
+              transport: "webhook",
+              correlationId: msgCorr,
+              peer: message.from,
+              textPreview: previewChannelText(reply),
+              trace: ["reply_enqueued"]
+            });
+            replies.push({ to: message.from, reply, delivered: true });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            trace.push("orchestrator_error");
+            pushChannelDebug({
+              channel: "signal",
+              direction: "in",
+              transport: "webhook",
+              correlationId: msgCorr,
+              peer: message.from,
+              textPreview: previewChannelText(message.text),
+              trace,
+              reachedNova: false,
+              error: msg
+            });
+          }
         }
         return sendJson(response, 200, { handled: replies.length, replies, correlationId });
       }
