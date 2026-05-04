@@ -1,4 +1,5 @@
 import type { ChannelMessage } from "./channel-router.js";
+import { sendWhatsAppWebMessage } from "./whatsapp-web-bridge.js";
 
 type WhatsAppWebhookPayload = {
   entry?: Array<{
@@ -41,6 +42,10 @@ export class WhatsAppChannelAdapter {
   }
 
   async sendMessage(to: string, text: string): Promise<void> {
+    if ((process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase() === "baileys") {
+      await sendWhatsAppWebMessage(to, text);
+      return;
+    }
     const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
     const token = process.env.WHATSAPP_TOKEN;
     const baseUrl = process.env.WHATSAPP_API_BASE_URL ?? "https://graph.facebook.com";

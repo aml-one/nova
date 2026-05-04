@@ -170,6 +170,14 @@ type SignalBootstrapResult = {
   suggestedEnv?: string;
   error?: string;
 };
+type WhatsAppWebBridgeStatus = {
+  state?: "idle" | "starting" | "qr" | "connected" | "reconnecting" | "logged_out" | "error";
+  qr?: string;
+  detail?: string;
+  connected?: boolean;
+  startedAt?: string;
+  lastEventAt?: string;
+};
 type SshTestResult = { ok: boolean; detail: string } | null;
 
 const DEFAULT_SETTINGS: SettingsState = {
@@ -403,6 +411,8 @@ export default function SettingsPage() {
   const [modelPingResults, setModelPingResults] = useState<ModelPingResult[] | null>(null);
   const [modelPingError, setModelPingError] = useState<string | null>(null);
   const [channelsSetupMode, setChannelsSetupMode] = useState<"signal" | "whatsapp" | "both">("both");
+  const [signalVerificationCode, setSignalVerificationCode] = useState("");
+  const [whatsAppWebStatus, setWhatsAppWebStatus] = useState<WhatsAppWebBridgeStatus | null>(null);
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
   const lastSavedVoiceSilenceSecRef = useRef<number>(DEFAULT_SETTINGS.web.voiceDictationSilenceSec);
@@ -461,6 +471,7 @@ export default function SettingsPage() {
         loadHealth(),
         loadCatalog(),
         loadUpdateStatus(),
+        refreshWhatsAppWebStatus(),
         loadSkillManifests(),
         loadWebsites(),
         loadDefaultPersona(),
@@ -828,6 +839,108 @@ export default function SettingsPage() {
       signalAccountNumber
     });
     setStatus("Signal bridge bootstrap completed. Finish one-time registration/link, then run Validate.");
+  }
+
+  async function runSignalRegisterStart(): Promise<void> {
+    setError(null);
+    setStatus(null);
+    const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
+    const signalApiUrl = values.signalApiUrl ?? "http://127.0.0.1:8085";
+    const signalAccountNumber = values.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "";
+    const response = await apiFetch("/api/setup/channels/signal/register", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ signalApiUrl, signalAccountNumber })
+    });
+    const data = (await response.json()) as { detail?: string; endpointTried?: string; error?: string };
+    if (!response.ok) {
+      setError(data.error ?? "Could not start Signal registration.");
+      return;
+    }
+    setChannelsSetupOutput(
+      [
+        "Signal register/link: started.",
+        data.detail ?? "",
+        data.endpointTried ? `Endpoint: ${data.endpointTried}` : "",
+        "",
+        `SIGNAL_API_URL=${signalApiUrl}`,
+        `SIGNAL_ACCOUNT_NUMBER=${signalAccountNumber || "+15550001111"}`
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+    setStatus("Signal registration started. Enter the verification code below, then click Verify code.");
+  }
+
+  async function runSignalVerifyCode(): Promise<void> {
+    setError(null);
+    setStatus(null);
+    const code = signalVerificationCode.trim();
+    if (!code) {
+      setError("Enter the Signal verification code first.");
+      return;
+    }
+    const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
+    const signalApiUrl = values.signalApiUrl ?? "http://127.0.0.1:8085";
+    const signalAccountNumber = values.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "";
+    const response = await apiFetch("/api/setup/channels/signal/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ signalApiUrl, signalAccountNumber, code })
+    });
+    const data = (await response.json()) as { detail?: string; endpointTried?: string; error?: string };
+    if (!response.ok) {
+      setError(data.error ?? "Could not verify Signal code.");
+      return;
+    }
+    setChannelsSetupOutput(
+      [
+        "Signal verification: OK.",
+        data.detail ?? "",
+        data.endpointTried ? `Endpoint: ${data.endpointTried}` : "",
+        "",
+        `SIGNAL_API_URL=${signalApiUrl}`,
+        `SIGNAL_ACCOUNT_NUMBER=${signalAccountNumber || "+15550001111"}`
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+    setSignalVerificationCode("");
+    setStatus("Signal number linked successfully. Run Validate and then Save Settings.");
+  }
+
+  async function refreshWhatsAppWebStatus(): Promise<void> {
+    const response = await apiFetch("/api/setup/channels/whatsapp/web/status");
+    const data = (await response.json()) as { status?: WhatsAppWebBridgeStatus; error?: string };
+    if (!response.ok) {
+      setError(data.error ?? "Could not load WhatsApp Web status.");
+      return;
+    }
+    setWhatsAppWebStatus(data.status ?? null);
+  }
+
+  async function startWhatsAppWebBridge(): Promise<void> {
+    setError(null);
+    const response = await apiFetch("/api/setup/channels/whatsapp/web/start", { method: "POST" });
+    const data = (await response.json()) as { status?: WhatsAppWebBridgeStatus; error?: string };
+    if (!response.ok) {
+      setError(data.error ?? "Could not start WhatsApp Web bridge.");
+      return;
+    }
+    setWhatsAppWebStatus(data.status ?? null);
+    setStatus("WhatsApp Web bridge started. Scan QR from your phone Linked Devices.");
+  }
+
+  async function stopWhatsAppWebBridgeAction(): Promise<void> {
+    setError(null);
+    const response = await apiFetch("/api/setup/channels/whatsapp/web/stop", { method: "POST" });
+    const data = (await response.json()) as { status?: WhatsAppWebBridgeStatus; error?: string };
+    if (!response.ok) {
+      setError(data.error ?? "Could not stop WhatsApp Web bridge.");
+      return;
+    }
+    setWhatsAppWebStatus(data.status ?? null);
+    setStatus("WhatsApp Web bridge stopped.");
   }
 
   async function copyChannelsSetupOutput(): Promise<void> {
@@ -2144,9 +2257,9 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-2 rounded-ui border bg-surface p-3">
-                <h3 className="text-sm font-semibold">WhatsApp setup (Meta Cloud API)</h3>
+                <h3 className="text-sm font-semibold">WhatsApp setup (Web linked device / Meta Cloud)</h3>
                 <p className="text-xs text-muted">
-                  Create an app in <a className="underline" href="https://developers.facebook.com/" target="_blank" rel="noreferrer">Meta for Developers</a>, add WhatsApp product, then copy credentials.
+                  Preferred: OpenClaw-style linked device via WhatsApp Web (Baileys). Optional fallback: Meta Cloud API credentials below.
                 </p>
                 <Input
                   value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppPhoneNumberId ?? "")}
@@ -2163,74 +2276,116 @@ export default function SettingsPage() {
                   onChange={(e) => updateChannelSetup({ whatsAppAppSecret: e.target.value })}
                   placeholder="WHATSAPP_APP_SECRET (optional)"
                 />
+                <div className="grid gap-2 rounded-ui border bg-surface2 p-2">
+                  <div className="text-[11px] text-muted">
+                    WhatsApp Web bridge status: <strong>{whatsAppWebStatus?.state ?? "unknown"}</strong>
+                    {whatsAppWebStatus?.detail ? ` — ${whatsAppWebStatus.detail}` : ""}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" tone="blue" onClick={() => void startWhatsAppWebBridge()}>
+                      Start WhatsApp Web bridge
+                    </Button>
+                    <Button type="button" tone="neutral" onClick={() => void refreshWhatsAppWebStatus()}>
+                      Refresh status
+                    </Button>
+                    <Button type="button" tone="red" onClick={() => void stopWhatsAppWebBridgeAction()}>
+                      Stop bridge
+                    </Button>
+                  </div>
+                  {whatsAppWebStatus?.qr ? (
+                    <textarea
+                      className="h-20 w-full rounded-ui border border-border bg-surface p-2 font-mono text-[11px] text-text shadow-inner"
+                      readOnly
+                      value={whatsAppWebStatus.qr}
+                    />
+                  ) : null}
+                </div>
               </div>
             </div>
             <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
               <div><strong>Signal quick checklist:</strong> click <strong>Start Signal bridge via Docker</strong> {"->"} complete one-time register/link number {"->"} run validation {"->"} save settings.</div>
               <div><strong>WhatsApp quick checklist:</strong> create Meta app {"->"} add WhatsApp {"->"} generate permanent token {"->"} get phone number ID {"->"} run validation.</div>
             </div>
-            <Button type="button" tone="blue" onClick={() => void runSignalDockerBootstrap()}>
-              Start Signal bridge via Docker
-            </Button>
-            <Button
-              type="button"
-              tone="green"
-              onClick={async () => {
-                if (channelsSetupMode === "signal") {
-                  const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
-                  const response = await apiFetch("/api/setup/channels/test", {
-                    method: "POST",
-                    headers: { "content-type": "application/json" },
-                    body: JSON.stringify({
-                      signalApiUrl: values.signalApiUrl ?? "",
-                      signalAccountNumber: values.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "",
-                      whatsAppPhoneNumberId: "",
-                      whatsAppToken: "",
-                      whatsAppAppSecret: ""
-                    })
-                  });
-                  const data = (await response.json()) as { signal?: SetupCheckResult; suggestedEnv?: string; error?: string };
-                  if (!response.ok) {
-                    setError(data.error ?? "Signal setup test failed");
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <Button type="button" tone="blue" onClick={() => void runSignalDockerBootstrap()}>
+                Start Signal bridge via Docker
+              </Button>
+              <Button
+                type="button"
+                tone="green"
+                onClick={async () => {
+                  if (channelsSetupMode === "signal") {
+                    const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
+                    const response = await apiFetch("/api/setup/channels/test", {
+                      method: "POST",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({
+                        signalApiUrl: values.signalApiUrl ?? "",
+                        signalAccountNumber: values.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "",
+                        whatsAppPhoneNumberId: "",
+                        whatsAppToken: "",
+                        whatsAppAppSecret: ""
+                      })
+                    });
+                    const data = (await response.json()) as { signal?: SetupCheckResult; suggestedEnv?: string; error?: string };
+                    if (!response.ok) {
+                      setError(data.error ?? "Signal setup test failed");
+                      return;
+                    }
+                    const signalLine = `Signal: ${data.signal?.ok ? "OK" : "Needs attention"} - ${data.signal?.detail ?? "-"}`;
+                    setChannelsSetupOutput([signalLine, "", data.suggestedEnv ?? ""].join("\n"));
+                    setStatus("Signal setup checked.");
                     return;
                   }
-                  const signalLine = `Signal: ${data.signal?.ok ? "OK" : "Needs attention"} - ${data.signal?.detail ?? "-"}`;
-                  setChannelsSetupOutput([signalLine, "", data.suggestedEnv ?? ""].join("\n"));
-                  setStatus("Signal setup checked.");
-                  return;
-                }
-                if (channelsSetupMode === "whatsapp") {
-                  const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
-                  const response = await apiFetch("/api/setup/channels/test", {
-                    method: "POST",
-                    headers: { "content-type": "application/json" },
-                    body: JSON.stringify({
-                      signalApiUrl: "",
-                      signalAccountNumber: "",
-                      whatsAppPhoneNumberId: values.whatsAppPhoneNumberId ?? "",
-                      whatsAppToken: values.whatsAppToken ?? "",
-                      whatsAppAppSecret: values.whatsAppAppSecret ?? ""
-                    })
-                  });
-                  const data = (await response.json()) as { whatsApp?: SetupCheckResult; suggestedEnv?: string; error?: string };
-                  if (!response.ok) {
-                    setError(data.error ?? "WhatsApp setup test failed");
+                  if (channelsSetupMode === "whatsapp") {
+                    const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
+                    const response = await apiFetch("/api/setup/channels/test", {
+                      method: "POST",
+                      headers: { "content-type": "application/json" },
+                      body: JSON.stringify({
+                        signalApiUrl: "",
+                        signalAccountNumber: "",
+                        whatsAppPhoneNumberId: values.whatsAppPhoneNumberId ?? "",
+                        whatsAppToken: values.whatsAppToken ?? "",
+                        whatsAppAppSecret: values.whatsAppAppSecret ?? ""
+                      })
+                    });
+                    const data = (await response.json()) as { whatsApp?: SetupCheckResult; suggestedEnv?: string; error?: string };
+                    if (!response.ok) {
+                      setError(data.error ?? "WhatsApp setup test failed");
+                      return;
+                    }
+                    const waLine = `WhatsApp: ${data.whatsApp?.ok ? "OK" : "Needs attention"} - ${data.whatsApp?.detail ?? "-"}`;
+                    setChannelsSetupOutput([waLine, "", data.suggestedEnv ?? ""].join("\n"));
+                    setStatus("WhatsApp setup checked.");
                     return;
                   }
-                  const waLine = `WhatsApp: ${data.whatsApp?.ok ? "OK" : "Needs attention"} - ${data.whatsApp?.detail ?? "-"}`;
-                  setChannelsSetupOutput([waLine, "", data.suggestedEnv ?? ""].join("\n"));
-                  setStatus("WhatsApp setup checked.");
-                  return;
-                }
-                await runOneClickChannelSetup();
-              }}
-            >
-              Validate selected setup + generate env
-            </Button>
+                  await runOneClickChannelSetup();
+                }}
+              >
+                Validate selected setup + generate env
+              </Button>
+            </div>
+            <div className="grid gap-2 rounded-ui border bg-surface p-2 md:grid-cols-[1fr_auto_auto] md:items-end">
+              <label className="grid gap-1 text-xs">
+                Signal verification code
+                <Input
+                  value={signalVerificationCode}
+                  onChange={(e) => setSignalVerificationCode(e.target.value)}
+                  placeholder="Code from Signal/SMS"
+                />
+              </label>
+              <Button type="button" tone="purple" onClick={() => void runSignalRegisterStart()}>
+                Start register/link
+              </Button>
+              <Button type="button" tone="green" onClick={() => void runSignalVerifyCode()}>
+                Verify code
+              </Button>
+            </div>
             {channelsSetupOutput ? (
               <div className="space-y-2">
                 <textarea
-                  className="h-32 w-full rounded-ui border border-border bg-surface2 p-2 font-mono text-xs text-text shadow-inner"
+                  className="h-32 w-full rounded-ui border border-border bg-surface2 p-2 font-mono text-xs text-text shadow-inner outline-none ring-pastelBlue/60 focus:ring-2"
                   value={channelsSetupOutput}
                   readOnly
                 />
@@ -2952,7 +3107,7 @@ export default function SettingsPage() {
       </div>
 
       <aside className="space-y-3 lg:self-start">
-        <Card className="lg:sticky lg:top-24">
+        <Card className="lg:sticky lg:top-24 lg:flex lg:max-h-[calc(100vh-6rem-10px)] lg:flex-col">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-lg font-semibold">Health checks</h2>
             <Button type="button" tone="blue" onClick={() => void loadHealth()}>Refresh</Button>
@@ -2964,7 +3119,7 @@ export default function SettingsPage() {
               className="w-[150px] min-w-[150px] max-w-[150px] shrink-0 justify-center whitespace-nowrap overflow-hidden text-ellipsis"
             />
           </div>
-          <div className="max-h-[60vh] space-y-2 overflow-y-auto">
+          <div className="space-y-2 overflow-y-auto lg:min-h-0 lg:flex-1">
             {(health?.checks ?? []).map((check) => (
               <article key={check.id} className="rounded-ui border bg-surface p-2 text-xs">
                 <div className="flex items-center justify-between gap-2">

@@ -7,6 +7,8 @@ import { promisify } from "node:util";
 import { TaskOrchestrator } from "../orchestrator/task-orchestrator.js";
 import { WhatsAppChannelAdapter } from "../channels/whatsapp.js";
 import { SignalChannelAdapter } from "../channels/signal.js";
+import { getWhatsAppWebBridgeStatus, startWhatsAppWebBridge, stopWhatsAppWebBridge } from "../channels/whatsapp-web-bridge.js";
+import { mapInboundIdentity } from "../channels/identity-mapping.js";
 import { ChannelRouter } from "../channels/channel-router.js";
 import {
   verifyInternalAuthHeader,
@@ -110,6 +112,24 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       correlationId: randomUUID()
     });
   });
+  if ((process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase() === "baileys") {
+    void startWhatsAppWebBridge(async ({ from, text }) => {
+      const identity = mapInboundIdentity("whatsapp", from);
+      const accessProfile = resolveChannelAccess(identity, options.settings.get());
+      if (!accessProfile.allowed) {
+        return;
+      }
+      const reply = await options.orchestrator.handleChannelMessage({
+        channel: "whatsapp",
+        phoneNumber: identity,
+        text,
+        correlationId: randomUUID()
+      });
+      dispatcher.enqueue("whatsapp", identity, reply, randomUUID());
+    }).catch((error) => {
+      console.warn("[channels] Could not auto-start WhatsApp Web bridge:", error instanceof Error ? error.message : String(error));
+    });
+  }
 
   setInterval(() => {
     if (!dispatcher.isRunning()) {
@@ -581,16 +601,24 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const whatsAppPhoneNumberId = payload.whatsAppPhoneNumberId?.trim() || "";
         const whatsAppToken = payload.whatsAppToken?.trim() || "";
         const whatsAppAppSecret = payload.whatsAppAppSecret?.trim() || "";
+        const whatsAppTransport = (process.env.WHATSAPP_TRANSPORT ?? "cloud").trim().toLowerCase();
         const signalCheck = signalApiUrl ? await checkSignalConnectionForBase(signalApiUrl) : { ok: false, detail: "SIGNAL_API_URL missing" };
+        const waWebStatus = getWhatsAppWebBridgeStatus();
         const waCheck =
-          whatsAppPhoneNumberId && whatsAppToken
-            ? await pingUrl(`https://graph.facebook.com/v22.0/${whatsAppPhoneNumberId}?fields=id`, {
-                authorization: `Bearer ${whatsAppToken}`
-              })
-            : { ok: false, detail: "WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_TOKEN missing" };
+          whatsAppTransport === "baileys"
+            ? {
+                ok: waWebStatus.connected === true,
+                detail: waWebStatus.connected ? "WhatsApp Web bridge connected" : waWebStatus.detail || "WhatsApp Web bridge not connected"
+              }
+            : whatsAppPhoneNumberId && whatsAppToken
+              ? await pingUrl(`https://graph.facebook.com/v22.0/${whatsAppPhoneNumberId}?fields=id`, {
+                  authorization: `Bearer ${whatsAppToken}`
+                })
+              : { ok: false, detail: "WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_TOKEN missing" };
         const suggestedEnv = [
           `SIGNAL_API_URL=${signalApiUrl || "http://127.0.0.1:8080"}`,
           `SIGNAL_ACCOUNT_NUMBER=${signalAccountNumber || "+15550001111"}`,
+          `WHATSAPP_TRANSPORT=${whatsAppTransport === "baileys" ? "baileys" : "cloud"}`,
           `WHATSAPP_PHONE_NUMBER_ID=${whatsAppPhoneNumberId || "your_phone_number_id"}`,
           `WHATSAPP_TOKEN=${whatsAppToken || "your_whatsapp_token"}`,
           `WHATSAPP_APP_SECRET=${whatsAppAppSecret || "your_whatsapp_app_secret"}`
@@ -634,6 +662,51 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           ].join("\n"),
           correlationId
         });
+      }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/status") {
+        return sendJson(response, 200, { status: getWhatsAppWebBridgeStatus(), correlationId });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/start") {
+        const status = await startWhatsAppWebBridge(async ({ from, text }) => {
+          const identity = mapInboundIdentity("whatsapp", from);
+          const accessProfile = resolveChannelAccess(identity, options.settings.get());
+          if (!accessProfile.allowed) {
+            return;
+          }
+          const reply = await options.orchestrator.handleChannelMessage({
+            channel: "whatsapp",
+            phoneNumber: identity,
+            text,
+            correlationId: randomUUID()
+          });
+          dispatcher.enqueue("whatsapp", identity, reply, randomUUID());
+        });
+        return sendJson(response, 200, { status, correlationId });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/stop") {
+        const status = await stopWhatsAppWebBridge();
+        return sendJson(response, 200, { status, correlationId });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/register") {
+        const payload = (await readJson(request)) as { signalApiUrl?: string; signalAccountNumber?: string };
+        const signalApiUrl = payload.signalApiUrl?.trim() || "http://127.0.0.1:8085";
+        const signalAccountNumber = payload.signalAccountNumber?.trim() || "";
+        if (!signalAccountNumber) {
+          return sendJson(response, 400, { error: "SIGNAL_ACCOUNT_NUMBER is required", correlationId });
+        }
+        const result = await startSignalRegistration(signalApiUrl, signalAccountNumber);
+        return sendJson(response, result.ok ? 200 : 400, { ...result, correlationId });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/verify") {
+        const payload = (await readJson(request)) as { signalApiUrl?: string; signalAccountNumber?: string; code?: string };
+        const signalApiUrl = payload.signalApiUrl?.trim() || "http://127.0.0.1:8085";
+        const signalAccountNumber = payload.signalAccountNumber?.trim() || "";
+        const code = payload.code?.trim() || "";
+        if (!signalAccountNumber || !code) {
+          return sendJson(response, 400, { error: "SIGNAL_ACCOUNT_NUMBER and verification code are required", correlationId });
+        }
+        const result = await verifySignalRegistration(signalApiUrl, signalAccountNumber, code);
+        return sendJson(response, result.ok ? 200 : 400, { ...result, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/copilot/test") {
         const payload = (await readJson(request)) as { baseUrl?: string; apiKey?: string };
@@ -2780,6 +2853,11 @@ async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string
   try {
     const running = await runLocalCommand('docker ps --filter "name=^/nova-signal-bridge$" --format "{{.Names}}"');
     if ((running.stdout ?? "").trim().includes("nova-signal-bridge")) {
+      try {
+        await runLocalCommand("docker update --restart unless-stopped nova-signal-bridge");
+      } catch {
+        // Ignore restart policy update failures on older Docker setups.
+      }
       return { ok: true, detail: "Signal bridge container already running." };
     }
   } catch {
@@ -2787,7 +2865,7 @@ async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string
   }
 
   const startCmd =
-    "docker run -d --name nova-signal-bridge -p 8085:8080 -v nova-signal-cli-config:/home/.local/share/signal-cli bbernhard/signal-cli-rest-api:latest";
+    "docker run -d --restart unless-stopped --name nova-signal-bridge -p 8085:8080 -v nova-signal-cli-config:/home/.local/share/signal-cli bbernhard/signal-cli-rest-api:latest";
   try {
     await runLocalCommand(startCmd);
     return { ok: true, detail: "Started Signal bridge container.", executedCommand: startCmd };
@@ -2795,6 +2873,11 @@ async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string
     const message = err instanceof Error ? err.message : "unknown error";
     if (/already in use|is already in use|Conflict/i.test(message)) {
       try {
+        try {
+          await runLocalCommand("docker update --restart unless-stopped nova-signal-bridge");
+        } catch {
+          // Ignore restart policy update failures.
+        }
         await runLocalCommand("docker start nova-signal-bridge");
         return { ok: true, detail: "Started existing Signal bridge container.", executedCommand: "docker start nova-signal-bridge" };
       } catch (startErr) {
@@ -2806,6 +2889,56 @@ async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string
     }
     return { ok: false, detail: `Could not start Signal bridge: ${message}` };
   }
+}
+
+async function startSignalRegistration(
+  signalApiUrl: string,
+  signalAccountNumber: string
+): Promise<{ ok: boolean; detail: string; endpointTried?: string }> {
+  const base = signalApiUrl.trim().replace(/\/$/, "");
+  const encoded = encodeURIComponent(signalAccountNumber);
+  const candidates = [
+    `${base}/v1/register/${encoded}`,
+    `${base}/register/${encoded}`,
+    `${base}/v1/accounts/${encoded}/register`
+  ];
+  let last = "registration request failed";
+  for (const endpoint of candidates) {
+    const attempt = await postJson(endpoint, {});
+    if (attempt.ok) {
+      return {
+        ok: true,
+        detail: "Registration started. Check your Signal app/SMS for code, then click Verify code.",
+        endpointTried: endpoint
+      };
+    }
+    last = attempt.detail;
+  }
+  return { ok: false, detail: `Could not start registration: ${last}`, endpointTried: candidates[candidates.length - 1] };
+}
+
+async function verifySignalRegistration(
+  signalApiUrl: string,
+  signalAccountNumber: string,
+  code: string
+): Promise<{ ok: boolean; detail: string; endpointTried?: string }> {
+  const base = signalApiUrl.trim().replace(/\/$/, "");
+  const encoded = encodeURIComponent(signalAccountNumber);
+  const safeCode = encodeURIComponent(code);
+  const candidates = [
+    `${base}/v1/register/${encoded}/verify/${safeCode}`,
+    `${base}/register/${encoded}/verify/${safeCode}`,
+    `${base}/v1/accounts/${encoded}/verify/${safeCode}`
+  ];
+  let last = "verification request failed";
+  for (const endpoint of candidates) {
+    const attempt = await postJson(endpoint, {});
+    if (attempt.ok) {
+      return { ok: true, detail: "Signal number verified and linked.", endpointTried: endpoint };
+    }
+    last = attempt.detail;
+  }
+  return { ok: false, detail: `Could not verify Signal code: ${last}`, endpointTried: candidates[candidates.length - 1] };
 }
 
 async function pingUrl(url: string, headers?: HeadersInit): Promise<{ ok: boolean; detail: string }> {
@@ -2825,6 +2958,30 @@ async function pingUrl(url: string, headers?: HeadersInit): Promise<{ ok: boolea
     return {
       ok: false,
       detail: error instanceof Error ? error.message : "connection check failed"
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function postJson(url: string, body: unknown, headers?: HeadersInit): Promise<{ ok: boolean; detail: string }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6000);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(headers ?? {}) },
+      body: JSON.stringify(body ?? {}),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      return { ok: false, detail: `endpoint returned ${response.status}` };
+    }
+    return { ok: true, detail: "ok" };
+  } catch (error) {
+    return {
+      ok: false,
+      detail: error instanceof Error ? error.message : "request failed"
     };
   } finally {
     clearTimeout(timer);
