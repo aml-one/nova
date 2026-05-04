@@ -3,7 +3,8 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { FaCopy, FaPenToSquare, FaRotateRight } from "react-icons/fa6";
+import { FaChevronDown, FaCopy, FaPenToSquare, FaRotateRight } from "react-icons/fa6";
+import QRCode from "qrcode";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -26,6 +27,25 @@ import {
 } from "../../lib/skill-badge";
 import { VoiceWakeWordPanel, OrpheusTtsPreviewCard } from "../../components/voice-settings-panel";
 import { apiFetch } from "../../lib/api-fetch";
+
+const SIGNAL_CAPTCHA_GENERATE_URL = "https://signalcaptchas.org/registration/generate.html";
+
+function extractSignalCaptchaToken(raw: string): string {
+  let t = raw.trim();
+  if (!t) return "";
+  const proto = t.toLowerCase().indexOf("signalcaptcha://");
+  if (proto >= 0) {
+    t = t.slice(proto + "signalcaptcha://".length).trim();
+  }
+  const m = t.match(/(signal-hcaptcha-[^\s"'<>]+)/i);
+  if (m?.[1]) return m[1];
+  const first = t.split(/\s/)[0]?.trim();
+  return first ?? t;
+}
+
+function messageLooksLikeSignalCaptchaRequired(message: string): boolean {
+  return message.toLowerCase().includes("captcha");
+}
 
 type HealthCheck = { id: string; name: string; level: "green" | "orange" | "red"; detail: string; lastSuccessfulAt?: string };
 type FullHealth = { level: "green" | "orange" | "red"; checks: HealthCheck[] };
@@ -461,6 +481,13 @@ export default function SettingsPage() {
   const [signalQrEndpoint, setSignalQrEndpoint] = useState<string | null>(null);
   const [signalAccountsLoading, setSignalAccountsLoading] = useState(false);
   const [signalLinkedAccounts, setSignalLinkedAccounts] = useState<string[] | null>(null);
+  const [signalQrDismissed, setSignalQrDismissed] = useState(false);
+  const [signalDockerLogsExpanded, setSignalDockerLogsExpanded] = useState(false);
+  const [signalCaptchaModalOpen, setSignalCaptchaModalOpen] = useState(false);
+  const [signalCaptchaModalDetail, setSignalCaptchaModalDetail] = useState("");
+  const [signalCaptchaPasteDraft, setSignalCaptchaPasteDraft] = useState("");
+  const [signalCaptchaBusy, setSignalCaptchaBusy] = useState(false);
+  const [whatsAppQrDataUrl, setWhatsAppQrDataUrl] = useState<string | null>(null);
   const [whatsAppWebStatus, setWhatsAppWebStatus] = useState<WhatsAppWebBridgeStatus | null>(null);
   const [channelDebugEntries, setChannelDebugEntries] = useState<ChannelDebugEntry[]>([]);
   const [channelDebugError, setChannelDebugError] = useState<string | null>(null);
@@ -942,14 +969,14 @@ export default function SettingsPage() {
     setStatus(`Signal bridge bootstrap completed.${hook}${snippet}`.trim());
   }
 
-  async function runSignalRegisterStart(): Promise<void> {
+  async function runSignalRegisterStart(opts?: { captchaOverride?: string }): Promise<boolean> {
     setError(null);
     setStatus(null);
     setSignalRegisterStatus(null);
     const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
     const signalApiUrl = values.signalApiUrl ?? "http://127.0.0.1:8085";
     const signalAccountNumber = values.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "";
-    const captcha = signalRegistrationCaptcha.trim();
+    const captcha = (opts?.captchaOverride ?? signalRegistrationCaptcha).trim();
     const response = await apiFetch("/api/setup/channels/signal/register", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -962,18 +989,29 @@ export default function SettingsPage() {
     });
     const data = (await response.json()) as { detail?: string; endpointTried?: string; error?: string };
     if (!response.ok) {
-      const message = data.error ?? "Could not start Signal registration.";
-      setSignalRegisterStatus({ ok: false, detail: message });
-      setError(message);
-      return;
+      const message = (typeof data.error === "string" && data.error.trim()) || "Could not start Signal registration.";
+      const detail = typeof data.detail === "string" ? data.detail.trim() : "";
+      const combined = [message, detail].filter(Boolean).join(" ");
+      setSignalRegisterStatus({ ok: false, detail: combined || message });
+      if (messageLooksLikeSignalCaptchaRequired(combined)) {
+        setSignalCaptchaModalDetail(combined.slice(0, 900));
+        setSignalCaptchaModalOpen(true);
+        setStatus("Signal needs a registration captcha — use the panel that opened, or paste a token below.");
+      } else {
+        setError(combined || message);
+      }
+      return false;
     }
+    setSignalCaptchaModalOpen(false);
     setSignalRegisterStatus({ ok: true, detail: data.detail ?? "Registration started" });
     setSignalSetupCheck({
       ok: true,
       detail: "SMS registration started"
     });
     setSignalRegistrationCaptcha("");
-    setStatus("Signal registration started. Enter the verification code below, then click Verify code.");
+    setSignalCaptchaPasteDraft("");
+    setStatus("SMS code sent. Enter the verification code, then click Submit verification code.");
+    return true;
   }
 
   async function runSignalVerifyCode(): Promise<void> {
@@ -1041,6 +1079,7 @@ export default function SettingsPage() {
         return;
       }
       if (data.imageBase64 && data.mimeType) {
+        setSignalQrDismissed(false);
         setSignalQrImageUrl(`data:${data.mimeType};base64,${data.imageBase64}`);
       } else {
         setSignalQrImageUrl(null);
@@ -1090,6 +1129,15 @@ export default function SettingsPage() {
     } finally {
       setSignalAccountsLoading(false);
     }
+  }
+
+  async function fetchWhatsAppWebStatusOnly(): Promise<WhatsAppWebBridgeStatus | null> {
+    const response = await apiFetch("/api/setup/channels/whatsapp/web/status");
+    if (!response.ok) {
+      return null;
+    }
+    const data = (await response.json()) as { status?: WhatsAppWebBridgeStatus };
+    return data.status ?? null;
   }
 
   async function refreshWhatsAppWebStatus(): Promise<void> {
@@ -1157,6 +1205,26 @@ export default function SettingsPage() {
     return () => window.clearInterval(id);
   }, [tab, channelDebugAutoRefresh, refreshChannelDebug]);
 
+  useEffect(() => {
+    const raw = whatsAppWebStatus?.qr?.trim();
+    if (!raw) {
+      setWhatsAppQrDataUrl(null);
+      return;
+    }
+    let cancelled = false;
+    void QRCode.toDataURL(raw, { margin: 2, width: 300, errorCorrectionLevel: "M" }).then(
+      (url) => {
+        if (!cancelled) setWhatsAppQrDataUrl(url);
+      },
+      () => {
+        if (!cancelled) setWhatsAppQrDataUrl(null);
+      }
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [whatsAppWebStatus?.qr]);
+
   async function startWhatsAppWebBridge(): Promise<void> {
     setError(null);
     const response = await apiFetch("/api/setup/channels/whatsapp/web/start", { method: "POST" });
@@ -1165,8 +1233,74 @@ export default function SettingsPage() {
       setError(data.error ?? "Could not start WhatsApp Web bridge.");
       return;
     }
-    setWhatsAppWebStatus(data.status ?? null);
-    setStatus("WhatsApp Web bridge started. Scan QR from your phone Linked Devices.");
+    let status = data.status ?? null;
+    setWhatsAppWebStatus(status);
+    if (status?.qr) {
+      setStatus("Scan this QR in WhatsApp → Settings → Linked devices → Link new device.");
+      return;
+    }
+    if (status?.state === "connected") {
+      setStatus("WhatsApp Web is already connected on this host.");
+      return;
+    }
+    setStatus("Starting WhatsApp… waiting for pairing QR (Baileys can take a few seconds).");
+    const deadline = Date.now() + 90_000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1500));
+      const next = await fetchWhatsAppWebStatusOnly();
+      if (!next) {
+        continue;
+      }
+      status = next;
+      setWhatsAppWebStatus(next);
+      if (next.qr) {
+        setStatus("Scan this QR in WhatsApp → Settings → Linked devices → Link new device.");
+        return;
+      }
+      if (next.state === "connected") {
+        setStatus("WhatsApp Web connected.");
+        return;
+      }
+      if (next.state === "error" || next.state === "logged_out" || next.state === "idle") {
+        setStatus(next.detail ?? "WhatsApp bridge stopped or needs attention. Try again or check logs.");
+        return;
+      }
+    }
+    setStatus("Still no QR after 90s. Click Refresh status, or stop and start again.");
+  }
+
+  async function signalCaptchaReadClipboard(): Promise<void> {
+    setSignalCaptchaBusy(true);
+    try {
+      const text = await navigator.clipboard.readText();
+      const token = extractSignalCaptchaToken(text);
+      if (!token) {
+        setStatus("Clipboard was empty or did not contain a captcha token.");
+        return;
+      }
+      setSignalRegistrationCaptcha(token);
+      setSignalCaptchaPasteDraft(token);
+      setStatus("Captcha token captured from clipboard.");
+    } catch {
+      setStatus("Could not read clipboard — paste manually or allow clipboard permission for this site.");
+    } finally {
+      setSignalCaptchaBusy(false);
+    }
+  }
+
+  async function signalCaptchaApplyDraftAndRetry(): Promise<void> {
+    const token = extractSignalCaptchaToken(signalCaptchaPasteDraft);
+    if (!token) {
+      setStatus("Paste the captcha link or token first.");
+      return;
+    }
+    setSignalRegistrationCaptcha(token);
+    setSignalCaptchaBusy(true);
+    try {
+      await runSignalRegisterStart({ captchaOverride: token });
+    } finally {
+      setSignalCaptchaBusy(false);
+    }
   }
 
   async function stopWhatsAppWebBridgeAction(): Promise<void> {
@@ -2486,33 +2620,22 @@ export default function SettingsPage() {
                 </div>
               </div>
               <div className="space-y-2 rounded-ui border bg-surface p-3">
-                <h3 className="text-sm font-semibold">WhatsApp setup (Web linked device / Meta Cloud)</h3>
-                <p className="text-xs text-muted">
-                  Preferred: OpenClaw-style linked device via WhatsApp Web (Baileys). Optional fallback: Meta Cloud API credentials below.
-                </p>
-                <Input
-                  value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppPhoneNumberId ?? "")}
-                  onChange={(e) => updateChannelSetup({ whatsAppPhoneNumberId: e.target.value })}
-                  placeholder="WHATSAPP_PHONE_NUMBER_ID"
-                />
-                <Input
-                  value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppToken ?? "")}
-                  onChange={(e) => updateChannelSetup({ whatsAppToken: e.target.value })}
-                  placeholder="WHATSAPP_TOKEN"
-                />
-                <Input
-                  value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppAppSecret ?? "")}
-                  onChange={(e) => updateChannelSetup({ whatsAppAppSecret: e.target.value })}
-                  placeholder="WHATSAPP_APP_SECRET (optional)"
-                />
-                <div className="grid gap-2 rounded-ui border bg-surface2 p-2">
+                <h3 className="text-sm font-semibold">WhatsApp setup</h3>
+                <p className="text-xs text-muted">Primary: link your phone with WhatsApp Web (below). Optional: Meta Cloud API in the expandable section.</p>
+                <div className="grid gap-3 rounded-ui border bg-surface2 p-3">
+                  <div>
+                    <h4 className="text-xs font-semibold text-foreground">WhatsApp Web (same phone app)</h4>
+                    <p className="mt-0.5 text-[11px] leading-snug text-muted">
+                      One click starts the bridge and waits until a pairing QR appears (Baileys can take a few seconds). Then scan with WhatsApp → Settings → Linked devices → Link a device.
+                    </p>
+                  </div>
                   <div className="text-[11px] text-muted">
-                    WhatsApp Web bridge status: <strong>{whatsAppWebStatus?.state ?? "unknown"}</strong>
+                    Status: <strong className="text-foreground">{whatsAppWebStatus?.state ?? "unknown"}</strong>
                     {whatsAppWebStatus?.detail ? ` — ${whatsAppWebStatus.detail}` : ""}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" tone="blue" onClick={() => void startWhatsAppWebBridge()}>
-                      Start WhatsApp Web bridge
+                      Link WhatsApp — show QR
                     </Button>
                     <Button type="button" tone="neutral" onClick={() => void refreshWhatsAppWebStatus()}>
                       Refresh status
@@ -2521,18 +2644,47 @@ export default function SettingsPage() {
                       Stop bridge
                     </Button>
                   </div>
-                  {whatsAppWebStatus?.qr ? (
+                  {whatsAppWebStatus?.state === "connected" ? (
+                    <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-200">WhatsApp Web is connected on this host.</p>
+                  ) : null}
+                  {whatsAppWebStatus?.qr && whatsAppWebStatus?.state !== "connected" ? (
                     <div className="space-y-2 rounded-ui border border-border bg-surface p-3">
-                      <div className="text-[11px] font-semibold text-muted">Scan this QR in WhatsApp {">"} Linked Devices</div>
-                      <img
-                        className="h-56 w-56 rounded-ui border border-border bg-white p-2"
-                        src={`https://quickchart.io/qr?margin=1&ecLevel=M&size=320&text=${encodeURIComponent(whatsAppWebStatus.qr)}`}
-                        alt="WhatsApp Web linking QR code"
-                        loading="lazy"
-                      />
+                      <div className="text-[11px] font-semibold text-muted">Scan this QR with WhatsApp</div>
+                      {whatsAppQrDataUrl ? (
+                        <img
+                          className="h-64 w-64 max-w-full rounded-ui border border-border bg-white p-2"
+                          src={whatsAppQrDataUrl}
+                          alt="WhatsApp Web pairing QR code"
+                        />
+                      ) : (
+                        <p className="text-[11px] text-muted">Rendering QR…</p>
+                      )}
                     </div>
                   ) : null}
                 </div>
+                <details className="rounded-ui border border-border/70 bg-surface2 p-2">
+                  <summary className="cursor-pointer list-none text-[11px] font-semibold text-muted outline-none [&::-webkit-details-marker]:hidden">
+                    Meta Cloud API (optional) — click to expand
+                  </summary>
+                  <p className="mb-2 mt-2 text-[11px] text-muted">Use only if you prefer Meta-hosted WhatsApp instead of Web link above.</p>
+                  <div className="space-y-2">
+                    <Input
+                      value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppPhoneNumberId ?? "")}
+                      onChange={(e) => updateChannelSetup({ whatsAppPhoneNumberId: e.target.value })}
+                      placeholder="WHATSAPP_PHONE_NUMBER_ID"
+                    />
+                    <Input
+                      value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppToken ?? "")}
+                      onChange={(e) => updateChannelSetup({ whatsAppToken: e.target.value })}
+                      placeholder="WHATSAPP_TOKEN"
+                    />
+                    <Input
+                      value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.whatsAppAppSecret ?? "")}
+                      onChange={(e) => updateChannelSetup({ whatsAppAppSecret: e.target.value })}
+                      placeholder="WHATSAPP_APP_SECRET (optional)"
+                    />
+                  </div>
+                </details>
               </div>
             </div>
             <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
@@ -2540,7 +2692,9 @@ export default function SettingsPage() {
                 <strong>Signal quick checklist:</strong> <strong>Start Signal bridge via Docker</strong> {"->"} link phone with <strong>Generate link QR</strong> (or SMS registration only if the number is new to Signal) {"->"}
                 validate {"->"} save settings.
               </div>
-              <div><strong>WhatsApp quick checklist:</strong> create Meta app {"->"} add WhatsApp {"->"} generate permanent token {"->"} get phone number ID {"->"} run validation.</div>
+              <div>
+                <strong>WhatsApp quick checklist:</strong> <strong>Link WhatsApp — show QR</strong> {"->"} scan in the phone app {"->"} validate {"->"} save. (Meta Cloud path is optional.)
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <Button type="button" tone="blue" onClick={() => void runSignalDockerBootstrap()}>
@@ -2640,12 +2794,29 @@ export default function SettingsPage() {
               ) : null}
               {signalQrImageUrl ? (
                 <div className="space-y-2 rounded-ui border border-border bg-surface2 p-3">
-                  <div className="text-[11px] font-semibold text-muted">Scan with your phone</div>
-                  <img
-                    className="max-h-80 w-80 max-w-full rounded-ui border border-border bg-white p-2"
-                    src={signalQrImageUrl}
-                    alt="Signal device link QR code"
-                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-muted">Scan with your phone</div>
+                    <div className="flex flex-wrap gap-2">
+                      {!signalQrDismissed ? (
+                        <Button type="button" tone="neutral" className="h-7 px-2 text-xs" onClick={() => setSignalQrDismissed(true)}>
+                          Dismiss QR
+                        </Button>
+                      ) : (
+                        <Button type="button" tone="blue" className="h-7 px-2 text-xs" onClick={() => setSignalQrDismissed(false)}>
+                          Show QR again
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {!signalQrDismissed ? (
+                    <img
+                      className="max-h-80 w-80 max-w-full rounded-ui border border-border bg-white p-2"
+                      src={signalQrImageUrl}
+                      alt="Signal device link QR code"
+                    />
+                  ) : (
+                    <p className="text-[11px] text-muted">QR hidden. Use Show QR again, or Generate link QR for a fresh code.</p>
+                  )}
                   <p className="text-[11px] text-muted">
                     signal-cli-rest-api issues a new QR on each request. If scanning fails or times out, click Generate link QR again.
                   </p>
@@ -2666,69 +2837,75 @@ export default function SettingsPage() {
                 </div>
               ) : null}
             </div>
-            <div className="space-y-2 rounded-ui border bg-surface p-2">
-              <p className="text-[11px] font-medium text-muted">SMS registration (new number / not yet on Signal)</p>
-              <label className="grid gap-1 text-xs">
-                Signal verification code
-                <Input
-                  value={signalVerificationCode}
-                  onChange={(e) => setSignalVerificationCode(e.target.value)}
-                  placeholder="Code from Signal/SMS"
-                />
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-text">
-                <Checkbox
-                  checked={signalRegistrationUseVoice}
-                  onChange={(e) => setSignalRegistrationUseVoice(e.target.checked)}
-                />
-                Use voice call for verification (optional; useful if SMS is unreliable)
-              </label>
-              <label className="grid gap-1 text-xs">
-                Signal captcha token (only if registration asks for captcha)
-                <Textarea
-                  value={signalRegistrationCaptcha}
-                  onChange={(e) => setSignalRegistrationCaptcha(e.target.value)}
-                  placeholder="Paste token after solving captcha (token only — not the signalcaptcha:// link)"
-                  rows={2}
-                  className="font-mono text-[11px]"
-                />
-              </label>
-              <p className="text-[11px] leading-snug text-muted">
-                If you see “Captcha required”: open{" "}
-                <a
-                  className="font-medium text-sky-700 underline hover:text-sky-900 dark:text-sky-300 dark:hover:text-sky-200"
-                  href="https://signalcaptchas.org/registration/generate.html"
-                  rel="noreferrer"
-                  target="_blank"
-                >
-                  signalcaptchas.org registration captcha
-                </a>
-                , solve it, then right‑click “Open Signal”, copy the link, and paste only the captcha token part into the field above.
-                Retry <strong>Start SMS registration</strong> with the token filled.
-              </p>
-              <div className="flex flex-wrap items-start gap-2">
-                <Button type="button" tone="purple" onClick={() => void runSignalRegisterStart()}>
-                  Start SMS registration
-                </Button>
-                <Button type="button" tone="green" onClick={() => void runSignalVerifyCode()}>
-                  Verify code
-                </Button>
-                {signalRegisterStatus ? (
-                  <span
-                    className={`inline-flex max-w-full min-w-0 flex-1 items-center rounded-lg border px-2 py-1.5 text-xs font-semibold leading-snug sm:flex-initial sm:rounded-full ${
-                      signalRegisterStatus.ok
-                        ? "border-emerald-600/35 bg-emerald-50 text-emerald-900 dark:border-emerald-400/60 dark:bg-emerald-400/10 dark:text-emerald-200"
-                        : "border-rose-600/40 bg-rose-50 text-rose-900 dark:border-rose-400/60 dark:bg-rose-400/10 dark:text-rose-200"
-                    }`}
-                    aria-live="polite"
+            <details className="rounded-ui border bg-surface p-2">
+              <summary className="cursor-pointer list-none text-sm font-semibold text-foreground outline-none [&::-webkit-details-marker]:hidden">
+                Signal: new number (SMS) — only if this number is not on Signal yet
+              </summary>
+              <div className="mt-3 space-y-3 border-t border-border/60 pt-3">
+                <p className="text-[11px] leading-snug text-muted">
+                  If your number already uses Signal on a phone, skip this — use <strong className="text-foreground">Generate link QR</strong> above. Otherwise: request the SMS code, enter it below, then submit. If Nova says a captcha is required, open the captcha helper panel (or it may open automatically).
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" tone="purple" onClick={() => void runSignalRegisterStart()}>
+                    Step 1 — request SMS / voice code
+                  </Button>
+                  <Button
+                    type="button"
+                    tone="neutral"
+                    onClick={() => {
+                      setSignalCaptchaModalDetail("");
+                      setSignalCaptchaModalOpen(true);
+                    }}
                   >
-                    <span className="break-words">
-                      SMS registration: {signalRegisterStatus.ok ? "OK" : "Failed"} — {signalRegisterStatus.detail}
+                    Captcha helper panel
+                  </Button>
+                </div>
+                <label className="grid gap-1 text-xs">
+                  SMS or voice verification code
+                  <Input
+                    value={signalVerificationCode}
+                    onChange={(e) => setSignalVerificationCode(e.target.value)}
+                    placeholder="Digits from Signal / SMS"
+                  />
+                </label>
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-text">
+                  <Checkbox
+                    checked={signalRegistrationUseVoice}
+                    onChange={(e) => setSignalRegistrationUseVoice(e.target.checked)}
+                  />
+                  Request voice call instead of SMS (optional)
+                </label>
+                <label className="grid gap-1 text-xs">
+                  Captcha token (filled automatically from the helper when possible)
+                  <Textarea
+                    value={signalRegistrationCaptcha}
+                    onChange={(e) => setSignalRegistrationCaptcha(e.target.value)}
+                    placeholder="signal-hcaptcha-… (pasted URL or token is fine)"
+                    rows={2}
+                    className="font-mono text-[11px]"
+                  />
+                </label>
+                <div className="flex flex-wrap items-start gap-2">
+                  <Button type="button" tone="green" onClick={() => void runSignalVerifyCode()}>
+                    Submit verification code
+                  </Button>
+                  {signalRegisterStatus ? (
+                    <span
+                      className={`inline-flex max-w-full min-w-0 flex-1 items-center rounded-lg border px-2 py-1.5 text-xs font-semibold leading-snug sm:flex-initial sm:rounded-full ${
+                        signalRegisterStatus.ok
+                          ? "border-emerald-600/35 bg-emerald-50 text-emerald-900 dark:border-emerald-400/60 dark:bg-emerald-400/10 dark:text-emerald-200"
+                          : "border-rose-600/40 bg-rose-50 text-rose-900 dark:border-rose-400/60 dark:bg-rose-400/10 dark:text-rose-200"
+                      }`}
+                      aria-live="polite"
+                    >
+                      <span className="break-words">
+                        SMS registration: {signalRegisterStatus.ok ? "OK" : "Failed"} — {signalRegisterStatus.detail}
+                      </span>
                     </span>
-                  </span>
-                ) : null}
+                  ) : null}
+                </div>
               </div>
-            </div>
+            </details>
             <div className="rounded-ui border bg-surface p-3 space-y-3">
               <h3 className="text-sm font-semibold">Allowed phone numbers by channel</h3>
               <p className="text-xs text-muted">
@@ -2940,16 +3117,30 @@ export default function SettingsPage() {
                     ))}
                   </div>
                 </div>
-                <div>
-                  <div className="mb-1 text-[11px] font-medium text-muted">Signal bridge (Docker)</div>
-                  <div className="flex h-[460px] flex-col rounded border border-border/60 bg-surface2">
-                    {signalDockerNote ? (
-                      <p className="shrink-0 border-b border-border/50 p-2 text-[11px] text-amber-800 dark:text-amber-200">{signalDockerNote}</p>
-                    ) : null}
-                    <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[10px] leading-snug text-muted">
-                      {signalDockerLogs || (channelDebugLoading ? "Loading…" : "(no log lines)")}
-                    </pre>
-                  </div>
+                <div className="min-h-0">
+                  <button
+                    type="button"
+                    className="mb-1 flex w-full items-center justify-between gap-2 rounded-md border border-border/60 bg-surface2 px-2 py-1.5 text-left text-[11px] font-medium text-muted transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                    onClick={() => setSignalDockerLogsExpanded((v) => !v)}
+                    aria-expanded={signalDockerLogsExpanded}
+                  >
+                    <span>Signal bridge (Docker)</span>
+                    <FaChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${signalDockerLogsExpanded ? "rotate-180" : ""}`} aria-hidden />
+                  </button>
+                  {signalDockerLogsExpanded ? (
+                    <div className="flex h-[460px] flex-col rounded border border-border/60 bg-surface2">
+                      {signalDockerNote ? (
+                        <p className="shrink-0 border-b border-border/50 p-2 text-[11px] text-amber-800 dark:text-amber-200">{signalDockerNote}</p>
+                      ) : null}
+                      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[10px] leading-snug text-muted">
+                        {signalDockerLogs || (channelDebugLoading ? "Loading…" : "(no log lines)")}
+                      </pre>
+                    </div>
+                  ) : (
+                    <p className="rounded-md border border-dashed border-border/60 px-2 py-2 text-[11px] text-muted">
+                      Collapsed by default. Expand to view <code className="text-[10px]">nova-signal-bridge</code> logs (same refresh as the trace on the left).
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -3694,6 +3885,76 @@ export default function SettingsPage() {
           </div>
         </Card>
       </aside>
+
+      {signalCaptchaModalOpen ? (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="signal-captcha-modal-title"
+          onClick={() => setSignalCaptchaModalOpen(false)}
+        >
+          <div className="w-full max-w-lg md:max-w-2xl" onClick={(e) => e.stopPropagation()}>
+            <Card className="flex max-h-[90vh] w-full flex-col gap-3 overflow-hidden p-4 shadow-xl">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 id="signal-captcha-modal-title" className="text-base font-semibold">
+                  Signal registration captcha
+                </h3>
+                <Button type="button" tone="neutral" onClick={() => setSignalCaptchaModalOpen(false)}>
+                  Close
+                </Button>
+              </div>
+              {signalCaptchaModalDetail ? (
+                <p className="rounded-ui border border-amber-500/35 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-950 dark:text-amber-100">{signalCaptchaModalDetail}</p>
+              ) : null}
+              <p className="text-[11px] leading-snug text-muted">
+                Complete the check on the official page (embedded below if your browser allows it). When Signal shows a blocked navigation to{" "}
+                <code className="text-[10px]">signalcaptcha://…</code>, copy that line from the browser, then use <strong className="text-foreground">Read from clipboard</strong> — Nova strips the token and retries registration for you.
+              </p>
+              <div className="overflow-hidden rounded-ui border border-border bg-white dark:bg-slate-950">
+                <iframe
+                  title="Signal registration captcha"
+                  className="h-[min(360px,45vh)] w-full"
+                  src={SIGNAL_CAPTCHA_GENERATE_URL}
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
+                />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <a
+                  className="inline-flex items-center justify-center rounded-ui border border-blue-500/70 bg-pastelBlue px-2.5 py-1.5 text-xs font-medium text-slate-900 shadow-sm transition hover:brightness-95"
+                  href={SIGNAL_CAPTCHA_GENERATE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open captcha in new tab
+                </a>
+                <Button type="button" tone="neutral" disabled={signalCaptchaBusy} onClick={() => void signalCaptchaReadClipboard()}>
+                  {signalCaptchaBusy ? "…" : "Read captcha from clipboard"}
+                </Button>
+                <Button type="button" tone="purple" disabled={signalCaptchaBusy} onClick={() => void signalCaptchaApplyDraftAndRetry()}>
+                  {signalCaptchaBusy ? "…" : "Use pasted text & retry SMS step"}
+                </Button>
+              </div>
+              <label className="grid gap-1 text-xs">
+                Or paste the blocked link / token here (then click the purple button above)
+                <Textarea
+                  value={signalCaptchaPasteDraft}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSignalCaptchaPasteDraft(v);
+                    const tok = extractSignalCaptchaToken(v);
+                    if (tok) setSignalRegistrationCaptcha(tok);
+                  }}
+                  rows={3}
+                  className="font-mono text-[11px]"
+                  placeholder="signalcaptcha://signal-hcaptcha-… or paste from DevTools console"
+                  spellCheck={false}
+                />
+              </label>
+            </Card>
+          </div>
+        </div>
+      ) : null}
 
       {sentiCoreModalOpen ? (
         <div
