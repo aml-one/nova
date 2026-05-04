@@ -832,6 +832,52 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const result = await verifySignalRegistration(signalApiUrl, signalAccountNumber, code);
         return sendJson(response, result.ok ? 200 : 400, { ...result, correlationId });
       }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/qrcodelink") {
+        const payload = (await readJson(request)) as { signalApiUrl?: string; deviceName?: string };
+        const signalApiUrl = normalizeSignalRestBase(
+          payload.signalApiUrl?.trim() || process.env.SIGNAL_API_URL?.trim() || "http://127.0.0.1:8085"
+        );
+        const deviceName = typeof payload.deviceName === "string" ? payload.deviceName : "";
+        const result = await fetchSignalQrCodeLinkImage(signalApiUrl, deviceName);
+        if (!result.ok) {
+          return sendJson(response, 400, {
+            ok: false,
+            error: result.detail,
+            detail: result.detail,
+            endpointTried: result.endpointTried,
+            correlationId
+          });
+        }
+        return sendJson(response, 200, {
+          ok: true,
+          imageBase64: result.imageBase64,
+          mimeType: result.mimeType,
+          detail: result.detail,
+          endpointTried: result.endpointTried,
+          correlationId
+        });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/accounts") {
+        const payload = (await readJson(request)) as { signalApiUrl?: string };
+        const signalApiUrl = normalizeSignalRestBase(
+          payload.signalApiUrl?.trim() || process.env.SIGNAL_API_URL?.trim() || "http://127.0.0.1:8085"
+        );
+        const result = await fetchSignalAccountsList(signalApiUrl);
+        if (!result.ok) {
+          return sendJson(response, 400, {
+            ok: false,
+            error: result.detail,
+            detail: result.detail,
+            correlationId
+          });
+        }
+        return sendJson(response, 200, {
+          ok: true,
+          accounts: result.accounts,
+          detail: result.detail,
+          correlationId
+        });
+      }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/copilot/test") {
         const payload = (await readJson(request)) as { baseUrl?: string; apiKey?: string };
         const resolved = await resolveCopilotRuntime();
@@ -3255,6 +3301,109 @@ async function startSignalRegistration(
     last = attempt.detail;
   }
   return { ok: false, detail: `Could not start registration: ${last}`, endpointTried: lastTried };
+}
+
+/**
+ * GET /v1/qrcodelink?device_name=… returns a PNG (or other image) for linking an existing Signal primary phone.
+ */
+async function fetchSignalQrCodeLinkImage(
+  signalApiUrl: string,
+  deviceNameRaw: string
+): Promise<{
+  ok: boolean;
+  imageBase64?: string;
+  mimeType?: string;
+  detail: string;
+  endpointTried?: string;
+}> {
+  const base = normalizeSignalRestBase(signalApiUrl);
+  const safeName = (deviceNameRaw.trim() || "Nova Agent Web").slice(0, 120) || "Nova Agent Web";
+  const endpoint = `${base}/v1/qrcodelink?device_name=${encodeURIComponent(safeName)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45_000);
+  try {
+    const upstream = await fetch(endpoint, { method: "GET", signal: controller.signal });
+    const contentTypeHeader = (upstream.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (!upstream.ok) {
+      let detail = `HTTP ${upstream.status}`;
+      try {
+        const text = (await upstream.text()).trim().slice(0, 2000);
+        if (text) {
+          const parsed = parseJsonSafe(text);
+          if (parsed && typeof parsed === "object" && parsed !== null && "error" in parsed) {
+            detail = `${detail}: ${String((parsed as { error?: unknown }).error ?? text)}`;
+          } else {
+            detail = `${detail}: ${text}`;
+          }
+        }
+      } catch {
+        // ignore
+      }
+      return { ok: false, detail, endpointTried: endpoint };
+    }
+    if (contentTypeHeader.includes("application/json")) {
+      const text = (await upstream.text()).trim().slice(0, 2000);
+      const parsed = parseJsonSafe(text);
+      const err =
+        parsed && typeof parsed === "object" && parsed !== null && "error" in parsed
+          ? String((parsed as { error?: unknown }).error)
+          : text || "unexpected JSON from qrcodelink";
+      return { ok: false, detail: err, endpointTried: endpoint };
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    if (!buf.length) {
+      return { ok: false, detail: "empty response from qrcodelink", endpointTried: endpoint };
+    }
+    const mimeType = contentTypeHeader.startsWith("image/") ? contentTypeHeader : "image/png";
+    return {
+      ok: true,
+      imageBase64: buf.toString("base64"),
+      mimeType,
+      detail: "Scan this QR with Signal on your phone: Settings → Linked devices → Link new device.",
+      endpointTried: endpoint
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      detail: error instanceof Error ? error.message : "qrcodelink request failed",
+      endpointTried: endpoint
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchSignalAccountsList(
+  signalApiUrl: string
+): Promise<{ ok: boolean; accounts?: string[]; detail: string }> {
+  const base = normalizeSignalRestBase(signalApiUrl);
+  const endpoint = `${base}/v1/accounts`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const upstream = await fetch(endpoint, { method: "GET", signal: controller.signal });
+    const text = (await upstream.text()).trim();
+    if (!upstream.ok) {
+      return { ok: false, detail: `HTTP ${upstream.status}: ${text.slice(0, 1200)}` };
+    }
+    const parsed = parseJsonSafe(text);
+    if (!Array.isArray(parsed)) {
+      return { ok: false, detail: "unexpected /v1/accounts response (expected JSON array)" };
+    }
+    const accounts = parsed.filter((x): x is string => typeof x === "string" && x.length > 0);
+    return {
+      ok: true,
+      accounts,
+      detail:
+        accounts.length > 0
+          ? `Found ${accounts.length} linked account(s). Use one as SIGNAL_ACCOUNT_NUMBER.`
+          : "No accounts on this bridge yet — complete QR linking on your phone, then refresh again."
+    };
+  } catch (error) {
+    return { ok: false, detail: error instanceof Error ? error.message : "accounts request failed" };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function verifySignalRegistration(

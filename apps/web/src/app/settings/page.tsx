@@ -455,6 +455,12 @@ export default function SettingsPage() {
   const [signalRegisterStatus, setSignalRegisterStatus] = useState<SetupCheckResult | null>(null);
   const [signalRegistrationCaptcha, setSignalRegistrationCaptcha] = useState("");
   const [signalRegistrationUseVoice, setSignalRegistrationUseVoice] = useState(false);
+  const [signalQrDeviceName, setSignalQrDeviceName] = useState("Nova Agent Web");
+  const [signalQrLoading, setSignalQrLoading] = useState(false);
+  const [signalQrImageUrl, setSignalQrImageUrl] = useState<string | null>(null);
+  const [signalQrEndpoint, setSignalQrEndpoint] = useState<string | null>(null);
+  const [signalAccountsLoading, setSignalAccountsLoading] = useState(false);
+  const [signalLinkedAccounts, setSignalLinkedAccounts] = useState<string[] | null>(null);
   const [whatsAppWebStatus, setWhatsAppWebStatus] = useState<WhatsAppWebBridgeStatus | null>(null);
   const [channelDebugEntries, setChannelDebugEntries] = useState<ChannelDebugEntry[]>([]);
   const [channelDebugError, setChannelDebugError] = useState<string | null>(null);
@@ -964,7 +970,7 @@ export default function SettingsPage() {
     setSignalRegisterStatus({ ok: true, detail: data.detail ?? "Registration started" });
     setSignalSetupCheck({
       ok: true,
-      detail: "Register/link started"
+      detail: "SMS registration started"
     });
     setSignalRegistrationCaptcha("");
     setStatus("Signal registration started. Enter the verification code below, then click Verify code.");
@@ -1003,6 +1009,87 @@ export default function SettingsPage() {
     });
     setSignalVerificationCode("");
     setStatus("Signal number linked successfully. Run Validate and then Save Settings.");
+  }
+
+  async function runSignalQrLinkFetch(): Promise<void> {
+    setError(null);
+    setStatus(null);
+    setSignalQrEndpoint(null);
+    setSignalQrLoading(true);
+    setSignalLinkedAccounts(null);
+    const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
+    const signalApiUrl = values.signalApiUrl ?? "http://127.0.0.1:8085";
+    try {
+      const response = await apiFetch("/api/setup/channels/signal/qrcodelink", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          signalApiUrl,
+          deviceName: signalQrDeviceName.trim() || "Nova Agent Web"
+        })
+      });
+      const data = (await response.json()) as {
+        error?: string;
+        detail?: string;
+        imageBase64?: string;
+        mimeType?: string;
+        endpointTried?: string;
+      };
+      if (!response.ok) {
+        setSignalQrImageUrl(null);
+        setError(data.error ?? data.detail ?? "Could not load Signal link QR.");
+        return;
+      }
+      if (data.imageBase64 && data.mimeType) {
+        setSignalQrImageUrl(`data:${data.mimeType};base64,${data.imageBase64}`);
+      } else {
+        setSignalQrImageUrl(null);
+        setError("Signal bridge returned no image. Is signal-cli-rest-api running at the URL above?");
+        return;
+      }
+      setSignalQrEndpoint(typeof data.endpointTried === "string" ? data.endpointTried : null);
+      setStatus(data.detail ?? "Scan the QR with Signal on your phone, then refresh linked accounts.");
+    } catch (e) {
+      setSignalQrImageUrl(null);
+      setError(e instanceof Error ? e.message : "Signal QR request failed");
+    } finally {
+      setSignalQrLoading(false);
+    }
+  }
+
+  async function runSignalAccountsRefresh(): Promise<void> {
+    setError(null);
+    setSignalAccountsLoading(true);
+    const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
+    const signalApiUrl = values.signalApiUrl ?? "http://127.0.0.1:8085";
+    try {
+      const response = await apiFetch("/api/setup/channels/signal/accounts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ signalApiUrl })
+      });
+      const data = (await response.json()) as { error?: string; detail?: string; accounts?: string[] };
+      if (!response.ok) {
+        setSignalLinkedAccounts(null);
+        setError(data.error ?? data.detail ?? "Could not list Signal accounts.");
+        return;
+      }
+      const accounts = Array.isArray(data.accounts) ? data.accounts : [];
+      setSignalLinkedAccounts(accounts);
+      if (accounts.length === 1) {
+        updateChannelSetup({ signalAccountNumber: accounts[0]! });
+        setStatus(`Linked account: ${accounts[0]}. Filled Signal account number — validate and save when ready.`);
+      } else if (accounts.length > 1) {
+        setStatus(`${accounts.length} accounts on this bridge. Pick one for SIGNAL_ACCOUNT_NUMBER above.`);
+      } else {
+        setStatus(data.detail ?? "No accounts on the bridge yet.");
+      }
+    } catch (e) {
+      setSignalLinkedAccounts(null);
+      setError(e instanceof Error ? e.message : "Accounts request failed");
+    } finally {
+      setSignalAccountsLoading(false);
+    }
   }
 
   async function refreshWhatsAppWebStatus(): Promise<void> {
@@ -2381,7 +2468,8 @@ export default function SettingsPage() {
               <div className="space-y-2 rounded-ui border bg-surface p-3">
                 <h3 className="text-sm font-semibold">Signal setup (self-hosted)</h3>
                 <p className="text-xs text-muted">
-                  Install and run <a className="underline" href="https://github.com/bbernhard/signal-cli-rest-api" target="_blank" rel="noreferrer">signal-cli-rest-api</a>, then register/link your number and use the API URL below.
+                  Install and run <a className="underline" href="https://github.com/bbernhard/signal-cli-rest-api" target="_blank" rel="noreferrer">signal-cli-rest-api</a>. If this number already uses Signal on a phone, use{" "}
+                  <strong className="text-foreground">Generate link QR</strong> below (linked device). SMS registration is only for numbers not yet on Signal.
                 </p>
                 <Input
                   value={String((settings.skillSettings["channel-setup"] as Record<string, unknown> | undefined)?.signalApiUrl ?? "")}
@@ -2448,7 +2536,10 @@ export default function SettingsPage() {
               </div>
             </div>
             <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
-              <div><strong>Signal quick checklist:</strong> click <strong>Start Signal bridge via Docker</strong> {"->"} complete one-time register/link number {"->"} run validation {"->"} save settings.</div>
+              <div>
+                <strong>Signal quick checklist:</strong> <strong>Start Signal bridge via Docker</strong> {"->"} link phone with <strong>Generate link QR</strong> (or SMS registration only if the number is new to Signal) {"->"}
+                validate {"->"} save settings.
+              </div>
               <div><strong>WhatsApp quick checklist:</strong> create Meta app {"->"} add WhatsApp {"->"} generate permanent token {"->"} get phone number ID {"->"} run validation.</div>
             </div>
             <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -2521,7 +2612,62 @@ export default function SettingsPage() {
                 </span>
               ) : null}
             </div>
+            <div className="space-y-3 rounded-ui border bg-surface p-3">
+              <h3 className="text-sm font-semibold">Signal: link phone (QR)</h3>
+              <p className="text-[11px] leading-snug text-muted">
+                Same as Signal Desktop: this bridge becomes a linked device on your primary phone. Open Signal on the phone → Settings → Linked devices → Link new device, then scan the QR. No SMS code.
+              </p>
+              <label className="grid gap-1 text-xs">
+                Device name (shown under linked devices on the phone)
+                <Input
+                  value={signalQrDeviceName}
+                  onChange={(e) => setSignalQrDeviceName(e.target.value)}
+                  placeholder="Nova Agent Web"
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" tone="blue" disabled={signalQrLoading} onClick={() => void runSignalQrLinkFetch()}>
+                  {signalQrLoading ? "Loading QR…" : "Generate link QR"}
+                </Button>
+                <Button type="button" tone="green" disabled={signalAccountsLoading} onClick={() => void runSignalAccountsRefresh()}>
+                  {signalAccountsLoading ? "Checking…" : "Refresh linked accounts"}
+                </Button>
+              </div>
+              {signalQrEndpoint ? (
+                <p className="break-all font-mono text-[10px] text-muted" title="Upstream URL used by agent-core">
+                  {signalQrEndpoint}
+                </p>
+              ) : null}
+              {signalQrImageUrl ? (
+                <div className="space-y-2 rounded-ui border border-border bg-surface2 p-3">
+                  <div className="text-[11px] font-semibold text-muted">Scan with your phone</div>
+                  <img
+                    className="max-h-80 w-80 max-w-full rounded-ui border border-border bg-white p-2"
+                    src={signalQrImageUrl}
+                    alt="Signal device link QR code"
+                  />
+                  <p className="text-[11px] text-muted">
+                    signal-cli-rest-api issues a new QR on each request. If scanning fails or times out, click Generate link QR again.
+                  </p>
+                </div>
+              ) : null}
+              {signalLinkedAccounts !== null ? (
+                <div className="rounded-ui border border-emerald-600/25 bg-surface2 p-2 text-[11px]">
+                  <div className="mb-1 font-semibold text-muted">Accounts on this bridge</div>
+                  {signalLinkedAccounts.length > 0 ? (
+                    <ul className="list-inside list-disc space-y-1 font-mono">
+                      {signalLinkedAccounts.map((n) => (
+                        <li key={n}>{n}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-muted">None yet — finish linking on the phone, then Refresh linked accounts.</p>
+                  )}
+                </div>
+              ) : null}
+            </div>
             <div className="space-y-2 rounded-ui border bg-surface p-2">
+              <p className="text-[11px] font-medium text-muted">SMS registration (new number / not yet on Signal)</p>
               <label className="grid gap-1 text-xs">
                 Signal verification code
                 <Input
@@ -2558,11 +2704,11 @@ export default function SettingsPage() {
                   signalcaptchas.org registration captcha
                 </a>
                 , solve it, then right‑click “Open Signal”, copy the link, and paste only the captcha token part into the field above.
-                Retry <strong>Start register/link</strong> with the token filled.
+                Retry <strong>Start SMS registration</strong> with the token filled.
               </p>
               <div className="flex flex-wrap items-start gap-2">
                 <Button type="button" tone="purple" onClick={() => void runSignalRegisterStart()}>
-                  Start register/link
+                  Start SMS registration
                 </Button>
                 <Button type="button" tone="green" onClick={() => void runSignalVerifyCode()}>
                   Verify code
@@ -2577,7 +2723,7 @@ export default function SettingsPage() {
                     aria-live="polite"
                   >
                     <span className="break-words">
-                      Register/link: {signalRegisterStatus.ok ? "OK" : "Failed"} — {signalRegisterStatus.detail}
+                      SMS registration: {signalRegisterStatus.ok ? "OK" : "Failed"} — {signalRegisterStatus.detail}
                     </span>
                   </span>
                 ) : null}
