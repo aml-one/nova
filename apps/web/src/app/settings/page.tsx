@@ -161,6 +161,15 @@ type PersonaVersion = { version: number; createdAt: string };
 type BackupRunState = { status?: "success" | "failed"; createdAt?: string; branch?: string; error?: string } | null;
 type WebsiteProject = { id: string; name: string; domain: string; subdomain: string; local_path: string; remote_www_root: string; remote_subfolder: string };
 type SetupCheckResult = { ok: boolean; detail: string };
+type SignalBootstrapResult = {
+  ok?: boolean;
+  bridge?: SetupCheckResult;
+  detail?: string;
+  executedCommand?: string;
+  nextStep?: string;
+  suggestedEnv?: string;
+  error?: string;
+};
 type SshTestResult = { ok: boolean; detail: string } | null;
 
 const DEFAULT_SETTINGS: SettingsState = {
@@ -789,6 +798,36 @@ export default function SettingsPage() {
     const waLine = `WhatsApp: ${data.whatsApp?.ok ? "OK" : "Needs attention"} - ${data.whatsApp?.detail ?? "-"}`;
     setChannelsSetupOutput([signalLine, waLine, "", data.suggestedEnv ?? ""].join("\n"));
     setStatus("Channel setup checked. Review result and save settings.");
+  }
+
+  async function runSignalDockerBootstrap(): Promise<void> {
+    setError(null);
+    setStatus(null);
+    const values = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
+    const signalAccountNumber = values.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "";
+    const response = await apiFetch("/api/setup/channels/signal/bootstrap", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ signalAccountNumber })
+    });
+    const data = (await response.json()) as SignalBootstrapResult;
+    if (!response.ok) {
+      setError(data.error ?? "Could not bootstrap Signal bridge.");
+      return;
+    }
+    const lines = [
+      `Signal bridge: ${data.bridge?.ok ? "OK" : "Needs attention"} - ${data.bridge?.detail ?? data.detail ?? "-"}`,
+      data.executedCommand ? `Command: ${data.executedCommand}` : "",
+      data.nextStep ?? "",
+      "",
+      data.suggestedEnv ?? ""
+    ].filter(Boolean);
+    setChannelsSetupOutput(lines.join("\n"));
+    updateChannelSetup({
+      signalApiUrl: "http://127.0.0.1:8085",
+      signalAccountNumber
+    });
+    setStatus("Signal bridge bootstrap completed. Finish one-time registration/link, then run Validate.");
   }
 
   async function copyChannelsSetupOutput(): Promise<void> {
@@ -2127,9 +2166,12 @@ export default function SettingsPage() {
               </div>
             </div>
             <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
-              <div><strong>Signal quick checklist:</strong> install `signal-cli-rest-api` {"->"} register/link number {"->"} verify API responds {"->"} paste URL/account {"->"} run validation.</div>
+              <div><strong>Signal quick checklist:</strong> click <strong>Start Signal bridge via Docker</strong> {"->"} complete one-time register/link number {"->"} run validation {"->"} save settings.</div>
               <div><strong>WhatsApp quick checklist:</strong> create Meta app {"->"} add WhatsApp {"->"} generate permanent token {"->"} get phone number ID {"->"} run validation.</div>
             </div>
+            <Button type="button" tone="blue" onClick={() => void runSignalDockerBootstrap()}>
+              Start Signal bridge via Docker
+            </Button>
             <Button
               type="button"
               tone="green"
@@ -2187,7 +2229,11 @@ export default function SettingsPage() {
             </Button>
             {channelsSetupOutput ? (
               <div className="space-y-2">
-                <textarea className="h-32 w-full rounded-ui border bg-white p-2 font-mono text-xs" value={channelsSetupOutput} readOnly />
+                <textarea
+                  className="h-32 w-full rounded-ui border border-border bg-surface2 p-2 font-mono text-xs text-text shadow-inner"
+                  value={channelsSetupOutput}
+                  readOnly
+                />
                 <Button type="button" tone="blue" onClick={() => void copyChannelsSetupOutput()}>Copy env block</Button>
               </div>
             ) : null}

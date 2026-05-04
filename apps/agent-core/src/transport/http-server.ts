@@ -581,9 +581,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const whatsAppPhoneNumberId = payload.whatsAppPhoneNumberId?.trim() || "";
         const whatsAppToken = payload.whatsAppToken?.trim() || "";
         const whatsAppAppSecret = payload.whatsAppAppSecret?.trim() || "";
-        const signalCheck = signalApiUrl
-          ? await pingUrl(`${signalApiUrl.replace(/\/$/, "")}/v1/about`)
-          : { ok: false, detail: "SIGNAL_API_URL missing" };
+        const signalCheck = signalApiUrl ? await checkSignalConnectionForBase(signalApiUrl) : { ok: false, detail: "SIGNAL_API_URL missing" };
         const waCheck =
           whatsAppPhoneNumberId && whatsAppToken
             ? await pingUrl(`https://graph.facebook.com/v22.0/${whatsAppPhoneNumberId}?fields=id`, {
@@ -613,6 +611,27 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
               "Copy Phone Number ID and token, then click Test."
             ]
           },
+          correlationId
+        });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/signal/bootstrap") {
+        const payload = (await readJson(request)) as { signalAccountNumber?: string };
+        const number = payload.signalAccountNumber?.trim() || "";
+        const bootstrap = await ensureSignalDockerBridge();
+        const afterCheck = await checkSignalConnectionForBase("http://127.0.0.1:8085");
+        const nextStep = number
+          ? `Bridge is up. Next: register/link ${number} in signal-cli-rest-api (one-time human verification), then re-run Validate.`
+          : "Bridge is up. Next: register/link your Signal number in signal-cli-rest-api (one-time human verification), then re-run Validate.";
+        return sendJson(response, 200, {
+          ok: bootstrap.ok && afterCheck.ok,
+          bridge: afterCheck,
+          detail: bootstrap.detail,
+          executedCommand: bootstrap.executedCommand,
+          nextStep,
+          suggestedEnv: [
+            "SIGNAL_API_URL=http://127.0.0.1:8085",
+            `SIGNAL_ACCOUNT_NUMBER=${number || "+15550001111"}`
+          ].join("\n"),
           correlationId
         });
       }
@@ -2729,8 +2748,64 @@ async function checkSignalConnection(): Promise<{ ok: boolean; detail: string }>
   if (!baseUrl) {
     return { ok: false, detail: "SIGNAL_API_URL missing" };
   }
-  const url = `${baseUrl.replace(/\/$/, "")}/v1/about`;
-  return pingUrl(url);
+  return checkSignalConnectionForBase(baseUrl);
+}
+
+async function checkSignalConnectionForBase(baseUrl: string): Promise<{ ok: boolean; detail: string }> {
+  const trimmed = baseUrl.trim().replace(/\/$/, "");
+  const candidates = [
+    `${trimmed}/v1/about`,
+    `${trimmed}/about`,
+    trimmed
+  ];
+  for (const url of candidates) {
+    const check = await pingUrl(url);
+    if (check.ok) {
+      return check;
+    }
+  }
+  return { ok: false, detail: "endpoint returned 404 (tried /v1/about, /about, and base URL)" };
+}
+
+async function ensureSignalDockerBridge(): Promise<{ ok: boolean; detail: string; executedCommand?: string }> {
+  try {
+    await runLocalCommand("docker --version");
+  } catch (err) {
+    return {
+      ok: false,
+      detail: `Docker is not available: ${err instanceof Error ? err.message : "unknown error"}`
+    };
+  }
+
+  try {
+    const running = await runLocalCommand('docker ps --filter "name=^/nova-signal-bridge$" --format "{{.Names}}"');
+    if ((running.stdout ?? "").trim().includes("nova-signal-bridge")) {
+      return { ok: true, detail: "Signal bridge container already running." };
+    }
+  } catch {
+    // Continue to start attempt below.
+  }
+
+  const startCmd =
+    "docker run -d --name nova-signal-bridge -p 8085:8080 -v nova-signal-cli-config:/home/.local/share/signal-cli bbernhard/signal-cli-rest-api:latest";
+  try {
+    await runLocalCommand(startCmd);
+    return { ok: true, detail: "Started Signal bridge container.", executedCommand: startCmd };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "unknown error";
+    if (/already in use|is already in use|Conflict/i.test(message)) {
+      try {
+        await runLocalCommand("docker start nova-signal-bridge");
+        return { ok: true, detail: "Started existing Signal bridge container.", executedCommand: "docker start nova-signal-bridge" };
+      } catch (startErr) {
+        return {
+          ok: false,
+          detail: `Container exists but could not be started: ${startErr instanceof Error ? startErr.message : "unknown error"}`
+        };
+      }
+    }
+    return { ok: false, detail: `Could not start Signal bridge: ${message}` };
+  }
 }
 
 async function pingUrl(url: string, headers?: HeadersInit): Promise<{ ok: boolean; detail: string }> {
