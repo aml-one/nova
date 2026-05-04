@@ -56,34 +56,14 @@ export class AIVoiceOrb {
   private rotationDirection = new THREE.Vector3(0.4, 1, 0.2).normalize();
   private targetDirection = this.rotationDirection.clone();
   private speechLevel = 0.2;
-  private speechPeak = 0.2;
-
-  private readonly moodTarget = {
-    colorA: new THREE.Color("#5ec8ff"),
-    colorB: new THREE.Color("#a8e8ff"),
-    shell: new THREE.Color(0.24, 0.72, 1.0),
-    glow: new THREE.Color("#2ea8ff")
-  };
-
-  private readonly moodCurrent = {
-    colorA: new THREE.Color("#5ec8ff"),
-    colorB: new THREE.Color("#a8e8ff"),
-    shell: new THREE.Color(0.24, 0.72, 1.0),
-    glow: new THREE.Color("#2ea8ff")
-  };
-
   private rafId = 0;
 
   private readonly uniforms = {
     uTime: { value: 0 },
     uSpeak: { value: 0.2 },
-    uSpeakPeak: { value: 0.2 },
     uColorA: { value: new THREE.Color("#39b9ff") },
-    uColorB: { value: new THREE.Color("#94f0ff") },
-    uShellColor: { value: new THREE.Color(0.24, 0.72, 1.0) }
+    uColorB: { value: new THREE.Color("#94f0ff") }
   };
-
-  private glowMaterial: THREE.SpriteMaterial;
 
   constructor(private readonly mount: HTMLElement, options: VoiceOrbOptions = {}) {
     const radius = options.radius ?? 1.8;
@@ -120,20 +100,17 @@ export class AIVoiceOrb {
           varying vec3 vPos;
           uniform float uTime;
           uniform float uSpeak;
-          uniform float uSpeakPeak;
 
           void main() {
             vNormal = normal;
 
-            float spk = mix(uSpeak, uSpeakPeak, 0.78);
-
             float wave1 = sin(position.y * 5.0 + uTime * 1.8) * 0.06;
             float wave2 = sin(position.x * 7.5 - uTime * 2.4) * 0.05;
             float wave3 = sin((position.z + position.x) * 9.0 + uTime * 2.0) * 0.035;
-            float pulse = (wave1 + wave2 + wave3) * (0.42 + uSpeak * 1.15 + uSpeakPeak * 1.85);
-            float spike = sin(position.y * 16.0 + uTime * 11.0) * spk * 0.11
-              + sin(position.x * 14.0 - uTime * 9.0) * spk * 0.095
-              + sin((position.z * 1.7 + position.y) * 18.0 + uTime * 13.0) * spk * 0.072;
+            float pulse = (wave1 + wave2 + wave3) * (0.42 + uSpeak * 2.45);
+            float spike = sin(position.y * 16.0 + uTime * 11.0) * uSpeak * 0.062
+              + sin(position.x * 14.0 - uTime * 9.0) * uSpeak * 0.052
+              + sin((position.z * 1.7 + position.y) * 18.0 + uTime * 13.0) * uSpeak * 0.038;
 
             vec3 displaced = position + normal * (pulse + spike);
             vPos = displaced;
@@ -146,7 +123,6 @@ export class AIVoiceOrb {
           varying vec3 vPos;
           uniform float uTime;
           uniform float uSpeak;
-          uniform float uSpeakPeak;
           uniform vec3 uColorA;
           uniform vec3 uColorB;
 
@@ -157,8 +133,7 @@ export class AIVoiceOrb {
             ribbons += sin((vPos.y - vPos.z) * 11.0 - uTime * 2.2) * 0.5 + 0.5;
             ribbons = ribbons * 0.5;
 
-            float vib = 0.45 + uSpeak * 0.85 + uSpeakPeak * 1.05;
-            float alpha = smoothstep(0.18, 1.0, ribbons) * (0.3 + fresnel * 0.95) * vib;
+            float alpha = smoothstep(0.18, 1.0, ribbons) * (0.3 + fresnel * 0.95) * (0.45 + uSpeak * 1.2);
             vec3 col = mix(uColorA, uColorB, ribbons + fresnel * 0.4);
 
             gl_FragColor = vec4(col, alpha);
@@ -179,12 +154,10 @@ export class AIVoiceOrb {
           varying vec3 vNormal;
           uniform float uTime;
           uniform float uSpeak;
-          uniform float uSpeakPeak;
 
           void main() {
             vNormal = normal;
-            float spk = mix(uSpeak, uSpeakPeak, 0.65);
-            float shellWave = sin(position.y * 3.0 + uTime * 1.2) * 0.08 * (1.0 + spk * 1.4);
+            float shellWave = sin(position.y * 3.0 + uTime * 1.2) * 0.08 * (1.0 + uSpeak);
             vec3 p = position + normal * (0.32 + shellWave);
             gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
           }
@@ -193,22 +166,19 @@ export class AIVoiceOrb {
           varying vec3 vNormal;
           uniform float uTime;
           uniform float uSpeak;
-          uniform float uSpeakPeak;
-          uniform vec3 uShellColor;
 
           void main() {
             float edge = pow(1.0 - abs(dot(normalize(vNormal), vec3(0.0, 0.0, 1.0))), 2.0);
             float ripple = sin(vNormal.y * 9.0 + uTime * 2.0) * 0.5 + 0.5;
-            float spk = mix(uSpeak, uSpeakPeak, 0.55);
-            float alpha = edge * (0.18 + ripple * 0.18) * (0.5 + spk * 1.15);
-            gl_FragColor = vec4(uShellColor, alpha);
+            float alpha = edge * (0.18 + ripple * 0.18) * (0.5 + uSpeak);
+            gl_FragColor = vec4(0.24, 0.72, 1.0, alpha);
           }
         `
       })
     );
 
     const glowMap = this.buildGlowTexture();
-    this.glowMaterial = new THREE.SpriteMaterial({
+    const glowMat = new THREE.SpriteMaterial({
       map: glowMap,
       color: 0x2ea8ff,
       transparent: true,
@@ -216,7 +186,7 @@ export class AIVoiceOrb {
       blending: THREE.AdditiveBlending,
       depthWrite: false
     });
-    this.glow = new THREE.Sprite(this.glowMaterial);
+    this.glow = new THREE.Sprite(glowMat);
     this.glow.scale.set(7.2, 7.2, 1);
 
     this.scene.add(this.glow);
@@ -233,34 +203,12 @@ export class AIVoiceOrb {
 
   setBaseColor(hex: string): void {
     const c = new THREE.Color(hex);
-    this.moodTarget.colorA.copy(c);
-    this.moodTarget.colorB.copy(c.clone().offsetHSL(0.06, 0.08, 0.22));
-    this.moodTarget.shell.copy(c).multiplyScalar(0.55).offsetHSL(0.02, 0.15, 0.08);
-    this.moodTarget.glow.copy(c);
-    this.moodCurrent.colorA.copy(this.moodTarget.colorA);
-    this.moodCurrent.colorB.copy(this.moodTarget.colorB);
-    this.moodCurrent.shell.copy(this.moodTarget.shell);
-    this.moodCurrent.glow.copy(this.moodTarget.glow);
-    this.syncMoodUniforms();
-  }
-
-  /** Smooth level (envelope) + peak (snappy, tracks syllables). */
-  setSpeechEnvelope(smooth: number, peak: number): void {
-    this.speechLevel = THREE.MathUtils.clamp(smooth, 0, 1);
-    this.speechPeak = THREE.MathUtils.clamp(peak, 0, 1);
+    this.uniforms.uColorA.value.copy(c);
+    this.uniforms.uColorB.value.copy(c.clone().offsetHSL(0.06, 0.08, 0.22));
   }
 
   setSpeechLevel(level: number): void {
-    const v = THREE.MathUtils.clamp(level, 0, 1);
-    this.setSpeechEnvelope(v, v);
-  }
-
-  /** RGB hex for core A/B, shell tint, and glow (e.g. #5ec8ff). */
-  setMoodPalette(colorA: string, colorB: string, shellRgb: string, glowHex: string): void {
-    this.moodTarget.colorA.set(colorA);
-    this.moodTarget.colorB.set(colorB);
-    this.moodTarget.shell.set(shellRgb);
-    this.moodTarget.glow.set(glowHex);
+    this.speechLevel = THREE.MathUtils.clamp(level, 0, 1);
   }
 
   setRotationSpeed(speed: number): void {
@@ -319,13 +267,6 @@ export class AIVoiceOrb {
     }
   }
 
-  private syncMoodUniforms(): void {
-    this.uniforms.uColorA.value.copy(this.moodCurrent.colorA);
-    this.uniforms.uColorB.value.copy(this.moodCurrent.colorB);
-    this.uniforms.uShellColor.value.copy(this.moodCurrent.shell);
-    this.glowMaterial.color.copy(this.moodCurrent.glow);
-  }
-
   private animate = (): void => {
     this.rafId = requestAnimationFrame(this.animate);
 
@@ -333,15 +274,7 @@ export class AIVoiceOrb {
     const elapsed = this.clock.elapsedTime;
 
     this.uniforms.uTime.value = elapsed;
-    this.uniforms.uSpeak.value = THREE.MathUtils.damp(this.uniforms.uSpeak.value, this.speechLevel, 10, dt);
-    this.uniforms.uSpeakPeak.value = THREE.MathUtils.damp(this.uniforms.uSpeakPeak.value, this.speechPeak, 28, dt);
-
-    const moodLerp = Math.min(1, dt * 4.2);
-    this.moodCurrent.colorA.lerp(this.moodTarget.colorA, moodLerp);
-    this.moodCurrent.colorB.lerp(this.moodTarget.colorB, moodLerp);
-    this.moodCurrent.shell.lerp(this.moodTarget.shell, moodLerp);
-    this.moodCurrent.glow.lerp(this.moodTarget.glow, moodLerp);
-    this.syncMoodUniforms();
+    this.uniforms.uSpeak.value = THREE.MathUtils.damp(this.uniforms.uSpeak.value, this.speechLevel, 8, dt);
 
     this.rotationDirection.lerp(this.targetDirection, Math.min(1, dt * 5));
     this.rotationDirection.normalize();
@@ -350,8 +283,7 @@ export class AIVoiceOrb {
     this.mesh.rotateOnAxis(this.rotationDirection, step);
     this.shell.rotateOnAxis(this.rotationDirection, step * 0.9);
 
-    const spk = Math.max(this.uniforms.uSpeak.value, this.uniforms.uSpeakPeak.value * 0.85);
-    const breathing = 1 + Math.sin(elapsed * 1.7) * 0.02 * (1 + spk * 2.2);
+    const breathing = 1 + Math.sin(elapsed * 1.7) * 0.02 * (1 + this.uniforms.uSpeak.value * 2.2);
     this.mesh.scale.setScalar(breathing);
     this.shell.scale.setScalar(1 + (breathing - 1) * 1.2);
 

@@ -5,10 +5,7 @@ import { AIVoiceOrb, type VoiceOrbPresetName } from "../lib/ai-voice-orb/AIVoice
 
 export type NovaThreeSpeakingOrbHandle = {
   setSpeechLevel: (level: number) => void;
-  setSpeechEnvelope: (smooth: number, peak: number) => void;
-  setRotationSpeed: (speed: number) => void;
   randomizeDirection: () => void;
-  setMoodPalette: (colorA: string, colorB: string, shellRgb: string, glowHex: string) => void;
 };
 
 type Props = {
@@ -32,17 +29,8 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
     setSpeechLevel: (level: number) => {
       orbRef.current?.setSpeechLevel(level);
     },
-    setSpeechEnvelope: (smooth: number, peak: number) => {
-      orbRef.current?.setSpeechEnvelope(smooth, peak);
-    },
-    setRotationSpeed: (speed: number) => {
-      orbRef.current?.setRotationSpeed(speed);
-    },
     randomizeDirection: () => {
       orbRef.current?.randomizeDirection();
-    },
-    setMoodPalette: (colorA: string, colorB: string, shellRgb: string, glowHex: string) => {
-      orbRef.current?.setMoodPalette(colorA, colorB, shellRgb, glowHex);
     }
   }));
 

@@ -145,6 +145,30 @@ const NOVA_CHAT_WEB_SPEECH_ENERGY_WINDOW_MS = 2200;
 const NOVA_CHAT_STT_SERVER_HINT =
   "Server speech-to-text is not configured on the agent (set OPENAI_API_KEY or NOVA_STT_COMMAND). Use Chrome or Edge for in-browser dictation, or configure the agent.";
 
+/** Default TTS orb palette (restored on detach). */
+const NOVA_ORB_MOOD_DEFAULT_A = "#5ec8ff";
+const NOVA_ORB_MOOD_DEFAULT_B = "#c8f4ff";
+const NOVA_ORB_MOOD_DEFAULT_SHELL = "#3d8cc4";
+const NOVA_ORB_MOOD_DEFAULT_GLOW = "#3ab8f0";
+
+function hexToRgbChannels(hex: string): [number, number, number] {
+  const h = hex.trim().replace("#", "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  const n = parseInt(full, 16);
+  if (!Number.isFinite(n)) return [94, 200, 255];
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function lerpHexColor(a: string, b: string, t: number): string {
+  const u = Math.max(0, Math.min(1, t));
+  const [ar, ag, ab] = hexToRgbChannels(a);
+  const [br, bg, bb] = hexToRgbChannels(b);
+  const r = Math.round(ar + (br - ar) * u);
+  const g = Math.round(ag + (bg - ag) * u);
+  const bch = Math.round(ab + (bb - ab) * u);
+  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${bch.toString(16).padStart(2, "0")}`;
+}
+
 function chatTtsCacheKey(turnId: string, cleaned: string): string {
   return `${turnId}\u0000${cleaned}`;
 }
@@ -476,7 +500,7 @@ function ChatSessionHeaderControls({
               <div className="min-w-0 pr-1">
                 <span className="text-xs text-text">Continuous conversation (voice)</span>
                 <p className="mt-0.5 text-[10px] leading-snug text-muted">
-                  After Nova finishes read-aloud, start listening automatically so you can reply without tapping Voice again.
+                  After read-aloud, auto-start listening only when you sent that turn by voice (mic or auto-send after silence) — not when you typed the message.
                 </p>
               </div>
               <IosSwitch
@@ -591,6 +615,11 @@ export default function HomePage() {
   const novaOrbWordSpikeRef = useRef(0);
   /** Debounce rotation flips so they track words, not every frame. */
   const novaOrbLastFlipAtRef = useRef(0);
+  /** Slow envelope of TTS energy (whisper vs projected vs loud). */
+  const novaOrbSlowEnergyRef = useRef(0);
+  /** Outer wrapper scale: whisper 0.7, normal 1, loud up to ~1.5. */
+  const novaOrbDisplayScaleRef = useRef(1);
+  const novaOrbFreqBufRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   /** Agent `/v1/voice/stt-status`: whether server mic transcription is available. */
   const sttServerConfiguredRef = useRef<boolean | null>(null);
   const lastWebSpeechEndAtRef = useRef(0);
@@ -627,6 +656,10 @@ export default function HomePage() {
   const voiceContinuousConversationRef = useRef(false);
   /** After TTS ends, prefer server STT once (Web Speech often fails to pick up audio right after playback). */
   const preferServerSttAfterTtsRef = useRef(false);
+  /** True only for the assistant reply to a user message sent via mic (or dictation auto-send). */
+  const replyChainsVoiceListeningRef = useRef(false);
+  /** Set immediately before programmatic submit from dictation silence timer. */
+  const voiceDictationAutoSubmitRef = useRef(false);
   const startMicTranscriptionRef = useRef<(() => Promise<void>) | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const [autoScrollEnabled, setAutoScrollEnabled] = useState(true);
@@ -1052,6 +1085,15 @@ export default function HomePage() {
     novaOrbPrevInstantRef.current = 0;
     novaOrbWordSpikeRef.current = 0;
     novaOrbLastFlipAtRef.current = 0;
+    novaOrbSlowEnergyRef.current = 0;
+    novaOrbDisplayScaleRef.current = 1;
+    novaThreeSpeakingOrbRef.current?.setSpeechEnvelope(0, 0);
+    novaThreeSpeakingOrbRef.current?.setMoodPalette(
+      NOVA_ORB_MOOD_DEFAULT_A,
+      NOVA_ORB_MOOD_DEFAULT_B,
+      NOVA_ORB_MOOD_DEFAULT_SHELL,
+      NOVA_ORB_MOOD_DEFAULT_GLOW
+    );
     const meter = novaTtsOrbMeterRef.current;
     if (meter) {
       meter.style.removeProperty("transform");
@@ -1173,6 +1215,9 @@ export default function HomePage() {
         return;
       }
       orbVoiceAttachAttemptRef.current = 0;
+      novaOrbPrevInstantRef.current = 0;
+      novaOrbWordSpikeRef.current = 0;
+      novaOrbVoiceLevelRef.current = 0;
 
       const win = typeof window !== "undefined" ? window : undefined;
       const AudioCtx = win?.AudioContext ?? (win as unknown as { webkitAudioContext?: typeof AudioContext } | undefined)?.webkitAudioContext;
@@ -1181,10 +1226,13 @@ export default function HomePage() {
       }
 
       const timeDomainBufRef = { current: new Float32Array(0) };
+      novaOrbSlowEnergyRef.current = 0;
+      novaOrbDisplayScaleRef.current = 1;
 
       const tick = () => {
         const analyser = chatTtsAnalyserRef.current;
         const m = novaTtsOrbMeterRef.current;
+        const ctxLive = chatTtsAudioContextRef.current;
         if (!analyser || !m) {
           return;
         }
@@ -1208,12 +1256,31 @@ export default function HomePage() {
           sumSq += v * v;
         }
         const rms = Math.sqrt(sumSq / Math.max(1, buf.length));
-        const instant = Math.min(1, rms * 20 + peak * 3.4);
-        const gated = Math.max(0, instant - 0.01);
+        const timeInstant = Math.min(1, rms * 22 + peak * 3.9);
+
+        const sr = ctxLive?.sampleRate ?? 48000;
+        const nyquist = sr * 0.5;
+        const binCount = analyser.frequencyBinCount;
+        let freqBuf = novaOrbFreqBufRef.current;
+        if (!freqBuf || freqBuf.length !== binCount) {
+          freqBuf = new Uint8Array(new ArrayBuffer(binCount)) as Uint8Array<ArrayBuffer>;
+          novaOrbFreqBufRef.current = freqBuf;
+        }
+        analyser.getByteFrequencyData(freqBuf);
+        const binW = nyquist / Math.max(1, binCount);
+        const lo = Math.max(0, Math.floor(280 / binW));
+        const hi = Math.min(binCount - 1, Math.ceil(3400 / binW));
+        let bandSum = 0;
+        for (let i = lo; i <= hi; i++) {
+          bandSum += freqBuf[i] ?? 0;
+        }
+        const bandAvg = bandSum / Math.max(1, hi - lo + 1) / 255;
+        const combined = Math.min(1, timeInstant * 0.48 + bandAvg * 2.35);
+        const gated = Math.max(0, combined - 0.008);
 
         let level = novaOrbVoiceLevelRef.current;
-        const attack = 0.88;
-        const release = 0.042;
+        const attack = 0.94;
+        const release = 0.085;
         if (gated > level) {
           level += (gated - level) * attack;
         } else {
@@ -1222,26 +1289,65 @@ export default function HomePage() {
         novaOrbVoiceLevelRef.current = level;
 
         const prevInstant = novaOrbPrevInstantRef.current;
-        const rise = gated - prevInstant;
-        novaOrbPrevInstantRef.current = gated;
+        const rise = combined - prevInstant;
+        novaOrbPrevInstantRef.current = combined;
 
-        // Detect short speech onsets (close to per-word energy bursts).
         const nowMs = performance.now();
-        const onset = gated > 0.11 && rise > 0.055;
+        const onset = combined > 0.065 && rise > 0.028;
         if (onset) {
-          const burst = Math.min(1, gated * 1.28 + rise * 2.1 + 0.16);
+          const burst = Math.min(1, combined * 1.35 + rise * 2.45 + 0.14);
           novaOrbWordSpikeRef.current = Math.max(novaOrbWordSpikeRef.current, burst);
-          if (nowMs - novaOrbLastFlipAtRef.current > 115) {
+          if (nowMs - novaOrbLastFlipAtRef.current > 72) {
             novaOrbLastFlipAtRef.current = nowMs;
             novaThreeSpeakingOrbRef.current?.randomizeDirection();
+            novaThreeSpeakingOrbRef.current?.setRotationSpeed(0.52 + Math.random() * 2.85);
           }
         }
-        // Fast decay so next onset produces another visible "word spike".
-        novaOrbWordSpikeRef.current *= 0.62;
+        novaOrbWordSpikeRef.current *= 0.58;
 
-        const s = Math.min(1, Math.max(0, level * 0.72 + novaOrbWordSpikeRef.current * 0.98));
-        m.style.removeProperty("transform");
-        novaThreeSpeakingOrbRef.current?.setSpeechLevel(s);
+        const peakDrive = Math.min(1, combined * 0.98 + novaOrbWordSpikeRef.current * 1.08);
+        novaThreeSpeakingOrbRef.current?.setSpeechEnvelope(level, peakDrive);
+
+        let slow = novaOrbSlowEnergyRef.current;
+        slow = Math.max(combined, slow * (combined < 0.018 ? 0.87 : 0.993));
+        novaOrbSlowEnergyRef.current = slow;
+
+        let targetScale = 1.0;
+        if (slow < 0.052 && combined < 0.065) {
+          targetScale = 0.7;
+        } else if (combined > 0.122 || (slow > 0.045 && combined > slow * 1.4)) {
+          targetScale =
+            1.0 + Math.min(0.52, (combined - 0.108) * 2.05 + Math.max(0, combined - slow * 1.22) * 1.32);
+        }
+        let ds = novaOrbDisplayScaleRef.current;
+        ds += (targetScale - ds) * (targetScale > ds ? 0.19 : 0.088);
+        novaOrbDisplayScaleRef.current = ds;
+        m.style.transformOrigin = "center center";
+        m.style.transform = `scale(${ds})`;
+
+        const crest = peak / (rms + 1e-5);
+        let anger = Math.min(1, Math.max(0, (crest - 2.05) * 0.4)) * Math.min(1, combined * 3.6);
+        const calmEnergy = Math.min(1, combined * 2.15);
+        let colorA = NOVA_ORB_MOOD_DEFAULT_A;
+        let colorB = NOVA_ORB_MOOD_DEFAULT_B;
+        let shell = NOVA_ORB_MOOD_DEFAULT_SHELL;
+        let glow = NOVA_ORB_MOOD_DEFAULT_GLOW;
+        if (anger > 0.1) {
+          const t = Math.min(1, anger);
+          colorA = lerpHexColor(colorA, "#ff3355", t * 0.92);
+          colorB = lerpHexColor(colorB, "#ffb3c1", t * 0.86);
+          shell = lerpHexColor(shell, "#ff5555", t * 0.78);
+          glow = lerpHexColor(glow, "#ff2233", t * 0.9);
+        } else {
+          const play = calmEnergy * (1 - anger * 0.55);
+          colorA = lerpHexColor(colorA, "#fde047", play * 0.3);
+          colorA = lerpHexColor(colorA, "#86efac", play * 0.2);
+          colorB = lerpHexColor(colorB, "#f9a8d4", play * 0.34);
+          colorB = lerpHexColor(colorB, "#fef08a", play * 0.14);
+          shell = lerpHexColor(shell, "#5eead4", play * 0.16);
+          glow = lerpHexColor(glow, "#f472b6", play * 0.22);
+        }
+        novaThreeSpeakingOrbRef.current?.setMoodPalette(colorA, colorB, shell, glow);
 
         chatTtsOrbRafRef.current = requestAnimationFrame(tick);
       };
@@ -1260,10 +1366,10 @@ export default function HomePage() {
         if (!analyser) {
           analyser = ctx.createAnalyser();
           analyser.fftSize = 2048;
-          analyser.smoothingTimeConstant = 0.22;
+          analyser.smoothingTimeConstant = 0.38;
           chatTtsAnalyserRef.current = analyser;
         } else {
-          analyser.smoothingTimeConstant = 0.22;
+          analyser.smoothingTimeConstant = 0.38;
         }
 
         if (!chatTtsMediaSourceRef.current) {
@@ -1288,8 +1394,9 @@ export default function HomePage() {
           ttsOrbDirectionTimerRef.current = null;
           if (!ttsOrbDirectionActiveRef.current) return;
           novaThreeSpeakingOrbRef.current?.randomizeDirection();
+          novaThreeSpeakingOrbRef.current?.setRotationSpeed(0.45 + Math.random() * 1.6);
           scheduleOrbDirFlip();
-        }, 380 + Math.random() * 2200);
+        }, 10_000 + Math.random() * 8000);
       };
       scheduleOrbDirFlip();
     },
@@ -1317,9 +1424,13 @@ export default function HomePage() {
     setTtsPlayingTurnId(null);
     setTtsGeneratingTurnId(null);
     if (opts?.naturalTtsEnd) {
-      preferServerSttAfterTtsRef.current = true;
+      const chainFromVoiceSend = replyChainsVoiceListeningRef.current;
+      replyChainsVoiceListeningRef.current = false;
+      if (chainFromVoiceSend) {
+        preferServerSttAfterTtsRef.current = true;
+      }
       window.setTimeout(() => {
-        if (!voiceContinuousConversationRef.current) return;
+        if (!voiceContinuousConversationRef.current || !chainFromVoiceSend) return;
         if (loadingRef.current || sttTranscribingRef.current || sttRecordingRef.current) return;
         if (getMicCapabilityError()) return;
         void startMicTranscriptionRef.current?.();
@@ -1426,6 +1537,7 @@ export default function HomePage() {
       if (!voiceDictationAutoSendRef.current || loadingRef.current || sttTranscribingRef.current) return;
       const m = messageRef.current.trim();
       if (!m) return;
+      voiceDictationAutoSubmitRef.current = true;
       chatFormRef.current?.requestSubmit();
     }, ms);
     return () => {
@@ -1994,6 +2106,10 @@ export default function HomePage() {
       clearTimeout(dictationAutoSendTimerRef.current);
       dictationAutoSendTimerRef.current = null;
     }
+    const viaVoiceAutoSend = voiceDictationAutoSubmitRef.current;
+    voiceDictationAutoSubmitRef.current = false;
+    const viaActiveMic = sttRecordingRef.current || sttTranscribingRef.current;
+    replyChainsVoiceListeningRef.current = viaVoiceAutoSend || viaActiveMic;
     stopMicTranscription();
     const trimmed = message.trim();
     if (!trimmed || loading) return;
@@ -3040,12 +3156,12 @@ export default function HomePage() {
       </div>
       {ttsPlaybackActive && ttsPlayingTurnId !== null ? (
         <div
-          className="pointer-events-none absolute bottom-[calc(7.375rem+env(safe-area-inset-bottom,0px))] right-[31px] z-[35] sm:right-[39px]"
+          className="pointer-events-none absolute left-1/2 top-[40%] z-[35] -translate-x-1/2 -translate-y-1/2"
           aria-hidden
         >
           <div
             ref={novaTtsOrbMeterRef}
-            className="h-[269px] w-[269px] shrink-0 drop-shadow-[0_0_28px_rgba(56,189,248,0.24)]"
+            className="h-[538px] w-[538px] shrink-0 origin-center drop-shadow-[0_0_36px_rgba(56,189,248,0.3)]"
           >
             <NovaThreeSpeakingOrb ref={novaThreeSpeakingOrbRef} className="h-full w-full" preset="speaking" baseColor="#5ec8ff" />
           </div>
