@@ -305,7 +305,7 @@ export default function EndpointsPage() {
           <strong className="text-foreground">Recent TTS / read-aloud log</strong> shows what was actually synthesized (last N), for debugging Orpheus repeats.
         </p>
       </Card>
-      <div className="grid gap-4 lg:grid-cols-[1.2fr_1fr]">
+      <div className="grid gap-4 lg:grid-cols-[710px_minmax(0,1fr)]">
         <Card className="space-y-3">
           <h2 className="text-sm font-semibold">Available endpoints</h2>
           <div className="max-h-[62vh] space-y-3 overflow-auto pr-1">
@@ -354,7 +354,7 @@ export default function EndpointsPage() {
             })}
           </div>
         </Card>
-        <Card className="space-y-2">
+        <Card className="min-w-0 space-y-2">
           <h2 className="text-sm font-semibold">Endpoint viewer</h2>
           <div className="grid gap-2">
             <label className="grid gap-1 text-xs">
