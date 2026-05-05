@@ -30,8 +30,36 @@ export type AgentAuthStateSnapshot = {
 };
 
 /**
+ * When the agent is down, Edge middleware may not see `process.env` the same way as Node.
+ * Optional static file at `/nova-login-fallback.json` (copy from `nova-login-fallback.json.example`)
+ * lets you set `"loginEnabled": false` at **runtime** without rebuilding.
+ */
+export async function loginPolicyFromPublicFallback(request: Request): Promise<boolean | undefined> {
+  try {
+    const u = new URL(request.url);
+    u.pathname = "/nova-login-fallback.json";
+    u.hash = "";
+    u.search = "";
+    const res = await fetch(u.toString(), { cache: "no-store" });
+    if (!res.ok) {
+      return undefined;
+    }
+    const data = (await res.json()) as { loginEnabled?: unknown };
+    if (data.loginEnabled === false || data.loginEnabled === "false" || data.loginEnabled === 0 || data.loginEnabled === "0") {
+      return false;
+    }
+    if (data.loginEnabled === true || data.loginEnabled === "true" || data.loginEnabled === 1 || data.loginEnabled === "1") {
+      return true;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+/**
  * Reads `/v1/auth/state` from agent-core (public, no session).
- * Returns `undefined` when the agent cannot be reached or returns non-OK.
+ * Returns `undefined` when the agent cannot be reached or returns non-OK and no env/fallback applies.
  */
 export async function fetchAgentAuthState(request: Request): Promise<AgentAuthStateSnapshot | undefined> {
   const envLogin = loginEnabledEnvOverride();
@@ -39,6 +67,13 @@ export async function fetchAgentAuthState(request: Request): Promise<AgentAuthSt
     needsSetup,
     loginEnabled: envLogin!
   });
+  const fromFallback = async (): Promise<AgentAuthStateSnapshot | undefined> => {
+    const fb = await loginPolicyFromPublicFallback(request);
+    if (fb === undefined) {
+      return undefined;
+    }
+    return { needsSetup: false, loginEnabled: fb };
+  };
   try {
     const res = await fetch(`${getAgentBaseUrl(request)}/v1/auth/state`, {
       headers: { accept: "application/json" },
@@ -48,7 +83,7 @@ export async function fetchAgentAuthState(request: Request): Promise<AgentAuthSt
       if (envLogin !== undefined) {
         return fromEnv(false);
       }
-      return undefined;
+      return (await fromFallback()) ?? undefined;
     }
     const data = (await res.json()) as { needsSetup?: unknown; loginEnabled?: unknown };
     return {
@@ -59,6 +94,6 @@ export async function fetchAgentAuthState(request: Request): Promise<AgentAuthSt
     if (envLogin !== undefined) {
       return fromEnv(false);
     }
-    return undefined;
+    return (await fromFallback()) ?? undefined;
   }
 }

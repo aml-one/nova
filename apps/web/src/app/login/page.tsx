@@ -77,8 +77,9 @@ export default function LoginPage() {
       {agentUnreachable ? (
         <p style={{ marginTop: 10, color: "#856404", fontSize: 13, background: "#fff3cd", padding: "8px 10px", borderRadius: 6 }}>
           Nova could not read auth settings from the agent (check <code>NOVA_AGENT_API_URL</code> and that agent-core is running).
-          Login is required until the agent responds. To temporarily open the UI, set{" "}
-          <code>NOVA_WEB_LOGIN_ENABLED=false</code> on the web server (homelab only).
+          To open the UI anyway: set <code>NOVA_WEB_LOGIN_ENABLED=false</code> for the web process and restart web,{" "}
+          <strong>or</strong> copy <code>public/nova-login-fallback.json.example</code> to <code>public/nova-login-fallback.json</code> with{" "}
+          <code>{`{ "loginEnabled": false }`}</code> (no rebuild; refresh the page).
         </p>
       ) : null}
       <form onSubmit={onSubmit} style={{ display: "grid", gap: 10, marginTop: 16 }}>

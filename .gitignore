@@ -1,5 +1,7 @@
 # Signal from agent-core update apply: local supervisor wipes Next dev cache on restart
 tmp/.nova-clean-web-next
+# Runtime copy: open web UI when agent is down (see public/nova-login-fallback.json.example)
+apps/web/public/nova-login-fallback.json
 
 node_modules/
 .pnpm-store/

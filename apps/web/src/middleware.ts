@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { fetchAgentAuthState } from "./lib/auth-login-policy";
+import { fetchAgentAuthState, loginEnabledEnvOverride } from "./lib/auth-login-policy";
 
 function forwardCookieHeader(request: NextRequest): HeadersInit {
   const cookie = request.headers.get("cookie");
@@ -31,8 +31,9 @@ export async function middleware(request: NextRequest) {
     pathname.startsWith("/emotion") ||
     pathname.startsWith("/security") ||
     pathname.startsWith("/services");
-  const authState = await fetchAgentAuthState(request);
-  const loginEnabled = authState?.loginEnabled ?? true;
+  const envOverride = loginEnabledEnvOverride();
+  const loginEnabled =
+    envOverride === true ? true : envOverride === false ? false : (await fetchAgentAuthState(request))?.loginEnabled ?? true;
 
   if (loginEnabled && !session && protectedPath) {
     return NextResponse.redirect(new URL("/login", request.url));
