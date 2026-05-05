@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 
 let database: DatabaseSync | undefined;
-const LATEST_SCHEMA_VERSION = 18;
+const LATEST_SCHEMA_VERSION = 20;
 
 export function getDatabase(): DatabaseSync {
   if (database) {
@@ -497,6 +497,36 @@ function runMigrations(db: DatabaseSync): void {
     () => {
       db.prepare(`DELETE FROM emotion_events WHERE user_id != ?`).run(NOVA_PRIMARY_EMOTION_USER_ID);
       db.prepare(`DELETE FROM emotion_state WHERE user_id != ?`).run(NOVA_PRIMARY_EMOTION_USER_ID);
+    },
+    () => {
+      db.exec(`
+    CREATE TABLE IF NOT EXISTS improvement_proposals (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      details TEXT,
+      source TEXT NOT NULL DEFAULT 'idle-learning',
+      status TEXT NOT NULL DEFAULT 'proposed',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      approved_at DATETIME,
+      started_at DATETIME,
+      completed_at DATETIME
+    );
+  `);
+    },
+    () => {
+      db.exec(`
+    CREATE TABLE IF NOT EXISTS improvement_proposal_events (
+      id TEXT PRIMARY KEY,
+      proposal_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      status_from TEXT,
+      status_to TEXT,
+      note TEXT,
+      actor TEXT NOT NULL DEFAULT 'nova',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
     }
   ];
 

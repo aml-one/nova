@@ -1150,6 +1150,36 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         });
         return sendJson(response, 200, { ok: true, result, correlationId });
       }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/improvement/proposals") {
+        const limit = Math.max(10, Math.min(1000, Number(parsedUrl.searchParams.get("limit") ?? "200")));
+        const items = options.improvement.listImprovementProposals(limit);
+        return sendJson(response, 200, { items, correlationId });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/improvement/proposals/status") {
+        const payload = (await readJson(request)) as { id?: string; status?: string };
+        const id = payload.id?.trim() ?? "";
+        const status = payload.status?.trim() ?? "";
+        if (!id || !["proposed", "approved", "in_progress", "implemented"].includes(status)) {
+          return sendJson(response, 400, { error: "id and valid status are required", correlationId });
+        }
+        const item = options.improvement.updateImprovementProposalStatus(
+          id,
+          status as "proposed" | "approved" | "in_progress" | "implemented"
+        );
+        if (!item) {
+          return sendJson(response, 404, { error: "proposal not found", correlationId });
+        }
+        return sendJson(response, 200, { item, correlationId });
+      }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/improvement/proposals/events") {
+        const id = (parsedUrl.searchParams.get("id") ?? "").trim();
+        const limit = Math.max(10, Math.min(500, Number(parsedUrl.searchParams.get("limit") ?? "100")));
+        if (!id) {
+          return sendJson(response, 400, { error: "id is required", correlationId });
+        }
+        const events = options.improvement.listImprovementProposalEvents(id, limit);
+        return sendJson(response, 200, { events, correlationId });
+      }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/chat") {
         const payload = (await readJson(request)) as {
           message?: string;

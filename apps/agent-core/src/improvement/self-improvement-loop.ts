@@ -12,6 +12,12 @@ import { ModelRouter } from "../providers/router.js";
 import type { ChatMessage } from "@nova/sdk/provider";
 import { CuriosityStore } from "./curiosity-store.js";
 import { getDatabase } from "../storage/sqlite.js";
+import {
+  ImprovementProposalRepository,
+  type ImprovementProposalEvent,
+  type ImprovementProposal,
+  type ImprovementProposalStatus
+} from "./improvement-proposal-repository.js";
 
 type Outcome = {
   runId: string;
@@ -41,6 +47,7 @@ export class SelfImprovementLoop {
   private readonly outcomeRunIds = new Set<string>();
   private readonly learningLog = new LearningLog();
   private readonly curiosity = new CuriosityStore();
+  private readonly proposalRepo = new ImprovementProposalRepository();
   private readonly policy: ImprovementPolicy;
   /** Avoid flooding the learning timeline when idle cycles repeat the same benign skip. */
   private lastIdleResearchSkipLogMs = 0;
@@ -167,6 +174,10 @@ export class SelfImprovementLoop {
     if ((options?.enabled ?? policy.backgroundLearningEnabled) !== true) {
       return "background learning is disabled by policy";
     }
+    const workResult = await this.maybeWorkOnAcceptedProposal();
+    if (workResult) {
+      return workResult;
+    }
     if (this.outcomes.length === 0) {
       this.learningLog.append(
         "Skipped idle learning: waiting for real interaction",
@@ -207,6 +218,7 @@ export class SelfImprovementLoop {
         topics: researchTopics.slice(0, 2),
         provider: cognition.provider
       });
+      this.enqueueCognitionProposal(cognition.summary, researchTopics.slice(0, 2));
     }
     if (cognition.questions.length > 0) {
       this.curiosity.enqueueQuestions(
@@ -316,7 +328,8 @@ export class SelfImprovementLoop {
       "Return sections exactly:",
       "1) SUMMARY: 3 bullet points",
       "2) QUESTIONS_FOR_USER: up to 2 short questions only if truly unresolved after web research.",
-      "3) SOUL_OR_PERSONA_DELTA: one short paragraph or the word \"none\" if no change is warranted.",
+      "3) ACTION_PLAN: exactly one item with Title, Summary, and Done Signal (how we verify completion).",
+      "4) SOUL_OR_PERSONA_DELTA: one short paragraph or the word \"none\" if no change is warranted.",
       "",
       moodLine ? `Nova unified mood now: ${moodLine}` : "",
       `Topics: ${topics.join(", ") || "general reliability"}`,
@@ -347,6 +360,18 @@ export class SelfImprovementLoop {
 
   getLearningHistory(): Array<Record<string, unknown>> {
     return this.learningLog.getAll();
+  }
+
+  listImprovementProposals(limit = 200): ImprovementProposal[] {
+    return this.proposalRepo.list(limit);
+  }
+
+  updateImprovementProposalStatus(id: string, status: ImprovementProposalStatus): ImprovementProposal | undefined {
+    return this.proposalRepo.setStatus(id, status, `Set by user to ${status}`, "user");
+  }
+
+  listImprovementProposalEvents(id: string, limit = 100): ImprovementProposalEvent[] {
+    return this.proposalRepo.listEvents(id, limit);
   }
 
   getDiagnostics(): {
@@ -429,6 +454,83 @@ export class SelfImprovementLoop {
       // Keep startup resilient if history read fails.
     }
   }
+
+  private enqueueCognitionProposal(cognitionSummary: string, topics: string[]): void {
+    const plan = extractActionPlan(cognitionSummary);
+    if (!plan) {
+      this.learningLog.append(
+        "Idle cognition generated no actionable plan",
+        true,
+        "Marked as research-only cycle; next cycle should force fresh topics.",
+        "proposal",
+        { topics, scorecard: { actionable: false, status: "research-only" } }
+      );
+      return;
+    }
+    if (this.proposalRepo.hasSimilarRecent(plan.title, 24)) {
+      this.learningLog.append(
+        "Skipped duplicate improvement proposal",
+        true,
+        `Title repeated within novelty window: ${plan.title}`,
+        "proposal",
+        { topics, scorecard: { actionable: true, duplicateSuppressed: true } }
+      );
+      return;
+    }
+    const created = this.proposalRepo.create({
+      title: plan.title,
+      summary: plan.summary,
+      details: plan.doneSignal,
+      source: "idle-learning"
+    });
+    this.learningLog.append(
+      "Queued improvement proposal",
+      true,
+      `${created.title}: ${created.summary}`,
+      "proposal",
+      {
+        proposalId: created.id,
+        topics,
+        scorecard: { actionable: true, duplicateSuppressed: false, status: "queued" }
+      }
+    );
+  }
+
+  private async maybeWorkOnAcceptedProposal(): Promise<string | null> {
+    const next = this.proposalRepo
+      .list(300)
+      .find((item) => item.status === "in_progress" || item.status === "approved");
+    if (!next) {
+      return null;
+    }
+    if (next.status === "approved") {
+      this.proposalRepo.setStatus(next.id, "in_progress", "Nova picked up approved proposal", "nova");
+    }
+    const improvementResult = await this.maybeApplySkillImprovement(next.title);
+    const succeeded =
+      improvementResult.includes("generated and validated skill") || improvementResult.includes("pending user approval");
+    this.proposalRepo.setStatus(
+      next.id,
+      succeeded ? "implemented" : "in_progress",
+      succeeded ? "Work result marked implemented" : "Work attempt incomplete; staying in progress",
+      "nova"
+    );
+    this.proposalRepo.addEvent({
+      proposalId: next.id,
+      eventType: "work_attempt",
+      note: improvementResult,
+      actor: "nova",
+      statusTo: succeeded ? "implemented" : "in_progress"
+    });
+    this.learningLog.append(
+      "Worked accepted improvement proposal",
+      succeeded,
+      improvementResult,
+      "improvement",
+      { proposalId: next.id, proposalTitle: next.title, status: succeeded ? "implemented" : "in_progress" }
+    );
+    return `idle cycle worked accepted proposal: ${next.title}`;
+  }
 }
 
 async function runModelReasoning(
@@ -472,6 +574,41 @@ function extractSoulDelta(value: string): string {
     return "";
   }
   return line.replace(/^[-*]\s*/, "").slice(0, 1200).trim();
+}
+
+function extractActionPlan(value: string): { title: string; summary: string; doneSignal: string } | null {
+  const section = value.split(/action_plan\s*:/i)[1] ?? "";
+  const source = section || value;
+  const lines = source
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !/^(summary|questions_for_user|soul_or_persona_delta)\s*:/i.test(line));
+  let title = "";
+  let summary = "";
+  let doneSignal = "";
+  for (const line of lines) {
+    const cleaned = line.replace(/^[-*]\s*/, "").trim();
+    if (!title && /^title\s*:/i.test(cleaned)) {
+      title = cleaned.replace(/^title\s*:/i, "").trim();
+      continue;
+    }
+    if (!summary && /^summary\s*:/i.test(cleaned)) {
+      summary = cleaned.replace(/^summary\s*:/i, "").trim();
+      continue;
+    }
+    if (!doneSignal && /^done signal\s*:/i.test(cleaned)) {
+      doneSignal = cleaned.replace(/^done signal\s*:/i, "").trim();
+      continue;
+    }
+  }
+  if (!title || !summary) {
+    return null;
+  }
+  return {
+    title: title.slice(0, 160),
+    summary: summary.slice(0, 500),
+    doneSignal: (doneSignal || "Manually verify expected behavior and logs").slice(0, 500)
+  };
 }
 
 function applySoulDelta(existing: string, delta: string): string {

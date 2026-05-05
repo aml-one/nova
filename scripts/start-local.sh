@@ -20,6 +20,10 @@ run_pnpm() {
     pnpm "$@"
     return $?
   fi
+  if command -v npm >/dev/null 2>&1; then
+    npx --yes pnpm "$@"
+    return $?
+  fi
   return 127
 }
 
@@ -94,9 +98,9 @@ echo "Starting Nova local stack supervisor..."
 echo "This script now auto-restarts services after update-triggered exits."
 echo "Tip: if agent-core fails with EADDRINUSE on 8787, another Nova (or stale tsx) is still running, or use NOVA_LOCAL_FREE_PORTS=1 once to clear 8787 and the web port."
 
-if ! command -v corepack >/dev/null 2>&1 && ! command -v pnpm >/dev/null 2>&1; then
-  echo "Error: neither corepack nor pnpm was found in PATH (${PATH})."
-  echo "Install Node.js+Corepack or pnpm globally, then restart the service."
+if ! command -v corepack >/dev/null 2>&1 && ! command -v pnpm >/dev/null 2>&1 && ! command -v npm >/dev/null 2>&1; then
+  echo "Error: none of corepack, pnpm, or npm was found in PATH (${PATH})."
+  echo "Install Node.js (includes npm), then restart the service."
   exit 1
 fi
 

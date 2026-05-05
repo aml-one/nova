@@ -250,9 +250,9 @@ export class UpdateManager {
      * Set NOVA_UPDATE_INCLUDE_BUILD=true for installs that need a full compile (e.g. prod without dev).
      */
     const includeBuild = process.env.NOVA_UPDATE_INCLUDE_BUILD === "true";
-    const cmd = includeBuild
-      ? "git pull && corepack pnpm install && corepack pnpm -r build"
-      : "git pull && corepack pnpm install";
+    const pnpmInstallCmd = "(corepack pnpm install || pnpm install || npx --yes pnpm install)";
+    const pnpmBuildCmd = "(corepack pnpm -r build || pnpm -r build || npx --yes pnpm -r build)";
+    const cmd = includeBuild ? `git pull && ${pnpmInstallCmd} && ${pnpmBuildCmd}` : `git pull && ${pnpmInstallCmd}`;
     const result = spawnSync(cmd, {
       cwd: repoRoot,
       shell: true,
