@@ -3496,14 +3496,50 @@ export default function SettingsPage() {
         {tab === "backup" ? (
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">Identity Backup</h2>
-            <label className="flex items-center gap-2"><Checkbox checked={settings.identityBackup.enabled} onChange={(e) => setSettings((p) => ({ ...p, identityBackup: { ...p.identityBackup, enabled: e.target.checked } }))} /> Enable automatic identity backup</label>
-            <div className="grid gap-2 md:grid-cols-2">
-              <Input type="number" min={1} max={30} value={settings.identityBackup.intervalDays} onChange={(e) => setSettings((p) => ({ ...p, identityBackup: { ...p.identityBackup, intervalDays: Number(e.target.value || 1) } }))} placeholder="Interval days" />
-              <Input value={settings.identityBackup.labelPrefix} onChange={(e) => setSettings((p) => ({ ...p, identityBackup: { ...p.identityBackup, labelPrefix: e.target.value } }))} placeholder="Label prefix" />
+            <p className="text-xs text-muted">
+              Pushes a snapshot branch to <code className="text-[11px]">origin</code> (needs Git + push credentials on the agent host). Includes DB, personas, config, and learning sidecars.
+            </p>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={settings.identityBackup.enabled}
+                onChange={(e) => setSettings((p) => ({ ...p, identityBackup: { ...p.identityBackup, enabled: e.target.checked } }))}
+              />
+              Enable automatic identity backup
+            </label>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label className="grid gap-1 text-xs">
+                <span className="font-medium text-text">Interval (days)</span>
+                <span className="text-muted">Minimum full days between automatic backup runs (1–30).</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={settings.identityBackup.intervalDays}
+                  onChange={(e) =>
+                    setSettings((p) => ({ ...p, identityBackup: { ...p.identityBackup, intervalDays: Number(e.target.value || 1) } }))
+                  }
+                  placeholder="e.g. 1"
+                />
+              </label>
+              <label className="grid gap-1 text-xs">
+                <span className="font-medium text-text">Label prefix</span>
+                <span className="text-muted">Short tag used in snapshot folder names and backup labels (letters, numbers, dash).</span>
+                <Input
+                  value={settings.identityBackup.labelPrefix}
+                  onChange={(e) => setSettings((p) => ({ ...p, identityBackup: { ...p.identityBackup, labelPrefix: e.target.value } }))}
+                  placeholder="e.g. nova-core"
+                />
+              </label>
             </div>
-            <div className="flex gap-2">
-              <Input value={backupLabel} onChange={(e) => setBackupLabel(e.target.value)} placeholder="Manual backup label" />
-              <Button type="button" tone="pink" onClick={() => void pushIdentityBackup()}>Push Backup</Button>
+            <div className="grid gap-2 md:grid-cols-[1fr_auto] md:items-end">
+              <label className="grid gap-1 text-xs">
+                <span className="font-medium text-text">Manual backup label (optional)</span>
+                <span className="text-muted">Extra tag for this one-off push; combined with date when the backup runs.</span>
+                <Input value={backupLabel} onChange={(e) => setBackupLabel(e.target.value)} placeholder="e.g. before-os-upgrade" />
+              </label>
+              <Button type="button" tone="pink" className="md:mb-0.5" onClick={() => void pushIdentityBackup()}>
+                Push backup now
+              </Button>
             </div>
           </Card>
         ) : null}
