@@ -11,6 +11,11 @@ type GitPolicy = {
   checkpointTagPrefix: string;
 };
 
+export type OpenPrResult = {
+  branch: string;
+  prUrl?: string;
+};
+
 export class GitOpsManager {
   readonly mode: GitOpsMode = "suggest-only";
   private readonly policy: GitPolicy;
@@ -36,6 +41,37 @@ export class GitOpsManager {
     const checkpoint = this.checkpoints.createTagName(this.policy.checkpointTagPrefix);
     this.checkpoints.createCheckpoint(checkpoint);
     runGit(["push", "origin", checkpoint]);
+  }
+
+  /** Commit only selected files and try opening a PR (uses `gh` when available). */
+  async commitFilesAndOpenPr(input: {
+    files: string[];
+    commitMessage: string;
+    title: string;
+    body: string;
+    baseBranch?: string;
+  }): Promise<OpenPrResult | null> {
+    ensureRepo();
+    const files = [...new Set(input.files.map((f) => f.trim()).filter(Boolean))];
+    if (files.length === 0) {
+      return null;
+    }
+    const branch = `${this.policy.branchPrefix}${Date.now()}`;
+    runGit(["checkout", "-B", branch]);
+    runGit(["add", "--", ...files]);
+    const changed = runGit(["diff", "--cached", "--name-only"]).trim();
+    if (!changed) {
+      return null;
+    }
+    runGit(["commit", "-m", input.commitMessage]);
+    runGit(["push", "-u", "origin", branch]);
+    const prUrl = tryCreatePr({
+      title: input.title,
+      body: input.body,
+      baseBranch: input.baseBranch ?? "main",
+      headBranch: branch
+    });
+    return { branch, prUrl };
   }
 
   async rollbackToCheckpoint(tagName: string): Promise<void> {
@@ -81,6 +117,26 @@ function runGit(args: string[]): string {
     throw new Error(result.stderr || `git ${args.join(" ")} failed`);
   }
   return result.stdout ?? "";
+}
+
+function tryCreatePr(input: { title: string; body: string; baseBranch: string; headBranch: string }): string | undefined {
+  const which = spawnSync("gh", ["--version"], { cwd: process.cwd(), shell: true, encoding: "utf8" });
+  if (which.status !== 0) {
+    return undefined;
+  }
+  const create = spawnSync(
+    "gh",
+    ["pr", "create", "--base", input.baseBranch, "--head", input.headBranch, "--title", input.title, "--body", input.body],
+    { cwd: process.cwd(), shell: true, encoding: "utf8" }
+  );
+  if (create.status !== 0) {
+    return undefined;
+  }
+  const line = (create.stdout ?? "")
+    .split("\n")
+    .map((x) => x.trim())
+    .find((x) => /^https?:\/\//.test(x));
+  return line;
 }
 
 function ensureRepo(): void {

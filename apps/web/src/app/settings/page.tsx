@@ -432,6 +432,7 @@ export default function SettingsPage() {
   const [health, setHealth] = useState<FullHealth | null>(null);
   const [catalog, setCatalog] = useState<ProviderCatalog | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [updateApplying, setUpdateApplying] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
@@ -850,10 +851,48 @@ export default function SettingsPage() {
   }
 
   async function applyUpdates(): Promise<void> {
-    const response = await apiFetch("/api/system/update/apply", { method: "POST" });
-    const data = (await response.json()) as { result?: { message?: string }; error?: string };
-    if (!response.ok) setError(data.error ?? "Update apply failed");
-    else setStatus(data.result?.message ?? "Update apply requested");
+    setUpdateApplying(true);
+    setError(null);
+    setStatus("Applying update... Nova will restart services. Waiting for reconnect.");
+    try {
+      const response = await apiFetch("/api/system/update/apply", { method: "POST" });
+      const data = (await response.json()) as { result?: { message?: string }; error?: string };
+      if (!response.ok) {
+        setError(data.error ?? "Update apply failed");
+        return;
+      }
+      setStatus(data.result?.message ?? "Update apply requested");
+      await waitForServerBackAfterUpdate();
+      setStatus("Nova is back online. Reloading UI...");
+      window.setTimeout(() => {
+        router.refresh();
+        window.location.reload();
+      }, 450);
+    } finally {
+      setUpdateApplying(false);
+    }
+  }
+
+  async function waitForServerBackAfterUpdate(): Promise<void> {
+    const maxAttempts = 90; // ~3 minutes
+    for (let i = 0; i < maxAttempts; i += 1) {
+      try {
+        const response = await fetch(`/api/system/update/status?t=${Date.now()}`, {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store"
+        });
+        if (response.ok) {
+          const data = (await response.json()) as { status?: UpdateStatus };
+          setUpdateStatus(data.status ?? null);
+          return;
+        }
+      } catch {
+        // During restart this is expected.
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    setStatus("Update command was sent, but reconnect timed out. Refresh the page in a few moments.");
   }
 
   function updateChannelSetup(patch: Record<string, string>): void {
@@ -3473,6 +3512,10 @@ export default function SettingsPage() {
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">Auto Updates</h2>
             <p className="text-xs text-muted">Automatic checks run at most once per day. Use "Check now" anytime for a manual check.</p>
+            <p className="text-xs text-muted">
+              Recommended on macOS: run Nova under a launchd service once, then this button can update + restart without manual SSH. See{" "}
+              <code className="rounded bg-black/15 px-1 py-0.5 text-[10px]">scripts/install-macos-service.sh</code>.
+            </p>
             <label className="flex items-center gap-2"><Checkbox checked={settings.updates.enabled} onChange={(e) => setSettings((p) => ({ ...p, updates: { ...p.updates, enabled: e.target.checked } }))} /> Enable update checks</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.updates.autoApply} onChange={(e) => setSettings((p) => ({ ...p, updates: { ...p.updates, autoApply: e.target.checked } }))} /> Auto apply updates in background</label>
             <div className="grid gap-2 md:grid-cols-3">
@@ -3486,8 +3529,15 @@ export default function SettingsPage() {
             </div>
             <div className="flex gap-2">
               <Button type="button" tone="yellow" onClick={() => void checkUpdates()}>Check now</Button>
-              <Button type="button" tone="orange" onClick={() => void applyUpdates()}>Apply latest</Button>
+              <Button type="button" tone="orange" onClick={() => void applyUpdates()} disabled={updateApplying}>
+                {updateApplying ? "Applying… restarting…" : "Apply latest"}
+              </Button>
             </div>
+            {updateApplying ? (
+              <div className="rounded-ui border border-orange-400/40 bg-orange-400/10 p-2 text-xs text-orange-900 dark:text-orange-100">
+                Updating Nova in progress. Services may disconnect briefly; this page will auto-reload when agent-core responds again.
+              </div>
+            ) : null}
             {updateStatus ? (
               <div className="rounded-ui border bg-surface p-2 text-sm">
                 <div>Installed at: {updateStatus.installedAt ? new Date(updateStatus.installedAt).toLocaleString() : "-"}</div>

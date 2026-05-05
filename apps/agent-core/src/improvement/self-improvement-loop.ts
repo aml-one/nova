@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 import { GitOpsManager } from "../git/gitops-manager.js";
 import { LearningLog } from "./learning-log.js";
 import { generateSkillFromTemplate } from "./patch-generator.js";
@@ -54,6 +54,7 @@ export class SelfImprovementLoop {
     private readonly getSettings?: () => {
       activeProvider: "ollama" | "lmstudio" | "copilot";
       models: { defaultByProvider: { ollama: string; lmstudio: string; copilot: string } };
+      sentiCore?: { enabled?: boolean; orchestrationMarkdownPath?: string };
     }
   ) {
     this.policy = loadPolicy();
@@ -216,6 +217,7 @@ export class SelfImprovementLoop {
         queuedQuestions: cognition.questions.length
       });
     }
+    await this.maybeAutoEvolveSoul(cognition.summary);
     this.emotionService?.applySystemEvent(NOVA_PRIMARY_EMOTION_USER_ID, "research_complete", {
       enabled: true,
       expressionStyle: "balanced",
@@ -247,6 +249,52 @@ export class SelfImprovementLoop {
       .consumeQuestions(userId, limit)
       .map((item) => item.question.trim())
       .filter((item) => item.length > 0);
+  }
+
+  private async maybeAutoEvolveSoul(cognitionSummary: string): Promise<void> {
+    if (!cognitionSummary.trim() || !isSoulAutoPrEnabled()) {
+      return;
+    }
+    const settings = this.getSettings?.();
+    const soulPathRaw = settings?.sentiCore?.orchestrationMarkdownPath?.trim() ?? "";
+    if (!settings?.sentiCore?.enabled || !soulPathRaw) {
+      return;
+    }
+    const delta = extractSoulDelta(cognitionSummary);
+    if (!delta) {
+      return;
+    }
+    const soulPath = resolve(process.cwd(), soulPathRaw);
+    const existing = existsSync(soulPath) ? readFileSync(soulPath, "utf8") : "";
+    const next = applySoulDelta(existing, delta);
+    if (next === existing) {
+      return;
+    }
+    mkdirSync(dirname(soulPath), { recursive: true });
+    writeFileSync(soulPath, next, "utf8");
+    const rel = relative(process.cwd(), soulPath).replace(/\\/g, "/");
+    const firstLine = delta.split(/\r?\n/)[0]?.slice(0, 120) ?? "SOUL refinement";
+    const result = await this.gitOps.commitFilesAndOpenPr({
+      files: [rel || soulPath],
+      commitMessage: `chore(soul): autonomous persona refinement\n\n${firstLine}`,
+      title: "Autonomous SOUL refinement",
+      body: [
+        "## Why",
+        "Nova idle-learning proposed a small SOUL/persona refinement.",
+        "",
+        "## Safety",
+        "- Keeps base system persona as anchor",
+        "- No deception / unsafe goals",
+        "- Human review expected before merge"
+      ].join("\n")
+    });
+    this.learningLog.append(
+      "Proposed autonomous SOUL evolution PR",
+      true,
+      result?.prUrl ? `PR: ${result.prUrl}` : `Branch pushed: ${result?.branch ?? "n/a"} (gh not available)`,
+      "improvement",
+      { soulPath: rel || soulPath, prUrl: result?.prUrl ?? "", branch: result?.branch ?? "" }
+    );
   }
 
   private async runAutonomousCognition(topics: string[], researchNotes: string): Promise<AutonomousCognitionResult> {
@@ -411,6 +459,41 @@ function extractQuestions(value: string): string[] {
     .map((line) => line.replace(/^[-*\d.)\s]+/, "").trim())
     .filter((line) => line.endsWith("?"));
   return Array.from(new Set(lines)).slice(0, 2);
+}
+
+function extractSoulDelta(value: string): string {
+  const section = value.split(/soul_or_persona_delta\s*:/i)[1] ?? "";
+  const source = section || value;
+  const line = source
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .find((x) => x.length > 0 && !/^(summary|questions_for_user)\s*:/i.test(x));
+  if (!line || /^none\.?$/i.test(line)) {
+    return "";
+  }
+  return line.replace(/^[-*]\s*/, "").slice(0, 1200).trim();
+}
+
+function applySoulDelta(existing: string, delta: string): string {
+  const clean = existing.trimEnd();
+  const stamp = new Date().toISOString();
+  const block = `\n\n### Autonomous refinement ${stamp}\n${delta}\n`;
+  if (!clean) {
+    return `# SOUL\n\n## Autonomous refinements${block}`;
+  }
+  if (clean.includes(delta)) {
+    return existing;
+  }
+  if (clean.includes("## Autonomous refinements")) {
+    return `${clean}${block}`;
+  }
+  return `${clean}\n\n## Autonomous refinements${block}`;
+}
+
+function isSoulAutoPrEnabled(): boolean {
+  const raw = process.env.NOVA_AUTO_SOUL_PR?.trim().toLowerCase();
+  if (!raw) return true;
+  return raw === "1" || raw === "true" || raw === "yes";
 }
 
 function loadPolicy(): ImprovementPolicy {

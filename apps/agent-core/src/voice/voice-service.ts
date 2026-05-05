@@ -11,7 +11,7 @@ import { prependSilenceToWavPcm } from "./wav-prepend-silence.js";
 
 /** True when agent-core can run mic upload transcription (Whisper API or NOVA_STT_COMMAND). */
 export function isVoiceSttConfigured(): boolean {
-  return Boolean(process.env.NOVA_STT_COMMAND?.trim() || process.env.OPENAI_API_KEY?.trim());
+  return Boolean(process.env.NOVA_STT_COMMAND?.trim() || process.env.OPENAI_API_KEY?.trim() || process.env.NOVA_STT_OPENAI_BASE_URL?.trim());
 }
 
 /** Run `NOVA_STT_COMMAND` without requiring the executable bit on `.sh` wrappers (POSIX). */
@@ -64,12 +64,13 @@ export class VoiceService {
       return result.stdout.trim();
     }
     const apiKey = process.env.OPENAI_API_KEY?.trim();
-    if (!apiKey) {
+    const baseUrl = process.env.NOVA_STT_OPENAI_BASE_URL?.trim() || process.env.OPENAI_BASE_URL?.trim() || "";
+    if (!apiKey && !baseUrl) {
       throw new Error(
-        "Speech-to-text is not configured. Set OPENAI_API_KEY for Whisper API transcription, or set NOVA_STT_COMMAND to a shell command that receives the audio file path as argv[1] and prints the transcript to stdout. Optional: OPENAI_BASE_URL, NOVA_WHISPER_MODEL."
+        "Speech-to-text is not configured. Set NOVA_STT_COMMAND, or set OPENAI_API_KEY / NOVA_STT_OPENAI_BASE_URL for OpenAI-compatible Whisper transcription."
       );
     }
-    return await transcribeOpenAIWhisper(audioPath, apiKey);
+    return await transcribeOpenAIWhisper(audioPath, apiKey || "not-needed");
   }
 
   /** Decode uploaded browser audio bytes into text (normalizes to 16k mono WAV via ffmpeg when available). */
@@ -249,14 +250,28 @@ function isWavMime(mimeType: string | undefined): boolean {
 }
 
 async function transcribeOpenAIWhisper(audioPath: string, apiKey: string): Promise<string> {
-  const baseUrl = (process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com").replace(/\/+$/, "");
-  const model = process.env.NOVA_WHISPER_MODEL?.trim() || "whisper-1";
+  const baseUrl = (process.env.NOVA_STT_OPENAI_BASE_URL?.trim() || process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com").replace(
+    /\/+$/,
+    ""
+  );
+  const model = process.env.NOVA_STT_MODEL?.trim() || process.env.NOVA_WHISPER_MODEL?.trim() || "whisper-1";
+  const language = process.env.NOVA_STT_LANGUAGE?.trim() || "";
+  const prompt = process.env.NOVA_STT_PROMPT?.trim() || "";
+  const rawTemp = process.env.NOVA_STT_TEMPERATURE?.trim() || "";
   const buf = readFileSync(audioPath);
   const name = basename(audioPath);
   const blob = new Blob([buf], { type: mimeForSttFilename(name) });
   const form = new FormData();
   form.append("file", blob, name);
   form.append("model", model);
+  if (language) form.append("language", language);
+  if (prompt) form.append("prompt", prompt);
+  if (rawTemp) {
+    const temp = Number(rawTemp);
+    if (Number.isFinite(temp) && temp >= 0 && temp <= 1) {
+      form.append("temperature", String(temp));
+    }
+  }
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 120_000);
   try {
