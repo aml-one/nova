@@ -8,6 +8,21 @@ ENABLE_HTTPS="${NOVA_WEB_HTTPS:-false}"
 HTTPS_CERT_PATH="${NOVA_WEB_HTTPS_CERT:-${ROOT_DIR}/tmp/dev-cert.pem}"
 HTTPS_KEY_PATH="${NOVA_WEB_HTTPS_KEY:-${ROOT_DIR}/tmp/dev-key.pem}"
 
+# launchd has a minimal PATH; include common Homebrew/bin locations.
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+
+run_pnpm() {
+  if command -v corepack >/dev/null 2>&1; then
+    corepack pnpm "$@"
+    return $?
+  fi
+  if command -v pnpm >/dev/null 2>&1; then
+    pnpm "$@"
+    return $?
+  fi
+  return 127
+}
+
 # macOS ships Bash 3.2 — avoid Bash 4+ features like ${var,,}
 https_enabled() {
   case "${ENABLE_HTTPS}" in
@@ -79,6 +94,12 @@ echo "Starting Nova local stack supervisor..."
 echo "This script now auto-restarts services after update-triggered exits."
 echo "Tip: if agent-core fails with EADDRINUSE on 8787, another Nova (or stale tsx) is still running, or use NOVA_LOCAL_FREE_PORTS=1 once to clear 8787 and the web port."
 
+if ! command -v corepack >/dev/null 2>&1 && ! command -v pnpm >/dev/null 2>&1; then
+  echo "Error: neither corepack nor pnpm was found in PATH (${PATH})."
+  echo "Install Node.js+Corepack or pnpm globally, then restart the service."
+  exit 1
+fi
+
 if https_enabled; then
   mkdir -p "$(dirname "${HTTPS_CERT_PATH}")"
   mkdir -p "$(dirname "${HTTPS_KEY_PATH}")"
@@ -119,7 +140,7 @@ while true; do
   echo "Launching agent-core and web..."
   (
     cd "${ROOT_DIR}"
-    corepack pnpm --filter @nova/agent-core dev
+    run_pnpm --filter @nova/agent-core dev
   ) &
   AGENT_PID=$!
 
@@ -129,14 +150,14 @@ while true; do
     cd "${ROOT_DIR}/apps/web"
     export PORT="${WEB_PORT}"
     if https_enabled; then
-      corepack pnpm exec next dev \
+      run_pnpm exec next dev \
         -H "${WEB_HOST}" \
         -p "${WEB_PORT}" \
         --experimental-https \
         --experimental-https-cert "${HTTPS_CERT_PATH}" \
         --experimental-https-key "${HTTPS_KEY_PATH}"
     else
-      corepack pnpm exec next dev -H "${WEB_HOST}" -p "${WEB_PORT}"
+      run_pnpm exec next dev -H "${WEB_HOST}" -p "${WEB_PORT}"
     fi
   ) &
   WEB_PID=$!
