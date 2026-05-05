@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { SelfImprovementLoop } from "./self-improvement-loop.js";
 import { TaskOrchestrator } from "../orchestrator/task-orchestrator.js";
 import { ThoughtRepository } from "../storage/repositories/thought-repository.js";
@@ -22,6 +23,9 @@ export class LearningDaemon {
   private lastCycleResult = "not started";
   private lastCycleError = "";
   private readonly thoughtLog = new ThoughtRepository();
+  /** Suppress identical "cycle completed" thoughts when the learning synopsis has not changed (hash of result + summary). */
+  private lastCompletedThoughtFingerprint = "";
+  private lastCompletedThoughtAt = 0;
 
   constructor(
     private readonly improvement: SelfImprovementLoop,
@@ -73,11 +77,13 @@ export class LearningDaemon {
     this.lastCycleAt = now;
     this.lastCycleStartedAt = now;
     this.cycleInProgress = true;
-    this.thoughtLog.append({
-      category: "learning",
-      title: "Idle learning cycle started",
-      content: `idleMinutes=${idleMinutes}`
-    });
+    if (shouldLogCycleStartThought()) {
+      this.thoughtLog.append({
+        category: "learning",
+        title: "Idle learning cycle started",
+        content: `idleMinutes=${idleMinutes}`
+      });
+    }
     try {
       const result = await withTimeout(
         this.improvement.runIdleLearningCycle({
@@ -90,12 +96,26 @@ export class LearningDaemon {
       const proposalQueue = buildProposalQueueSnapshot(this.improvement);
       this.lastCycleResult = result;
       this.lastCycleError = "";
-      this.thoughtLog.append({
-        category: "learning",
-        title: "Idle learning cycle completed",
-        content: [result, details.summary, "Open /learning to accept or track improvement proposals."].filter(Boolean).join("\n"),
-        metadata: { ...details.metadata, proposalQueue }
-      });
+      const fingerprint = fingerprintLearningCompleted(result, details.summary);
+      const suppressMs = Math.max(
+        120_000,
+        Number(process.env.NOVA_LEARNING_DUP_COMPLETED_THOUGHT_MS ?? String(3 * 60 * 60 * 1000))
+      );
+      const nowDone = Date.now();
+      const isDup =
+        fingerprint === this.lastCompletedThoughtFingerprint &&
+        this.lastCompletedThoughtFingerprint.length > 0 &&
+        nowDone - this.lastCompletedThoughtAt < suppressMs;
+      if (!isDup) {
+        this.lastCompletedThoughtFingerprint = fingerprint;
+        this.lastCompletedThoughtAt = nowDone;
+        this.thoughtLog.append({
+          category: "learning",
+          title: "Idle learning cycle completed",
+          content: [result, details.summary, "Open /learning to accept or track improvement proposals."].filter(Boolean).join("\n"),
+          metadata: { ...details.metadata, proposalQueue }
+        });
+      }
     } catch (error) {
       this.lastCycleError = error instanceof Error ? error.message : "unknown cycle error";
       this.lastCycleResult = "failed";

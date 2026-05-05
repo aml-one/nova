@@ -263,6 +263,9 @@ Recommended production approach: run Nova as OS services (agent-core + web) and 
 - Optional runtime tuning:
   - `NOVA_LEARNING_IDLE_MINUTES` (default `3`)
   - `NOVA_LEARNING_INTERVAL_MS` (default `120000`)
+  - `NOVA_IDLE_FULL_RESEARCH_COOLDOWN_MS` (default `21600000` = 6h): when there are **zero** task failures, full Wikipedia + cognition runs at most this often (wall clock), so Thoughts is not spammed with identical research every few minutes.
+  - `NOVA_LEARNING_DUP_COMPLETED_THOUGHT_MS` (default `10800000` = 3h): suppress duplicate “idle cycle completed” **thought** rows when the synopsis hash is unchanged.
+  - `NOVA_LEARNING_LOG_CYCLE_START_THOUGHT` (`true`/`1`): log “cycle started” thoughts (default off to reduce noise).
 
 ### Channel Access Control
 - Configure in Settings -> **Channel Phone Access Control**

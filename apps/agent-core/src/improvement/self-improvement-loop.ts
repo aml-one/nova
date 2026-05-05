@@ -12,6 +12,22 @@ import { ModelRouter } from "../providers/router.js";
 import type { ChatMessage } from "@nova/sdk/provider";
 import { CuriosityStore } from "./curiosity-store.js";
 import { getDatabase } from "../storage/sqlite.js";
+
+/** When there are no failing tasks, rotate through these pairs so Wikipedia + cognition are not stuck on two fixed topics. */
+const IDLE_FALLBACK_TOPIC_PAIRS: ReadonlyArray<[string, string]> = [
+  ["Observability", "Site reliability engineering"],
+  ["TypeScript", "Rust programming language"],
+  ["PostgreSQL", "SQLite"],
+  ["WebRTC", "HTTP/3"],
+  ["Docker software", "Kubernetes"],
+  ["React software", "Next.js"],
+  ["Large language model", "Prompt engineering"],
+  ["Computer security", "Zero trust"],
+  ["Accessibility", "Human–computer interaction"],
+  ["Software testing", "Continuous integration"],
+  ["Energy efficiency", "Battery electric vehicle"],
+  ["Open source", "Software license"]
+];
 import {
   ImprovementProposalRepository,
   type ImprovementProposalEvent,
@@ -52,6 +68,9 @@ export class SelfImprovementLoop {
   /** Avoid flooding the learning timeline when idle cycles repeat the same benign skip. */
   private lastIdleResearchSkipLogMs = 0;
   private static readonly IDLE_RESEARCH_SKIP_LOG_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+  /** Wall-clock throttle for full Wikipedia + cognition when there are zero task failures (learning-log timestamps reset every cycle, so time-since-last-research was ineffective). */
+  private lastFullAutonomousResearchAt = 0;
+  private fallbackTopicRotation = 0;
 
   constructor(
     private readonly gitOps: GitOpsManager,
@@ -192,22 +211,27 @@ export class SelfImprovementLoop {
       this.outcomes.map((item) => item.success)
     );
     if (summary.failures === 0) {
-      const hoursSinceResearch = this.hoursSinceLastAcceptedResearch();
-      if (hoursSinceResearch !== null && hoursSinceResearch < 2) {
+      const cooldownMs = Math.max(
+        45 * 60 * 1000,
+        Number(process.env.NOVA_IDLE_FULL_RESEARCH_COOLDOWN_MS ?? String(6 * 60 * 60 * 1000))
+      );
+      if (this.lastFullAutonomousResearchAt > 0 && Date.now() - this.lastFullAutonomousResearchAt < cooldownMs) {
         const now = Date.now();
         if (now - this.lastIdleResearchSkipLogMs >= SelfImprovementLoop.IDLE_RESEARCH_SKIP_LOG_COOLDOWN_MS) {
           this.learningLog.append(
             "Skipped idle research to avoid repetitive loop",
             true,
-            `No failures detected and last accepted research was ${hoursSinceResearch.toFixed(1)}h ago. (Similar skips are logged at most once per 24h.)`,
+            `No failures detected and full autonomous research ran recently (cooldown ${Math.round(cooldownMs / 3_600_000)}h wall clock).`,
             "proposal"
           );
           this.lastIdleResearchSkipLogMs = now;
         }
-        return "idle cycle skipped: no failures and research still fresh";
+        return "idle cycle skipped: no failures and research cooldown";
       }
     }
-    const researchTopics = summary.topFailingTasks.length > 0 ? summary.topFailingTasks : ["Intelligent agent", "TypeScript"];
+    const researchTopics =
+      summary.topFailingTasks.length > 0 ? summary.topFailingTasks.slice(0, 2) : this.pickRotatingFallbackTopics();
+    this.lastFullAutonomousResearchAt = Date.now();
     const researchNotes = await collectResearchNotes(researchTopics.slice(0, 2));
     const cognition = await this.runAutonomousCognition(researchTopics.slice(0, 2), researchNotes);
     this.learningLog.append("Idle research cycle completed", true, researchNotes, "research", {
@@ -406,15 +430,11 @@ export class SelfImprovementLoop {
     };
   }
 
-  private hoursSinceLastAcceptedResearch(): number | null {
-    const recent = this.learningLog.getAll() as LearningRecordLike[];
-    const last = [...recent]
-      .reverse()
-      .find((item) => item.category === "research" && item.accepted === true && typeof item.at === "string");
-    if (!last?.at) return null;
-    const at = Date.parse(last.at);
-    if (!Number.isFinite(at)) return null;
-    return Math.max(0, (Date.now() - at) / 3_600_000);
+  private pickRotatingFallbackTopics(): string[] {
+    const idx = this.fallbackTopicRotation % IDLE_FALLBACK_TOPIC_PAIRS.length;
+    this.fallbackTopicRotation += 1;
+    const pair = IDLE_FALLBACK_TOPIC_PAIRS[idx]!;
+    return [pair[0], pair[1]];
   }
 
   private hydrateOutcomesFromRunHistory(): void {
