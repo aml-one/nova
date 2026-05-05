@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAgentBaseUrl, getAgentHeaders } from "../../../../../lib/agent-core";
+import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 
 export async function GET(request: Request) {
   const response = await fetch(`${getAgentBaseUrl(request)}/v1/improvement/proposals?limit=300`, {
