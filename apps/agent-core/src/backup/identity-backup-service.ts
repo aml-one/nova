@@ -234,11 +234,16 @@ export class IdentityBackupService {
       throw new Error("identity snapshot path is outside the Git checkout; check NOVA_REPO_ROOT and working directory");
     }
     const branch = `identity-backup/${Date.now()}`;
-    runGit(["checkout", "-B", branch]);
-    runGit(["add", relativePath]);
-    runGit(["commit", "-m", `chore(backup): add identity snapshot ${new Date().toISOString()}`]);
-    runGit(["push", "-u", gitRemote, branch]);
-    return branch;
+    const previousBranch = getCurrentBranchName(repoRoot);
+    try {
+      runGit(["checkout", "-B", branch]);
+      runGit(["add", relativePath]);
+      runGit(["commit", "-m", `chore(backup): add identity snapshot ${new Date().toISOString()}`]);
+      runGit(["push", "-u", gitRemote, branch]);
+      return branch;
+    } finally {
+      checkoutRestoreAfterBackup(repoRoot, previousBranch);
+    }
   }
 
   private recordRun(
@@ -291,7 +296,7 @@ function assertGitRemoteConfigured(remote: string, cwd: string): void {
     cwd,
     shell: false,
     encoding: "utf8",
-    env: gitSafeDirectoryEnvForRepo(cwd)
+    env: gitEnv(cwd)
   });
   if (result.status !== 0) {
     throw new Error(
@@ -304,13 +309,55 @@ function gitWorkTree(): string {
   return resolveNovaRepoRoot();
 }
 
+function gitEnv(cwd: string): NodeJS.ProcessEnv {
+  return gitSafeDirectoryEnvForRepo(cwd);
+}
+
+/** Empty when detached HEAD or unreadable. */
+function getCurrentBranchName(repoRoot: string): string | undefined {
+  const result = spawnSync("git", ["branch", "--show-current"], {
+    cwd: repoRoot,
+    shell: false,
+    encoding: "utf8",
+    env: gitEnv(repoRoot)
+  });
+  if (result.status !== 0) {
+    return undefined;
+  }
+  const name = (result.stdout ?? "").trim();
+  return name.length > 0 ? name : undefined;
+}
+
+/**
+ * Return to the branch we were on before identity-backup checkout, so `git pull` and dev workflows keep working.
+ * Best-effort: never throws.
+ */
+function checkoutRestoreAfterBackup(repoRoot: string, previousBranch: string | undefined): void {
+  const tryCheckout = (ref: string): boolean => {
+    const r = spawnSync("git", ["checkout", ref], {
+      cwd: repoRoot,
+      shell: false,
+      encoding: "utf8",
+      env: gitEnv(repoRoot)
+    });
+    return r.status === 0;
+  };
+  if (previousBranch && !previousBranch.startsWith("identity-backup/") && tryCheckout(previousBranch)) {
+    return;
+  }
+  if (tryCheckout("main")) {
+    return;
+  }
+  void tryCheckout("master");
+}
+
 function runGit(args: string[]): string {
   const cwd = gitWorkTree();
   const result = spawnSync("git", args, {
     cwd,
     shell: false,
     encoding: "utf8",
-    env: gitSafeDirectoryEnvForRepo(cwd)
+    env: gitEnv(cwd)
   });
   if (result.status !== 0) {
     throw new Error(result.stderr || `git ${args.join(" ")} failed`);
@@ -324,7 +371,7 @@ function ensureRepo(): void {
     cwd,
     shell: false,
     encoding: "utf8",
-    env: gitSafeDirectoryEnvForRepo(cwd)
+    env: gitEnv(cwd)
   });
   if (result.status !== 0) {
     const hint = (result.stderr ?? "").trim();
