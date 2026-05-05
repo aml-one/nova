@@ -87,13 +87,14 @@ export class LearningDaemon {
         cycleTimeoutMs
       );
       const details = buildLatestLearningDetails(this.improvement.getLearningHistory());
+      const proposalQueue = buildProposalQueueSnapshot(this.improvement);
       this.lastCycleResult = result;
       this.lastCycleError = "";
       this.thoughtLog.append({
         category: "learning",
         title: "Idle learning cycle completed",
-        content: [result, details.summary].filter(Boolean).join("\n"),
-        metadata: details.metadata
+        content: [result, details.summary, "Open /learning to accept or track improvement proposals."].filter(Boolean).join("\n"),
+        metadata: { ...details.metadata, proposalQueue }
       });
     } catch (error) {
       this.lastCycleError = error instanceof Error ? error.message : "unknown cycle error";
@@ -178,14 +179,46 @@ function buildLatestLearningDetails(history: Array<Record<string, unknown>>): {
   if (improvementResult) {
     summaryParts.push(`Improvement: ${improvementResult}`);
   }
+  const latestProposal = recent.find((item) => item.category === "proposal");
+  let latestProposalId: string | undefined;
+  if (latestProposal && typeof latestProposal.proposal === "string") {
+    const detailsObj =
+      latestProposal.details && typeof latestProposal.details === "object" && latestProposal.details !== null
+        ? (latestProposal.details as Record<string, unknown>)
+        : undefined;
+    const pid = typeof detailsObj?.proposalId === "string" ? detailsObj.proposalId : undefined;
+    if (pid) latestProposalId = pid;
+    const line = pid
+      ? `Latest proposal: ${latestProposal.proposal.slice(0, 140)} (id ${pid.slice(0, 8)}…)`
+      : `Latest proposal: ${latestProposal.proposal.slice(0, 160)}`;
+    summaryParts.push(line);
+  }
   return {
     summary: summaryParts.join("\n"),
     metadata: {
       researchTopics: topics,
       researchSummary: researchResult,
-      improvementSummary: improvementResult
+      improvementSummary: improvementResult,
+      latestProposalId
     }
   };
+}
+
+function buildProposalQueueSnapshot(improvement: SelfImprovementLoop): Record<string, unknown> {
+  try {
+    const items = improvement.listImprovementProposals(250);
+    const count = (s: "proposed" | "approved" | "in_progress" | "implemented") => items.filter((i) => i.status === s).length;
+    const top = items.slice(0, 4).map((i) => ({ title: i.title, status: i.status }));
+    return {
+      proposed: count("proposed"),
+      approved: count("approved"),
+      in_progress: count("in_progress"),
+      implemented: count("implemented"),
+      recent: top
+    };
+  } catch {
+    return { error: "queue_unavailable" };
+  }
 }
 
 async function withTimeout<T>(task: Promise<T>, timeoutMs: number): Promise<T> {

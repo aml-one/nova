@@ -21,6 +21,28 @@ export class ThoughtRepository {
       .run(randomUUID(), input.category, input.title, input.content, JSON.stringify(input.metadata ?? {}));
   }
 
+  countByCategory(): { chat: number; learning: number; system: number } {
+    const rows = getDatabase()
+      .prepare(
+        `
+        SELECT category, COUNT(*) AS c
+        FROM thought_events
+        GROUP BY category
+        `
+      )
+      .all() as Array<{ category?: string; c?: number }>;
+    const out = { chat: 0, learning: 0, system: 0 };
+    for (const row of rows) {
+      const cat = toCategory(row.category);
+      const n = Number(row.c ?? 0);
+      if (!Number.isFinite(n) || n < 0) continue;
+      if (cat === "chat") out.chat += n;
+      else if (cat === "learning") out.learning += n;
+      else out.system += n;
+    }
+    return out;
+  }
+
   list(limit = 300): Array<{
     id: string;
     category: ThoughtCategory;

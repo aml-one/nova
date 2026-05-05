@@ -1083,7 +1083,8 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       if (request.method === "GET" && parsedUrl.pathname === "/v1/thoughts") {
         const limit = Number(parsedUrl.searchParams.get("limit") ?? "300");
         const items = thoughtLog.list(limit);
-        return sendJson(response, 200, { items, correlationId });
+        const counts = thoughtLog.countByCategory();
+        return sendJson(response, 200, { items, counts, correlationId });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/persona/default") {
         const { persona, source, filePath } = personaLoader.getDefaultPersona();
@@ -2621,7 +2622,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
     thoughtWs.handleUpgrade(request, socket, head, (ws: WebSocket) => {
       ws.send(JSON.stringify({ type: "hello", at: new Date().toISOString() }));
       const latest = thoughtLog.list(20).reverse();
-      ws.send(JSON.stringify({ type: "snapshot", items: latest }));
+      ws.send(JSON.stringify({ type: "snapshot", items: latest, counts: thoughtLog.countByCategory() }));
     });
   });
 

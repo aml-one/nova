@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
@@ -17,8 +18,11 @@ type ThoughtItem = {
   createdAt: string;
 };
 
+type ThoughtCategoryCounts = { chat: number; learning: number; system: number };
+
 export default function ThoughtsPage() {
   const [items, setItems] = useState<ThoughtItem[]>([]);
+  const [categoryTotals, setCategoryTotals] = useState<ThoughtCategoryCounts | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -27,10 +31,15 @@ export default function ThoughtsPage() {
     const ws = new WebSocket(wsUrl);
     ws.onmessage = (event) => {
       try {
-        const payload = JSON.parse(event.data) as { type?: string; items?: ThoughtItem[] };
+        const payload = JSON.parse(event.data) as {
+          type?: string;
+          items?: ThoughtItem[];
+          counts?: ThoughtCategoryCounts;
+        };
         if (!payload.items) return;
         if (payload.type === "snapshot") {
           setItems(payload.items.slice().reverse());
+          if (payload.counts) setCategoryTotals(payload.counts);
           setLoading(false);
           return;
         }
@@ -69,7 +78,14 @@ export default function ThoughtsPage() {
       <Card className="flex flex-wrap items-center justify-between gap-3 border-indigo-500/25 bg-gradient-to-br from-indigo-950/35 via-surface to-purple-950/25 p-5 shadow-lg shadow-indigo-900/15">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Live thoughts</h1>
-          <p className="mt-1 max-w-xl text-sm text-muted">Internal narration — chat traces, idle learning, and system pulses.</p>
+          <p className="mt-1 max-w-xl text-sm text-muted">
+            Internal narration — chat traces, idle learning, and system pulses. For the improvement queue (accept / start /
+            done), use{" "}
+            <Link href="/learning" className="font-medium text-sky-600 underline hover:text-sky-500 dark:text-sky-400">
+              Learning
+            </Link>
+            .
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <HealthPill level={loading ? "orange" : "green"} label={loading ? "Syncing" : "Live"} />
@@ -82,17 +98,17 @@ export default function ThoughtsPage() {
         <article className="rounded-2xl border border-sky-500/30 bg-gradient-to-br from-sky-950/50 to-surface p-4 shadow-md">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-sky-200/90">Chat</div>
           <div className="mt-1 text-3xl font-bold tabular-nums text-text">{stats.chat}</div>
-          <p className="mt-1 text-xs text-muted">Turn-linked reasoning</p>
+          <p className="mt-1 text-xs text-muted">All-time thought events</p>
         </article>
         <article className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-950/45 to-surface p-4 shadow-md">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-purple-200/90">Learning</div>
           <div className="mt-1 text-3xl font-bold tabular-nums text-text">{stats.learning}</div>
-          <p className="mt-1 text-xs text-muted">Idle cycles & proposals</p>
+          <p className="mt-1 text-xs text-muted">All-time learning-category events</p>
         </article>
         <article className="rounded-2xl border border-slate-500/30 bg-gradient-to-br from-slate-900/60 to-surface p-4 shadow-md">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-200/90">System</div>
           <div className="mt-1 text-3xl font-bold tabular-nums text-text">{stats.system}</div>
-          <p className="mt-1 text-xs text-muted">Daemon & bridges</p>
+          <p className="mt-1 text-xs text-muted">All-time system-category events</p>
         </article>
       </div>
       <Card className="border-white/10 bg-surface/80 p-3 backdrop-blur-sm">
