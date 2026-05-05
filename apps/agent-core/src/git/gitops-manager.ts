@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
 import { CheckpointService } from "./checkpoint-service.js";
 import { RollbackService } from "./rollback-service.js";
 
@@ -85,10 +86,8 @@ export class GitOpsManager {
 }
 
 function loadGitPolicy(): GitPolicy {
-  const candidates = [
-    resolve(process.cwd(), "config/gitops/policy.yaml"),
-    resolve(process.cwd(), "../../config/gitops/policy.yaml")
-  ];
+  const root = resolveNovaRepoRoot();
+  const candidates = [resolve(root, "config/gitops/policy.yaml")];
   const filePath = candidates.find((item) => existsSync(item));
   if (!filePath) {
     return { branchPrefix: "agent/auto/", checkpointTagPrefix: "nova-checkpoint-" };
@@ -112,7 +111,7 @@ function readScalar(raw: string, key: string): string | undefined {
 }
 
 function runGit(args: string[]): string {
-  const result = spawnSync("git", args, { cwd: process.cwd(), shell: true, encoding: "utf8" });
+  const result = spawnSync("git", args, { cwd: resolveNovaRepoRoot(), shell: true, encoding: "utf8" });
   if (result.status !== 0) {
     throw new Error(result.stderr || `git ${args.join(" ")} failed`);
   }
@@ -120,14 +119,14 @@ function runGit(args: string[]): string {
 }
 
 function tryCreatePr(input: { title: string; body: string; baseBranch: string; headBranch: string }): string | undefined {
-  const which = spawnSync("gh", ["--version"], { cwd: process.cwd(), shell: true, encoding: "utf8" });
+  const which = spawnSync("gh", ["--version"], { cwd: resolveNovaRepoRoot(), shell: true, encoding: "utf8" });
   if (which.status !== 0) {
     return undefined;
   }
   const create = spawnSync(
     "gh",
     ["pr", "create", "--base", input.baseBranch, "--head", input.headBranch, "--title", input.title, "--body", input.body],
-    { cwd: process.cwd(), shell: true, encoding: "utf8" }
+    { cwd: resolveNovaRepoRoot(), shell: true, encoding: "utf8" }
   );
   if (create.status !== 0) {
     return undefined;
@@ -140,12 +139,15 @@ function tryCreatePr(input: { title: string; body: string; baseBranch: string; h
 }
 
 function ensureRepo(): void {
+  const cwd = resolveNovaRepoRoot();
   const result = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
-    cwd: process.cwd(),
+    cwd,
     shell: true,
     encoding: "utf8"
   });
   if (result.status !== 0) {
-    throw new Error("git repository not initialized");
+    throw new Error(
+      `git repository not initialized (git cwd=${cwd}). Set NOVA_REPO_ROOT to your checkout if the process cwd is not the repo root.`
+    );
   }
 }

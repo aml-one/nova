@@ -4,6 +4,7 @@ type IdentityBackupSettings = {
   enabled: boolean;
   intervalDays: number;
   labelPrefix: string;
+  gitRemote: string;
 };
 
 export class IdentityBackupDaemon {
@@ -59,7 +60,7 @@ export class IdentityBackupDaemon {
     this.running = true;
     try {
       const label = `${settings.labelPrefix}-${new Date().toISOString().slice(0, 10)}`;
-      await this.backupService.createAndPushIdentityBackup(label, "auto");
+      await this.backupService.createAndPushIdentityBackup(label, "auto", { gitRemote: settings.gitRemote });
     } catch {
       // Failure details are already recorded by IdentityBackupService.
     } finally {

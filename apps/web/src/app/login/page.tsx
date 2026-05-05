@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { clearAgentRestartExpected, isAgentRestartGraceActive } from "../../lib/agent-restart-grace";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,8 +21,13 @@ export default function LoginPage() {
         loginEnabled?: boolean;
         agentUnreachable?: boolean;
       };
-      if (stateData.agentUnreachable) {
+      if (stateData.agentUnreachable && isAgentRestartGraceActive()) {
+        setAgentUnreachable(false);
+      } else if (stateData.agentUnreachable) {
         setAgentUnreachable(true);
+      }
+      if (!stateData.agentUnreachable) {
+        clearAgentRestartExpected();
       }
       if (stateData.loginEnabled === false) {
         router.push("/dashboard");

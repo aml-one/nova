@@ -27,6 +27,7 @@ import {
 } from "../../lib/skill-badge";
 import { VoiceWakeWordPanel, OrpheusTtsPreviewCard } from "../../components/voice-settings-panel";
 import { apiFetch } from "../../lib/api-fetch";
+import { clearAgentRestartExpected, markAgentRestartExpected } from "../../lib/agent-restart-grace";
 
 const SIGNAL_CAPTCHA_GENERATE_URL = "https://signalcaptchas.org/registration/generate.html";
 
@@ -41,6 +42,14 @@ function extractSignalCaptchaToken(raw: string): string {
   if (m?.[1]) return m[1];
   const first = t.split(/\s/)[0]?.trim();
   return first ?? t;
+}
+
+function normalizeIdentityBackupGitRemote(value: string | undefined, fallback: string): string {
+  const t = String(value ?? fallback).trim();
+  if (!t || t.length > 128 || !/^[A-Za-z0-9._-]+$/.test(t)) {
+    return fallback;
+  }
+  return t;
 }
 
 function messageLooksLikeSignalCaptchaRequired(message: string): boolean {
@@ -178,7 +187,7 @@ type SettingsState = {
   };
   shell: { timeoutMs: number; maxOutputBytes: number };
   skills: { isolationEnabled: boolean; timeoutMs: number; maxMemoryMb: number; skillAuthoringDisabled: boolean };
-  identityBackup: { enabled: boolean; intervalDays: number; labelPrefix: string };
+  identityBackup: { enabled: boolean; intervalDays: number; labelPrefix: string; gitRemote: string };
   models: { defaultByProvider: { ollama: string; lmstudio: string; copilot: string }; ollamaThinkingEnabled: boolean };
   copilot: { baseUrl: string; apiKey: string; defaultModel: string; disabled: boolean };
   visionProviderPriority: Array<"lmstudio" | "ollama" | "cloud">;
@@ -855,19 +864,25 @@ export default function SettingsPage() {
     setError(null);
     setStatus("Applying update... Nova will restart services. Waiting for reconnect.");
     try {
+      markAgentRestartExpected();
       const response = await apiFetch("/api/system/update/apply", { method: "POST" });
       const data = (await response.json()) as { result?: { message?: string }; error?: string };
       if (!response.ok) {
+        clearAgentRestartExpected();
         setError(data.error ?? "Update apply failed");
         return;
       }
       setStatus(data.result?.message ?? "Update apply requested");
       await waitForServerBackAfterUpdate();
       setStatus("Nova is back online. Reloading UI...");
+      clearAgentRestartExpected();
       window.setTimeout(() => {
         router.refresh();
         window.location.reload();
       }, 450);
+    } catch (err) {
+      clearAgentRestartExpected();
+      setError(err instanceof Error ? err.message : "Update apply failed");
     } finally {
       setUpdateApplying(false);
     }
@@ -3497,7 +3512,10 @@ export default function SettingsPage() {
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">Identity Backup</h2>
             <p className="text-xs text-muted">
-              Pushes a snapshot branch to <code className="text-[11px]">origin</code> (needs Git + push credentials on the agent host). Includes DB, personas, config, and learning sidecars.
+              Pushes a snapshot branch to the Git remote you configure below (default <code className="text-[11px]">origin</code>). For a <strong>public</strong> Nova repo, create an empty <strong>private</strong> repository, then on the agent host run once:{" "}
+              <code className="text-[11px]">git remote add identity-private &lt;private-repo-url&gt;</code> and set push remote to{" "}
+              <code className="text-[11px]">identity-private</code>. Needs Git + credentials with push access to that remote. Includes DB, personas, config, and learning sidecars. If Git says the repo is not initialized, set{" "}
+              <code className="text-[11px]">NOVA_REPO_ROOT</code> on the agent to the monorepo path.
             </p>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
@@ -3528,6 +3546,24 @@ export default function SettingsPage() {
                   value={settings.identityBackup.labelPrefix}
                   onChange={(e) => setSettings((p) => ({ ...p, identityBackup: { ...p.identityBackup, labelPrefix: e.target.value } }))}
                   placeholder="e.g. nova-core"
+                />
+              </label>
+              <label className="grid gap-1 text-xs md:col-span-2">
+                <span className="font-medium text-text">Push remote name</span>
+                <span className="text-muted">
+                  Git remote for <code className="text-[10px]">git push</code> (not a URL). Add the URL once on the server with{" "}
+                  <code className="text-[10px]">git remote add …</code>. Override via env <code className="text-[10px]">NOVA_IDENTITY_BACKUP_GIT_REMOTE</code>.
+                </span>
+                <Input
+                  value={settings.identityBackup.gitRemote}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      identityBackup: { ...p.identityBackup, gitRemote: e.target.value }
+                    }))
+                  }
+                  placeholder="origin"
+                  spellCheck={false}
                 />
               </label>
             </div>
@@ -4404,7 +4440,11 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
     identityBackup: {
       enabled: value?.identityBackup?.enabled ?? DEFAULT_SETTINGS.identityBackup.enabled,
       intervalDays: value?.identityBackup?.intervalDays ?? DEFAULT_SETTINGS.identityBackup.intervalDays,
-      labelPrefix: value?.identityBackup?.labelPrefix ?? DEFAULT_SETTINGS.identityBackup.labelPrefix
+      labelPrefix: value?.identityBackup?.labelPrefix ?? DEFAULT_SETTINGS.identityBackup.labelPrefix,
+      gitRemote: normalizeIdentityBackupGitRemote(
+        value?.identityBackup?.gitRemote,
+        DEFAULT_SETTINGS.identityBackup.gitRemote
+      )
     },
     models: {
       defaultByProvider: {

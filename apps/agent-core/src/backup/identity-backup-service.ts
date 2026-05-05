@@ -1,9 +1,10 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { getDatabase } from "../storage/sqlite.js";
 import { PersonaLoader } from "../persona/persona-loader.js";
+import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
 
 type SanityReport = {
   ok: boolean;
@@ -27,7 +28,8 @@ export class IdentityBackupService {
 
   async createAndPushIdentityBackup(
     label?: string,
-    mode: BackupMode = "manual"
+    mode: BackupMode = "manual",
+    pushOptions?: { gitRemote?: string }
   ): Promise<{
     snapshotPath: string;
     branch: string;
@@ -39,7 +41,7 @@ export class IdentityBackupService {
         throw new Error(`sanity check failed: ${sanity.checks.filter((item) => !item.ok).map((item) => item.name).join(", ")}`);
       }
       const snapshotPath = this.createSnapshot(label);
-      const branch = this.pushSnapshotToGitHub(snapshotPath);
+      const branch = this.pushSnapshotToGitHub(snapshotPath, normalizePushRemote(pushOptions?.gitRemote));
       this.recordRun(mode, "success", { branch, snapshotPath });
       return { snapshotPath, branch, sanity };
     } catch (error) {
@@ -206,7 +208,7 @@ export class IdentityBackupService {
         "- Ephemeral TLS keys under tmp/ unless you copy them manually",
         "- Media uploads under data/uploads/",
         "",
-        "Git push: branches named identity-backup/* contain this folder. Treat the remote as sensitive if nova.db has API keys.",
+        "Git push: branches identity-backup/* go to the configured remote (Settings → Backup). Prefer a private repo + PAT when the Nova app repo is public; treat any remote that receives nova.db as sensitive.",
         ""
       ].join("\n"),
       "utf8"
@@ -222,14 +224,19 @@ export class IdentityBackupService {
     return snapshotDir;
   }
 
-  private pushSnapshotToGitHub(snapshotPath: string): string {
+  private pushSnapshotToGitHub(snapshotPath: string, gitRemote: string): string {
     ensureRepo();
-    const relativePath = toPosixPath(snapshotPath.replace(`${process.cwd()}\\`, "").replace(`${process.cwd()}/`, ""));
+    const repoRoot = resolveNovaRepoRoot();
+    assertGitRemoteConfigured(gitRemote, repoRoot);
+    const relativePath = toPosixPath(relative(repoRoot, snapshotPath));
+    if (relativePath.startsWith("..") || relativePath === "") {
+      throw new Error("identity snapshot path is outside the Git checkout; check NOVA_REPO_ROOT and working directory");
+    }
     const branch = `identity-backup/${Date.now()}`;
     runGit(["checkout", "-B", branch]);
     runGit(["add", relativePath]);
     runGit(["commit", "-m", `chore(backup): add identity snapshot ${new Date().toISOString()}`]);
-    runGit(["push", "-u", "origin", branch]);
+    runGit(["push", "-u", gitRemote, branch]);
     return branch;
   }
 
@@ -270,8 +277,30 @@ function listFilesWithHashes(root: string): Array<{ path: string; size: number; 
   return files;
 }
 
+function normalizePushRemote(name: string | undefined): string {
+  const t = String(name ?? "origin").trim();
+  if (!t || t.length > 128 || !/^[A-Za-z0-9._-]+$/.test(t)) {
+    return "origin";
+  }
+  return t;
+}
+
+function assertGitRemoteConfigured(remote: string, cwd: string): void {
+  const result = spawnSync("git", ["remote", "get-url", remote], { cwd, shell: true, encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(
+      `Git remote "${remote}" is not configured in this checkout. On the agent host run: git remote add ${remote} <url> (use a private empty repo for identity-only backups when the Nova repo is public), then set the same remote name in Settings → Backup.`
+    );
+  }
+}
+
+function gitWorkTree(): string {
+  return resolveNovaRepoRoot();
+}
+
 function runGit(args: string[]): string {
-  const result = spawnSync("git", args, { cwd: process.cwd(), shell: true, encoding: "utf8" });
+  const cwd = gitWorkTree();
+  const result = spawnSync("git", args, { cwd, shell: true, encoding: "utf8" });
   if (result.status !== 0) {
     throw new Error(result.stderr || `git ${args.join(" ")} failed`);
   }
@@ -279,13 +308,16 @@ function runGit(args: string[]): string {
 }
 
 function ensureRepo(): void {
+  const cwd = gitWorkTree();
   const result = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
-    cwd: process.cwd(),
+    cwd,
     shell: true,
     encoding: "utf8"
   });
   if (result.status !== 0) {
-    throw new Error("git repository not initialized");
+    throw new Error(
+      `git repository not initialized (git cwd=${cwd}). If Nova starts from a subdirectory, set environment variable NOVA_REPO_ROOT to your monorepo checkout.`
+    );
   }
 }
 

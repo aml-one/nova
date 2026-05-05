@@ -1619,7 +1619,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/backup/identity/push") {
         const payload = (await readJson(request)) as { label?: string };
-        const result = await identityBackup.createAndPushIdentityBackup(payload.label);
+        const result = await identityBackup.createAndPushIdentityBackup(payload.label, "manual", {
+          gitRemote: options.settings.get().identityBackup.gitRemote
+        });
         return sendJson(response, 200, { ...result, correlationId });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/backup/identity/status") {

@@ -17,7 +17,7 @@ export function coerceLoginEnabledFlag(value: unknown): boolean {
  * - NOVA_WEB_LOGIN_ENABLED=true → force login gate on.
  * When unset, agent response is authoritative.
  */
-function loginEnabledEnvOverride(): boolean | undefined {
+export function loginEnabledEnvOverride(): boolean | undefined {
   const raw = process.env.NOVA_WEB_LOGIN_ENABLED?.trim().toLowerCase();
   if (raw === "0" || raw === "false" || raw === "off") return false;
   if (raw === "1" || raw === "true" || raw === "on") return true;
@@ -35,12 +35,19 @@ export type AgentAuthStateSnapshot = {
  */
 export async function fetchAgentAuthState(request: Request): Promise<AgentAuthStateSnapshot | undefined> {
   const envLogin = loginEnabledEnvOverride();
+  const fromEnv = (needsSetup: boolean): AgentAuthStateSnapshot => ({
+    needsSetup,
+    loginEnabled: envLogin!
+  });
   try {
     const res = await fetch(`${getAgentBaseUrl(request)}/v1/auth/state`, {
       headers: { accept: "application/json" },
       cache: "no-store"
     });
     if (!res.ok) {
+      if (envLogin !== undefined) {
+        return fromEnv(false);
+      }
       return undefined;
     }
     const data = (await res.json()) as { needsSetup?: unknown; loginEnabled?: unknown };
@@ -49,6 +56,9 @@ export async function fetchAgentAuthState(request: Request): Promise<AgentAuthSt
       loginEnabled: envLogin !== undefined ? envLogin : coerceLoginEnabledFlag(data.loginEnabled)
     };
   } catch {
+    if (envLogin !== undefined) {
+      return fromEnv(false);
+    }
     return undefined;
   }
 }

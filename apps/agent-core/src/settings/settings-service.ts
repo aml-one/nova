@@ -94,7 +94,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   identityBackup: {
     enabled: process.env.NOVA_IDENTITY_BACKUP_ENABLED === "true",
     intervalDays: Number(process.env.NOVA_IDENTITY_BACKUP_INTERVAL_DAYS ?? "1"),
-    labelPrefix: process.env.NOVA_IDENTITY_BACKUP_LABEL_PREFIX ?? "nova-core"
+    labelPrefix: process.env.NOVA_IDENTITY_BACKUP_LABEL_PREFIX ?? "nova-core",
+    gitRemote: normalizeIdentityBackupGitRemote(process.env.NOVA_IDENTITY_BACKUP_GIT_REMOTE)
   },
   models: {
     defaultByProvider: {
@@ -348,7 +349,11 @@ export class SettingsService {
       identityBackup: {
         enabled: update.identityBackup?.enabled ?? current.identityBackup.enabled,
         intervalDays: update.identityBackup?.intervalDays ?? current.identityBackup.intervalDays,
-        labelPrefix: update.identityBackup?.labelPrefix ?? current.identityBackup.labelPrefix
+        labelPrefix: update.identityBackup?.labelPrefix ?? current.identityBackup.labelPrefix,
+        gitRemote:
+          update.identityBackup?.gitRemote !== undefined
+            ? normalizeIdentityBackupGitRemote(update.identityBackup.gitRemote)
+            : current.identityBackup.gitRemote
       },
       ollama: {
         disabled: update.ollama?.disabled ?? current.ollama.disabled,
@@ -589,7 +594,8 @@ export class SettingsService {
       identityBackup: {
         enabled: settings.identityBackup?.enabled === true,
         intervalDays: clampInt(settings.identityBackup?.intervalDays, 1, 30, 1),
-        labelPrefix: normalizeLabelPrefix(settings.identityBackup?.labelPrefix)
+        labelPrefix: normalizeLabelPrefix(settings.identityBackup?.labelPrefix),
+        gitRemote: normalizeIdentityBackupGitRemote(settings.identityBackup?.gitRemote)
       },
       models: {
         defaultByProvider: {
@@ -854,6 +860,15 @@ function normalizeLabelPrefix(value: string | undefined): string {
     .replace(/[^a-zA-Z0-9-_]/g, "-")
     .slice(0, 40);
   return normalized.length > 0 ? normalized : "nova-core";
+}
+
+/** Safe Git remote name for `git push <remote> <branch>` (URLs belong in `git remote add`, not here). */
+function normalizeIdentityBackupGitRemote(value: string | undefined): string {
+  const t = String(value ?? "origin").trim();
+  if (!t || t.length > 128 || !/^[A-Za-z0-9._-]+$/.test(t)) {
+    return "origin";
+  }
+  return t;
 }
 
 function normalizeHexColor(value: string | undefined, fallback: string): string {

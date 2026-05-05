@@ -104,6 +104,8 @@ export type AppSettings = {
     enabled: boolean;
     intervalDays: number;
     labelPrefix: string;
+    /** Git remote name for `git push` (e.g. `identity-private` → private repo); default `origin`. */
+    gitRemote: string;
   };
   /** Optional [MemoryBear](https://github.com/SuanmoSuanyangTechnology/MemoryBear) HTTP API (`/v1/...`) for long-term memory. */
   memoryBear: {
@@ -397,7 +399,8 @@ export class SettingsRepository {
         identityBackup: {
           enabled: parsed.identityBackup?.enabled === true,
           intervalDays: Number(parsed.identityBackup?.intervalDays ?? 0),
-          labelPrefix: typeof parsed.identityBackup?.labelPrefix === "string" ? parsed.identityBackup.labelPrefix : "nova-core"
+          labelPrefix: typeof parsed.identityBackup?.labelPrefix === "string" ? parsed.identityBackup.labelPrefix : "nova-core",
+          gitRemote: normalizeStoredIdentityBackupGitRemote(parsed.identityBackup?.gitRemote)
         },
         memoryBear: {
           enabled: parsed.memoryBear?.enabled === false ? false : true,
@@ -552,6 +555,13 @@ function getEncryptionKey(): Buffer | undefined {
   const secret = process.env.NOVA_SETTINGS_SECRET?.trim();
   if (!secret) return undefined;
   return createHash("sha256").update(secret).digest();
+}
+
+function normalizeStoredIdentityBackupGitRemote(value: unknown): string {
+  if (typeof value !== "string") return "origin";
+  const t = value.trim();
+  if (!t || t.length > 128 || !/^[A-Za-z0-9._-]+$/.test(t)) return "origin";
+  return t;
 }
 
 function normalizeOrpheusFormat(raw: unknown): AppSettings["orpheusTts"]["responseFormat"] {

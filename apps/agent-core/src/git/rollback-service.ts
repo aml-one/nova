@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
 
 export class RollbackService {
   async rollback(tag: string): Promise<void> {
@@ -9,7 +10,7 @@ export class RollbackService {
 
 function runGit(args: string[]): void {
   const result = spawnSync("git", args, {
-    cwd: process.cwd(),
+    cwd: resolveNovaRepoRoot(),
     shell: true,
     encoding: "utf8"
   });

@@ -127,6 +127,8 @@ type AppSettingsPayload = {
     enabled?: boolean;
     intervalDays?: number;
     labelPrefix?: string;
+    /** Git remote name for identity snapshot pushes (e.g. `identity-private`); not a URL. */
+    gitRemote?: string;
   };
   models?: {
     defaultByProvider?: {

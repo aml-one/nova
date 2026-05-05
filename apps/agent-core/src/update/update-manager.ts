@@ -3,17 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { getDatabase } from "../storage/sqlite.js";
-
-function resolveRepoRoot(): string {
-  const cwd = process.cwd();
-  const candidates = [cwd, resolve(cwd, ".."), resolve(cwd, "..", "..")];
-  for (const dir of candidates) {
-    if (existsSync(resolve(dir, "pnpm-workspace.yaml"))) {
-      return dir;
-    }
-  }
-  return cwd;
-}
+import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
 
 /**
  * LaunchDaemons often run Git as root while the checkout is owned by a normal user.
@@ -257,7 +247,7 @@ export class UpdateManager {
   }
 
   private runShellUpdate(): { ok: boolean; message: string } {
-    const repoRoot = resolveRepoRoot();
+    const repoRoot = resolveNovaRepoRoot();
     /**
      * Do not run `pnpm -r build` by default while `next dev` may still be running: `next build`
      * writes the same `apps/web/.next` tree and races the dev server (torn manifests / missing chunks).
