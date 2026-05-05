@@ -13,7 +13,7 @@ function runGit(args: string[]): void {
   const cwd = resolveNovaRepoRoot();
   const result = spawnSync("git", args, {
     cwd,
-    shell: true,
+    shell: false,
     encoding: "utf8",
     env: gitSafeDirectoryEnvForRepo(cwd)
   });

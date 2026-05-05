@@ -289,7 +289,7 @@ function normalizePushRemote(name: string | undefined): string {
 function assertGitRemoteConfigured(remote: string, cwd: string): void {
   const result = spawnSync("git", ["remote", "get-url", remote], {
     cwd,
-    shell: true,
+    shell: false,
     encoding: "utf8",
     env: gitSafeDirectoryEnvForRepo(cwd)
   });
@@ -308,7 +308,7 @@ function runGit(args: string[]): string {
   const cwd = gitWorkTree();
   const result = spawnSync("git", args, {
     cwd,
-    shell: true,
+    shell: false,
     encoding: "utf8",
     env: gitSafeDirectoryEnvForRepo(cwd)
   });
@@ -322,7 +322,7 @@ function ensureRepo(): void {
   const cwd = gitWorkTree();
   const result = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
     cwd,
-    shell: true,
+    shell: false,
     encoding: "utf8",
     env: gitSafeDirectoryEnvForRepo(cwd)
   });

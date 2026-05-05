@@ -119,7 +119,7 @@ function runGit(args: string[]): string {
   const cwd = gitCwd();
   const result = spawnSync("git", args, {
     cwd,
-    shell: true,
+    shell: false,
     encoding: "utf8",
     env: gitSafeDirectoryEnvForRepo(cwd)
   });
@@ -132,7 +132,7 @@ function runGit(args: string[]): string {
 function tryCreatePr(input: { title: string; body: string; baseBranch: string; headBranch: string }): string | undefined {
   const which = spawnSync("gh", ["--version"], {
     cwd: gitCwd(),
-    shell: true,
+    shell: false,
     encoding: "utf8",
     env: gitSafeDirectoryEnvForRepo(gitCwd())
   });
@@ -158,7 +158,7 @@ function ensureRepo(): void {
   const cwd = gitCwd();
   const result = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
     cwd,
-    shell: true,
+    shell: false,
     encoding: "utf8",
     env: gitSafeDirectoryEnvForRepo(cwd)
   });
