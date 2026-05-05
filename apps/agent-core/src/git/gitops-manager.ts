@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
+import { gitSafeDirectoryEnvForRepo } from "../util/git-safe-directory-env.js";
 import { CheckpointService } from "./checkpoint-service.js";
 import { RollbackService } from "./rollback-service.js";
 
@@ -110,8 +111,18 @@ function readScalar(raw: string, key: string): string | undefined {
   return line.replace(`${key}:`, "").trim().replace(/^"|"$/g, "");
 }
 
+function gitCwd(): string {
+  return resolveNovaRepoRoot();
+}
+
 function runGit(args: string[]): string {
-  const result = spawnSync("git", args, { cwd: resolveNovaRepoRoot(), shell: true, encoding: "utf8" });
+  const cwd = gitCwd();
+  const result = spawnSync("git", args, {
+    cwd,
+    shell: true,
+    encoding: "utf8",
+    env: gitSafeDirectoryEnvForRepo(cwd)
+  });
   if (result.status !== 0) {
     throw new Error(result.stderr || `git ${args.join(" ")} failed`);
   }
@@ -119,14 +130,19 @@ function runGit(args: string[]): string {
 }
 
 function tryCreatePr(input: { title: string; body: string; baseBranch: string; headBranch: string }): string | undefined {
-  const which = spawnSync("gh", ["--version"], { cwd: resolveNovaRepoRoot(), shell: true, encoding: "utf8" });
+  const which = spawnSync("gh", ["--version"], {
+    cwd: gitCwd(),
+    shell: true,
+    encoding: "utf8",
+    env: gitSafeDirectoryEnvForRepo(gitCwd())
+  });
   if (which.status !== 0) {
     return undefined;
   }
   const create = spawnSync(
     "gh",
     ["pr", "create", "--base", input.baseBranch, "--head", input.headBranch, "--title", input.title, "--body", input.body],
-    { cwd: resolveNovaRepoRoot(), shell: true, encoding: "utf8" }
+    { cwd: gitCwd(), shell: true, encoding: "utf8", env: gitSafeDirectoryEnvForRepo(gitCwd()) }
   );
   if (create.status !== 0) {
     return undefined;
@@ -139,11 +155,12 @@ function tryCreatePr(input: { title: string; body: string; baseBranch: string; h
 }
 
 function ensureRepo(): void {
-  const cwd = resolveNovaRepoRoot();
+  const cwd = gitCwd();
   const result = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
     cwd,
     shell: true,
-    encoding: "utf8"
+    encoding: "utf8",
+    env: gitSafeDirectoryEnvForRepo(cwd)
   });
   if (result.status !== 0) {
     throw new Error(

@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import { getDatabase } from "../storage/sqlite.js";
 import { PersonaLoader } from "../persona/persona-loader.js";
 import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
+import { gitSafeDirectoryEnvForRepo } from "../util/git-safe-directory-env.js";
 
 type SanityReport = {
   ok: boolean;
@@ -286,7 +287,12 @@ function normalizePushRemote(name: string | undefined): string {
 }
 
 function assertGitRemoteConfigured(remote: string, cwd: string): void {
-  const result = spawnSync("git", ["remote", "get-url", remote], { cwd, shell: true, encoding: "utf8" });
+  const result = spawnSync("git", ["remote", "get-url", remote], {
+    cwd,
+    shell: true,
+    encoding: "utf8",
+    env: gitSafeDirectoryEnvForRepo(cwd)
+  });
   if (result.status !== 0) {
     throw new Error(
       `Git remote "${remote}" is not configured in this checkout. On the agent host run: git remote add ${remote} <url> (use a private empty repo for identity-only backups when the Nova repo is public), then set the same remote name in Settings → Backup.`
@@ -300,7 +306,12 @@ function gitWorkTree(): string {
 
 function runGit(args: string[]): string {
   const cwd = gitWorkTree();
-  const result = spawnSync("git", args, { cwd, shell: true, encoding: "utf8" });
+  const result = spawnSync("git", args, {
+    cwd,
+    shell: true,
+    encoding: "utf8",
+    env: gitSafeDirectoryEnvForRepo(cwd)
+  });
   if (result.status !== 0) {
     throw new Error(result.stderr || `git ${args.join(" ")} failed`);
   }
@@ -312,11 +323,13 @@ function ensureRepo(): void {
   const result = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
     cwd,
     shell: true,
-    encoding: "utf8"
+    encoding: "utf8",
+    env: gitSafeDirectoryEnvForRepo(cwd)
   });
   if (result.status !== 0) {
+    const hint = (result.stderr ?? "").trim();
     throw new Error(
-      `git repository not initialized (git cwd=${cwd}). If Nova starts from a subdirectory, set environment variable NOVA_REPO_ROOT to your monorepo checkout.`
+      `git repository not initialized (git cwd=${cwd}).${hint ? ` Git said: ${hint}` : ""} If Nova runs as a different user than the checkout owner (e.g. launchd as root), this is often fixed automatically in newer Nova builds; otherwise run Git from a shell as your user, or set NOVA_REPO_ROOT.`
     );
   }
 }

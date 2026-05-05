@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
+import { gitSafeDirectoryEnvForRepo } from "../util/git-safe-directory-env.js";
 
 export class CheckpointService {
   createTagName(prefix: string): string {
@@ -19,7 +20,8 @@ export class CheckpointService {
 }
 
 function runGit(args: string[]): { stdout: string; stderr: string } {
-  const result = spawnSync("git", args, { cwd: resolveNovaRepoRoot(), shell: true, encoding: "utf8" });
+  const cwd = resolveNovaRepoRoot();
+  const result = spawnSync("git", args, { cwd, shell: true, encoding: "utf8", env: gitSafeDirectoryEnvForRepo(cwd) });
   if (result.status !== 0) {
     throw new Error(result.stderr || `git ${args.join(" ")} failed`);
   }
