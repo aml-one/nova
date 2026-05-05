@@ -28,6 +28,12 @@ Nova stores local state in **`data/state/nova.db`** (SQLite). No separate databa
 11. [Optional: other Nova-adjacent services](#11-optional-other-nova-adjacent-services)
 12. [Running Nova from another device on the LAN](#12-running-nova-from-another-device-on-the-lan)
 13. [Troubleshooting](#13-troubleshooting)
+14. [State on disk (what to preserve)](#14-state-on-disk-what-to-preserve)
+15. [Disaster recovery (new machine or dead disk)](#15-disaster-recovery-new-machine-or-dead-disk)
+16. [Backup strategies: Identity backup vs local backup vs manual](#16-backup-strategies-identity-backup-vs-local-backup-vs-manual)
+17. [Identity backup: design review and limits](#17-identity-backup-design-review-and-limits)
+18. [macOS service + HTTPS (production-style)](#18-macos-service--https-production-style)
+19. [Operational checklist after install](#19-operational-checklist-after-install)
 
 ---
 
@@ -50,6 +56,36 @@ Nova stores local state in **`data/state/nova.db`** (SQLite). No separate databa
 - `http://localhost:8787/health` returns OK.
 - `http://localhost:3000` loads the Web UI.
 - You can complete **first-time login** and open **Settings** to attach providers.
+
+### 1.4 Full dependency matrix (Nova core vs optional)
+
+**Always required (open-source Nova stack)**
+
+| Dependency | Version notes | Why |
+|-------------|---------------|-----|
+| **Git** | 2.40+ recommended | Clone repo; Identity backup uses `git push`. |
+| **Node.js** | **22.x** (LTS aligned with repo tooling) | Runs agent-core (TypeScript/`tsx` or compiled `node`) and Next.js web. |
+| **Corepack** | Ships with Node | Activates pinned **pnpm** (`packageManager` in root `package.json`). |
+| **pnpm** | Via Corepack (`corepack pnpm …`) | Workspace install for `apps/*`, `packages/*`, `skills/*`. |
+| **SQLite** | Embedded (Node `node:sqlite` / better-sqlite equiv. at runtime) | No separate database server for core product. |
+
+**Strongly recommended**
+
+| Dependency | When | Why |
+|------------|------|-----|
+| **OpenSSL** | macOS/Linux HTTPS using `scripts/start-local.sh` cert generation | Script creates `tmp/dev-cert.pem` / `tmp/dev-key.pem` when `NOVA_WEB_HTTPS=true`. |
+
+**Optional (you only install what you enable)**
+
+| Capability | Typical extra installs |
+|-------------|-------------------------|
+| Local LLM (**Ollama**) | Ollama.app / Linux package from ollama.com |
+| Local OpenAI-compatible (**LM Studio**) | LM Studio + enabled local server |
+| **Orpheus TTS** | Python venv or Docker per upstream Orpheus-FastAPI + inference server |
+| **MemoryBear** | PostgreSQL, Neo4j, Redis, Python `uv`, Node for web (see §10) |
+| **Dockerized STT** | Docker / Docker Desktop (e.g. Faster-Whisper server; see `docs/whisper-vad-docker.md`) |
+| **Camera / RTSP skills** | Network paths to cameras; optional ML weights per skill |
+| **Flutter mobile** | Flutter SDK (`apps/mobile_flutter`) |
 
 ---
 
@@ -177,7 +213,7 @@ If the Web UI says it cannot reach agent-core, confirm:
 | Item | Location |
 |------|-----------|
 | Environment file | **Repository root** `.env` (same folder as `package.json`, `apps/`, `scripts/`) |
-| SQLite database | `data/state/nova.db` (created at runtime) |
+| SQLite database | `data/state/nova.db` (created at runtime); **Web UI Settings** are persisted here in table `app_settings` (not a separate JSON file). |
 | Personas | `config/personas/*.persona.yaml` |
 | Cameras | `config/cameras/cameras.yaml` |
 | Policies | `config/improvement/policy.yaml`, `config/gitops/policy.yaml` |
@@ -470,6 +506,115 @@ By default, agent-core binds to the configured port for local use. To use the We
 
 ---
 
+## 14. State on disk (what to preserve)
+
+Everything below is **relative to the Nova repository root** (the folder that contains `package.json`, `apps/`, `data/`, `config/`).
+
+### 14.1 Authoritative stores
+
+| Area | Location | What it holds |
+|------|-----------|----------------|
+| **Primary database** | `data/state/nova.db` | Conversation/run history, SQLite memory tables, **Web UI Settings** (`app_settings` row: models, channels, MemoryBear, backups schedule, chat UI prefs, encrypted secrets if `NOVA_SETTINGS_SECRET` is set), auth users/sessions (if used), emotion state/events, improvement learning log metadata, **improvement proposals queue**, update events, schedules, and most product state. |
+| **Learning log (JSON mirror)** | `data/state/learning-log.json` | Append-only style learning timeline used by the self-improvement UI; safe to back up alongside the DB. |
+| **Curiosity store** | `data/state/curiosity-store.json` | Idle-learning / curiosity counters and queued follow-up questions. |
+| **Install / update clock** | `data/state/install-meta.json` | `installedAt` timestamp used by the in-app update checker. |
+| **Repository config** | `config/**` | Default persona YAML, camera map, improvement + gitops policy. Custom `SOUL.md` or extra YAML you add here should live under `config/` or paths you configure (e.g. SentiCore markdown path). |
+| **Environment secrets** | **`.env` in repo root** | API tokens, optional `GITHUB_TOKEN`, `NOVA_API_TOKEN`, provider keys when not only in Settings. **Not** stored in git; you must copy this file yourself to a new machine or password manager. |
+| **Runtime TLS (dev)** | `tmp/dev-cert.pem`, `tmp/dev-key.pem` (defaults) | Self-signed certs when `NOVA_WEB_HTTPS=true`; regeneratable. |
+| **Uploads / media** | `data/uploads/` (and related metadata in DB) | User-uploaded images/files referenced from chat; back up if you care about historical attachments. |
+
+### 14.2 What you do **not** need for a minimal “Nova works again” restore
+
+- `node_modules/` (recreated with `corepack pnpm install`)
+- `apps/web/.next/` (recreated with build or dev)
+- `apps/agent-core/dist/` (recreated with `pnpm --filter @nova/agent-core build`)
+
+---
+
+## 15. Disaster recovery (new machine or dead disk)
+
+High-level flow:
+
+1. **Install OS prerequisites** (Git, Node 22+, OpenSSL if you use HTTPS script paths on macOS/Linux).
+2. **Clone Nova** to the same relative layout you prefer (short path, no spaces on Windows).
+3. **`corepack enable`** then **`corepack pnpm install`** at repo root.
+4. **Restore state** (pick one path under [§16](#16-backup-strategies-identity-backup-vs-local-backup-vs-manual)):
+   - Copy a saved `nova.db` + `config/` + optional JSON sidecars into `data/state/` and `config/`, **or**
+   - Use `POST /v1/restore` with a folder created by `POST /v1/backup`, **or**
+   - Merge a snapshot from an `identity-backup/*` Git branch into `data/` and `config/`.
+5. **Restore `.env`** from your secret store (or recreate keys and re-enter credentials in Settings).
+6. **Start Nova** (`scripts/start-local.sh` / `.ps1` or your launchd/systemd/Task Scheduler units).
+7. **Verify**: `GET /health` on agent-core, open Web UI, log in, send a test message, run **Settings → Updates → Check** if you use GitHub updates.
+
+**SQLite consistency:** Copying `nova.db` while the agent is writing is usually fine for home use, but for paranoia stop agent-core first or use SQLite’s online backup API. If you see corruption, restore an older snapshot.
+
+---
+
+## 16. Backup strategies: Identity backup vs local backup vs manual
+
+| Mechanism | API / UI | What it captures | Where it goes | Best for |
+|-----------|----------|------------------|---------------|----------|
+| **Identity backup (push)** | `POST /v1/backup/identity/push` (Web UI: Settings → backup / Identity) | `nova.db`, `config/**`, `learning-log.json`, `curiosity-store.json`, `install-meta.json`, plus `manifest.json` and a short `README-SNAPSHOT.txt` inside the snapshot | New **git branch** `identity-backup/<timestamp>` pushed to **origin** | Off-site, versioned snapshots tied to Git history |
+| **Local backup folder** | `POST /v1/backup` | `nova.db`, whole `config/`, **`skills/`** tree, and the same JSON sidecars as above | `data/backups/backup-<timestamp>/` on local disk | Quick clone before risky experiment; includes custom skills |
+| **Restore** | `POST /v1/restore` `{ "backupPath": "…" }` | Reverses **local** backup layout into repo | N/A | Restore from `data/backups/...` |
+| **Manual** | Copy files / tarball | You choose | USB, NAS, encrypted archive | Air-gapped or no Git remote |
+
+**Settings:** Web UI settings are stored **inside `nova.db`** (table `app_settings`). They are **already included** in both Identity backup and local backup as long as `nova.db` is copied. There is no separate “settings-only” file unless you export JSON yourself from the DB.
+
+**`.env`:** Still **your** responsibility — copy it to a vault or encrypt a tarball; do not push it to a public repo.
+
+---
+
+## 17. Identity backup: design review and limits
+
+### 17.1 What it does well
+
+- **Single-click / scheduled** push of a **manifested** snapshot (hash per file) for audit and drift detection.
+- Captures **persona + policy + database**, i.e. the core of “who Nova is” and “what she remembers” in one operation.
+- **Includes Web UI settings** via `nova.db` (models, channel access, MemoryBear keys, Orpheus URL, identity backup schedule itself, etc.).
+
+### 17.2 Gaps and risks (be aware)
+
+1. **Secrets on Git branches:** `nova.db` may contain API keys and tokens (plain or `enc:v1:` blobs). **Private GitHub repo + branch protection** is strongly recommended. If the repo is public, do not use Identity push, or scrub keys from Settings before pushing.
+2. **No `.env`:** Environment defaults and bootstrap secrets are **not** in the snapshot; keep `.env` elsewhere.
+3. **No `skills/` tree:** Custom skill code under `skills/` is **not** in Identity backup (it is in **local** `POST /v1/backup`). Re-clone the repo or back up `skills/` separately if you fork skills.
+4. **No `data/uploads/`:** Large media is excluded by design; archive separately if needed.
+5. **Git required on the host:** Push uses `git commit` + `git push`; the machine must have `git` configured with credentials for `origin` (SSH key or helper).
+6. **Cross-user / launchd:** If a system daemon runs `git` as root against a user-owned repo, Git may refuse with “dubious ownership” — Nova’s updater sets a safe directory for pulls; for manual `git` on the Mac, see `docs/macos-service.md`.
+
+### 17.3 Practical recommendation
+
+- Use **Identity backup** for **encrypted private remote** + periodic disaster recovery drills.
+- Use **local `POST /v1/backup`** before upgrades or persona experiments.
+- Keep **password manager / encrypted copy of `.env`** and a **tarball of `skills/`** if you customize skills.
+
+---
+
+## 18. macOS service + HTTPS (production-style)
+
+For a Mac that should survive reboots and support **Apply latest** from the Web UI without manual SSH:
+
+- Follow **[docs/macos-service.md](./macos-service.md)** (`com.nova.localstack`, HTTPS via env in `scripts/start-local-macos-service.sh`).
+- Ensure **`GITHUB_TOKEN`** (or equivalent) is available to the agent process if update checks hit GitHub API rate limits.
+- After restoring from backup on a **new** Mac, re-run the installer once so `launchd` points at the new path if your home directory layout changed.
+
+Also see **root `README.md`** for alternative **LaunchAgent** templates under `deploy/launchd/` (user session, different from the system daemon approach).
+
+---
+
+## 19. Operational checklist after install
+
+- [ ] `corepack pnpm install` completes without errors.
+- [ ] `http://127.0.0.1:8787/health` (or your `NOVA_AGENT_PORT`) returns OK.
+- [ ] Web UI loads; first admin user created at `/login` if auth is enabled.
+- [ ] **Settings** saved (provider, models) — confirm they survive an agent-core restart (proves SQLite write path works).
+- [ ] **Backup:** run one **local** backup (`POST /v1/backup`) and confirm folder under `data/backups/`.
+- [ ] **Optional:** configure **Identity backup** to a **private** remote; trigger manual push once and verify branch on GitHub.
+- [ ] **`.env`:** stored in a password manager or encrypted backup; not committed.
+- [ ] **Updates:** `GITHUB_TOKEN` set if you use GitHub-based update checks; test **Apply latest** on a non-production clone first.
+
+---
+
 ## Quick checklist (copy/paste)
 
 **Nova core**
@@ -496,7 +641,7 @@ By default, agent-core binds to the configured port for local use. To use the We
 
 ## Document history
 
-- **Purpose:** single thorough guide for installing Nova and common dependencies on **another computer**, including **offline-friendly** upstream repo retention.
+- **Purpose:** single thorough guide for installing Nova and common dependencies on **another computer**, including **offline-friendly** upstream repo retention, **disaster recovery**, and **backup/restore** semantics (Identity backup vs local backup, settings location, secrets).
 - **Canonical Nova quick start:** still the repository root **`README.md`**; this guide expands operational detail and optional stacks.
 
 When Nova’s upstream install steps change, update **this file** and the root **README** in the same pull request so they stay aligned.

@@ -176,18 +176,41 @@ export class IdentityBackupService {
     const snapshotDir = resolve(root, "data", "identity-archive", `${stamp}-${safeLabel}`);
     mkdirSync(snapshotDir, { recursive: true });
 
-    const copyTargets = [
+    type CopyTarget = { from: string; to: string; recursive?: boolean };
+    const copyTargets: CopyTarget[] = [
       { from: resolve(root, "data", "state", "nova.db"), to: resolve(snapshotDir, "nova.db") },
       { from: resolve(root, "data", "state", "learning-log.json"), to: resolve(snapshotDir, "learning-log.json") },
-      { from: resolve(root, "config", "personas"), to: resolve(snapshotDir, "config", "personas") },
-      { from: resolve(root, "config", "improvement", "policy.yaml"), to: resolve(snapshotDir, "config", "improvement-policy.yaml") },
-      { from: resolve(root, "config", "gitops", "policy.yaml"), to: resolve(snapshotDir, "config", "gitops-policy.yaml") }
+      { from: resolve(root, "data", "state", "curiosity-store.json"), to: resolve(snapshotDir, "curiosity-store.json") },
+      { from: resolve(root, "data", "state", "install-meta.json"), to: resolve(snapshotDir, "install-meta.json") },
+      { from: resolve(root, "config"), to: resolve(snapshotDir, "config"), recursive: true }
     ];
     for (const target of copyTargets) {
       if (!existsSync(target.from)) continue;
       mkdirSync(dirname(target.to), { recursive: true });
-      cpSync(target.from, target.to, { recursive: true });
+      cpSync(target.from, target.to, { recursive: target.recursive === true });
     }
+
+    writeFileSync(
+      resolve(snapshotDir, "README-SNAPSHOT.txt"),
+      [
+        "Nova identity snapshot",
+        "----------------------",
+        "",
+        "- nova.db          : SQLite database (chat/run history, memory, emotion, Web UI settings in table app_settings,",
+        "                     sessions, improvement proposals, etc.). This already includes Settings you changed in /settings.",
+        "- learning-log.json, curiosity-store.json, install-meta.json : optional sidecar state (also partially reflected in DB).",
+        "- config/          : checked-in YAML personas, cameras, improvement + gitops policy (and any other files you added).",
+        "",
+        "NOT included (back these up separately):",
+        "- Repository root .env (secrets, provider defaults)",
+        "- Ephemeral TLS keys under tmp/ unless you copy them manually",
+        "- Media uploads under data/uploads/",
+        "",
+        "Git push: branches named identity-backup/* contain this folder. Treat the remote as sensitive if nova.db has API keys.",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
 
     const manifest = {
       id: randomUUID(),
