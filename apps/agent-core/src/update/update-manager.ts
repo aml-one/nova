@@ -15,6 +15,20 @@ function resolveRepoRoot(): string {
   return cwd;
 }
 
+/**
+ * LaunchDaemons often run Git as root while the checkout is owned by a normal user.
+ * Git >= 2.35 refuses that unless `safe.directory` includes the repo (CVE-2022-24765).
+ * Setting it only for this subprocess avoids requiring a manual `git config --global`.
+ */
+function gitSafeDirectoryEnvForRepo(repoRoot: string): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "safe.directory",
+    GIT_CONFIG_VALUE_0: repoRoot
+  };
+}
+
 export type UpdateSettings = {
   enabled: boolean;
   checkIntervalMs: number;
@@ -256,7 +270,8 @@ export class UpdateManager {
     const result = spawnSync(cmd, {
       cwd: repoRoot,
       shell: true,
-      encoding: "utf8"
+      encoding: "utf8",
+      env: gitSafeDirectoryEnvForRepo(repoRoot)
     });
     if (result.status !== 0) {
       return { ok: false, message: (result.stderr || result.stdout || "update command failed").slice(0, 2000) };

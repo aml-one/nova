@@ -38,3 +38,23 @@ tail -f /var/log/nova-localstack.err.log
 ```bash
 sudo bash ./scripts/uninstall-macos-service.sh
 ```
+
+## 5) Troubleshooting: “dubious ownership” on Apply latest
+
+Nova’s updater runs `git pull` from **agent-core**. If the LaunchDaemon runs that process as **root** while the repo directory is owned by your user (`ambrus`), Git 2.35+ prints:
+
+```text
+fatal: detected dubious ownership in repository at '...'
+```
+
+**Preferred fix (built in):** current Nova passes `safe.directory` for the repo **only during the apply command**, so Apply latest works without touching global Git config. Pull the newest code once (manual `git pull` in your repo as your user), restart the stack, then use Apply latest again.
+
+**Manual alternative (global, for root’s Git):** if you still see the error on an older build:
+
+```bash
+sudo git config --global --add safe.directory /Users/ambrus/projects/Nova
+```
+
+Use your real checkout path (`pwd` inside the Nova repo).
+
+**Why it happens:** system LaunchDaemons run as root by default; your project lives under `/Users/ambrus/...` owned by `ambrus`. Git refuses cross-user repos unless explicitly allowed.
