@@ -67,7 +67,23 @@ Nova passes `safe.directory` for the repo during apply on current builds. If you
 sudo git config --global --add safe.directory "$(pwd)"
 ```
 
-## 7) Troubleshooting: `Bootstrap failed: 5: Input/output error`
+## 7) Identity backup: `could not read Username for 'https://github.com': Device not configured`
+
+The button runs `git push` from **agent-core** with **no TTY**. An **`https://github.com/...`** remote needs credentials that work **without** an interactive prompt.
+
+**Recommended:** point the backup remote at SSH (same remote name you use in Settings):
+
+```bash
+cd /path/to/Nova
+git remote -v
+git remote set-url identity-backup git@github.com:YOUR_ORG/YOUR_PRIVATE_REPO.git
+```
+
+Use the remote name you configured under **Settings → Backup** (often `identity-backup` or `origin`). Ensure the SSH key under your login user’s `~/.ssh` can push to that repo (the LaunchDaemon sets `HOME` to that user, so Git uses that `~/.ssh` even when the process is root).
+
+**Alternative:** configure a non-interactive HTTPS credential for that host (PAT + `credential.helper store`, or a token embedded in the URL — treat as a secret).
+
+## 8) Troubleshooting: `Bootstrap failed: 5: Input/output error`
 
 Often a **bad or stale plist**, SIP/domain quirks, or a duplicate label. Try:
 

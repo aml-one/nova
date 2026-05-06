@@ -312,7 +312,11 @@ function gitWorkTree(): string {
 }
 
 function gitEnv(cwd: string): NodeJS.ProcessEnv {
-  return gitSafeDirectoryEnvForRepo(cwd);
+  return {
+    ...gitSafeDirectoryEnvForRepo(cwd),
+    // LaunchDaemon has no TTY; without this Git may hang or emit "Device not configured" on HTTPS prompts.
+    GIT_TERMINAL_PROMPT: "0"
+  };
 }
 
 /** Empty when detached HEAD or unreadable. */
@@ -362,9 +366,35 @@ function runGit(args: string[]): string {
     env: gitEnv(cwd)
   });
   if (result.status !== 0) {
-    throw new Error(result.stderr || `git ${args.join(" ")} failed`);
+    const stderr = (result.stderr ?? "").trim();
+    throw new Error(identityBackupGitFailureMessage(args, stderr));
   }
   return result.stdout ?? "";
+}
+
+/** Headless-friendly error text when Git wanted interactive HTTPS credentials. */
+function identityBackupGitFailureMessage(args: readonly string[], stderr: string): string {
+  const err = stderr || `git ${args.join(" ")} failed`;
+  const lower = err.toLowerCase();
+  const looksLikeHeadlessHttpsAuth =
+    lower.includes("could not read username") ||
+    lower.includes("device not configured") ||
+    lower.includes("terminal prompts disabled") ||
+    (lower.includes("authentication failed") && lower.includes("http"));
+
+  if (!looksLikeHeadlessHttpsAuth) {
+    return err;
+  }
+
+  return [
+    err,
+    "",
+    "Identity backup runs without a terminal (e.g. macOS LaunchDaemon), so Git cannot prompt for HTTPS username/password.",
+    "Fix (pick one):",
+    "- Prefer SSH — in your Nova clone: git remote set-url <REMOTE_NAME> git@github.com:ORG/PRIVATE-REPO.git",
+    "  The service plist sets HOME to your macOS login user, so SSH keys are typically read from that user's ~/.ssh (ensure that key can push to the backup repo).",
+    "- Or store HTTPS credentials non-interactively (fine-grained PAT with repo scope): e.g. credential.helper store and ~/.git-credentials, or embed the token in the remote URL (treat it as a secret)."
+  ].join("\n");
 }
 
 function ensureRepo(): void {
