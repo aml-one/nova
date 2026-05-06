@@ -22,6 +22,11 @@ RUNNER="${ROOT_DIR}/scripts/start-local-macos-service.sh"
 LOG_OUT="${ROOT_DIR}/tmp/nova-localstack.log"
 LOG_ERR="${ROOT_DIR}/tmp/nova-localstack.err.log"
 
+SERVICE_HOME="$(dscl . -read "/Users/${SERVICE_USER}" NFSHomeDirectory 2>/dev/null | sed 's/^[^/]*//')"
+if [[ -z "${SERVICE_HOME}" || ! -d "${SERVICE_HOME}" ]]; then
+  SERVICE_HOME="/Users/${SERVICE_USER}"
+fi
+
 if [[ ! -x "${RUNNER}" ]]; then
   chmod +x "${RUNNER}"
 fi
@@ -49,11 +54,14 @@ cat > "${PLIST_PATH}" <<EOF
 
   <key>UserName</key>
   <string>${SERVICE_USER}</string>
-  <key>GroupName</key>
-  <string>staff</string>
+
+  <key>LimitLoadToSessionType</key>
+  <string>Background</string>
 
   <key>EnvironmentVariables</key>
   <dict>
+    <key>HOME</key>
+    <string>${SERVICE_HOME}</string>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
@@ -74,10 +82,23 @@ EOF
 chmod 644 "${PLIST_PATH}"
 chown root:wheel "${PLIST_PATH}"
 
-launchctl bootout system/${LABEL} >/dev/null 2>&1 || true
-launchctl bootstrap system "${PLIST_PATH}"
-launchctl enable system/${LABEL}
-launchctl kickstart -k system/${LABEL}
+if ! plutil -lint "${PLIST_PATH}"; then
+  echo "Plist failed validation; not loading service." >&2
+  exit 1
+fi
+
+launchctl bootout "system/${LABEL}" >/dev/null 2>&1 || true
+# Sequoia+: enable may need to exist before bootstrap for some labels; harmless on older macOS.
+launchctl enable "system/${LABEL}" 2>/dev/null || true
+if ! launchctl bootstrap "system" "${PLIST_PATH}"; then
+  echo "" >&2
+  echo "launchctl bootstrap failed (often fixed by LimitLoadToSessionType=Background + UserName; see docs/macos-service.md)." >&2
+  echo "Recent launchd lines:" >&2
+  log show --style syslog --predicate "eventMessage CONTAINS[c] '${LABEL}'" --last 3m 2>/dev/null | tail -20 >&2 || true
+  exit 1
+fi
+launchctl enable "system/${LABEL}"
+launchctl kickstart -k "system/${LABEL}"
 
 echo "Installed and started ${LABEL} (runs as user ${SERVICE_USER}, not root — safe for git in ~/…)"
 echo "Logs:"

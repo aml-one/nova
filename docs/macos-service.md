@@ -68,3 +68,18 @@ sudo bash ./scripts/repair-nova-git-ownership.sh
 ```
 
 so existing `.git` ownership is repaired.
+
+## 6) Troubleshooting: `Bootstrap failed: 5: Input/output error`
+
+This is a generic launchd error. For Nova’s plist, common causes were:
+
+- **Missing `LimitLoadToSessionType`:** system jobs with `UserName` must not default to an Aqua GUI session. Current installer sets **`LimitLoadToSessionType` = `Background`**.
+- **Bad plist:** run `sudo plutil -lint /Library/LaunchDaemons/com.nova.localstack.plist`.
+- **Stale job name:** `sudo launchctl bootout system/com.nova.localstack` then re-run the installer.
+- **Logs not writable:** logs live under the repo `tmp/` and are `chown`’d to your user before load.
+
+If it still fails, capture recent launchd lines (replace the label if you changed it):
+
+```bash
+log show --style syslog --predicate 'eventMessage CONTAINS[c] "com.nova.localstack"' --last 5m | tail -40
+```
