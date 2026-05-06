@@ -14,7 +14,7 @@ sudo bash ./scripts/install-macos-service.sh
 The installer tries, in order:
 
 1. **System LaunchDaemon** (`/Library/LaunchDaemons/com.nova.localstack.plist`) with **`UserName` = `SUDO_USER`** and **`LimitLoadToSessionType` = `Background`** so **git / pnpm are not root** in your checkout.
-2. If macOS refuses that job (`Bootstrap failed: 5`), it falls back to a **per-user LaunchAgent** at `~/Library/LaunchAgents/com.nova.localstack.plist` (same script; no `UserName` key — the job **is** your user). Loaded in the **`user/<uid>`** domain first, then **`gui/<uid>`** if needed.
+2. If macOS refuses that job (`Bootstrap failed: 5`), it falls back to a **per-user LaunchAgent** at `~/Library/LaunchAgents/com.nova.localstack.plist` (same script; no `UserName` key — the job **is** your user). The installer loads it with **`launchctl asuser <uid> …`** (not plain `sudo -u … launchctl`), which targets the correct Mach bootstrap namespace; it tries **`user/<uid>`** first, then **`gui/<uid>`**.
 
 Both modes include:
 

@@ -23,8 +23,8 @@ if [[ -n "${UNINSTALL_USER}" && "${UNINSTALL_USER}" != "root" ]]; then
   AGENT_PLIST="${HOME_DIR}/Library/LaunchAgents/${LABEL}.plist"
   if [[ -f "${AGENT_PLIST}" ]]; then
     UIDN="$(id -u "${UNINSTALL_USER}")"
-    sudo -u "${UNINSTALL_USER}" launchctl bootout "user/${UIDN}/${LABEL}" >/dev/null 2>&1 || true
-    sudo -u "${UNINSTALL_USER}" launchctl bootout "gui/${UIDN}/${LABEL}" >/dev/null 2>&1 || true
+    launchctl asuser "${UIDN}" sudo -u "${UNINSTALL_USER}" launchctl bootout "user/${UIDN}/${LABEL}" >/dev/null 2>&1 || true
+    launchctl asuser "${UIDN}" sudo -u "${UNINSTALL_USER}" launchctl bootout "gui/${UIDN}/${LABEL}" >/dev/null 2>&1 || true
     rm -f "${AGENT_PLIST}"
   fi
 fi

@@ -29,6 +29,12 @@ fi
 SERVICE_UID="$(id -u "${SERVICE_USER}")"
 AGENT_PLIST="${SERVICE_HOME}/Library/LaunchAgents/${LABEL}.plist"
 
+# `sudo -u user launchctl …` uses the wrong Mach bootstrap namespace for GUI/user agents.
+# `launchctl asuser UID …` runs the inner command in that UID's context (required from installer scripts).
+agent_launchctl() {
+  launchctl asuser "${SERVICE_UID}" sudo -u "${SERVICE_USER}" launchctl "$@"
+}
+
 if [[ ! -x "${RUNNER}" ]]; then
   chmod +x "${RUNNER}"
 fi
@@ -37,8 +43,8 @@ mkdir -p "${ROOT_DIR}/tmp"
 touch "${LOG_OUT}" "${LOG_ERR}"
 chown "${SERVICE_USER}:staff" "${LOG_OUT}" "${LOG_ERR}"
 
-sudo -u "${SERVICE_USER}" launchctl bootout "user/${SERVICE_UID}/${LABEL}" >/dev/null 2>&1 || true
-sudo -u "${SERVICE_USER}" launchctl bootout "gui/${SERVICE_UID}/${LABEL}" >/dev/null 2>&1 || true
+agent_launchctl bootout "user/${SERVICE_UID}/${LABEL}" >/dev/null 2>&1 || true
+agent_launchctl bootout "gui/${SERVICE_UID}/${LABEL}" >/dev/null 2>&1 || true
 rm -f "${AGENT_PLIST}"
 
 write_system_plist() {
@@ -160,27 +166,27 @@ install_user_agent() {
     return 1
   fi
 
-  sudo -u "${SERVICE_USER}" launchctl bootout "user/${SERVICE_UID}/${LABEL}" >/dev/null 2>&1 || true
-  sudo -u "${SERVICE_USER}" launchctl bootout "gui/${SERVICE_UID}/${LABEL}" >/dev/null 2>&1 || true
+  agent_launchctl bootout "user/${SERVICE_UID}/${LABEL}" >/dev/null 2>&1 || true
+  agent_launchctl bootout "gui/${SERVICE_UID}/${LABEL}" >/dev/null 2>&1 || true
 
-  if sudo -u "${SERVICE_USER}" launchctl bootstrap "user/${SERVICE_UID}" "${AGENT_PLIST}"; then
-    sudo -u "${SERVICE_USER}" launchctl enable "user/${SERVICE_UID}/${LABEL}"
-    sudo -u "${SERVICE_USER}" launchctl kickstart -k "user/${SERVICE_UID}/${LABEL}"
+  if agent_launchctl bootstrap "user/${SERVICE_UID}" "${AGENT_PLIST}"; then
+    agent_launchctl enable "user/${SERVICE_UID}/${LABEL}"
+    agent_launchctl kickstart -k "user/${SERVICE_UID}/${LABEL}"
     echo "System daemon bootstrap failed; installed per-user LaunchAgent instead:"
     echo "  ${AGENT_PLIST}"
-    echo "(Runs as ${SERVICE_USER}; loads in user/${SERVICE_UID} domain — fine for git; see docs/macos-service.md.)"
+    echo "(Runs as ${SERVICE_USER}; user/${SERVICE_UID} domain — see docs/macos-service.md.)"
     return 0
   fi
 
-  if sudo -u "${SERVICE_USER}" launchctl bootstrap "gui/${SERVICE_UID}" "${AGENT_PLIST}"; then
-    sudo -u "${SERVICE_USER}" launchctl enable "gui/${SERVICE_UID}/${LABEL}"
-    sudo -u "${SERVICE_USER}" launchctl kickstart -k "gui/${SERVICE_UID}/${LABEL}"
-    echo "Installed per-user LaunchAgent (gui domain):"
+  if agent_launchctl bootstrap "gui/${SERVICE_UID}" "${AGENT_PLIST}"; then
+    agent_launchctl enable "gui/${SERVICE_UID}/${LABEL}"
+    agent_launchctl kickstart -k "gui/${SERVICE_UID}/${LABEL}"
+    echo "Installed per-user LaunchAgent (gui/${SERVICE_UID} domain):"
     echo "  ${AGENT_PLIST}"
     return 0
   fi
 
-  echo "Could not bootstrap LaunchAgent in user/ or gui/ domain." >&2
+  echo "Could not bootstrap LaunchAgent in user/ or gui/ domain (try from a local Terminal session)." >&2
   return 1
 }
 
