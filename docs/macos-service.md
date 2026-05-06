@@ -11,15 +11,22 @@ cd ~/source/Nova
 sudo bash ./scripts/install-macos-service.sh
 ```
 
-It installs `com.nova.localstack` as a LaunchDaemon with:
-- **`UserName` = the account that ran `sudo`** (`SUDO_USER`) so **git / pnpm never run as root** in your checkout (avoids root-owned `.git/objects` and lockouts).
+The installer tries, in order:
+
+1. **System LaunchDaemon** (`/Library/LaunchDaemons/com.nova.localstack.plist`) with **`UserName` = `SUDO_USER`** and **`LimitLoadToSessionType` = `Background`** so **git / pnpm are not root** in your checkout.
+2. If macOS refuses that job (`Bootstrap failed: 5`), it falls back to a **per-user LaunchAgent** at `~/Library/LaunchAgents/com.nova.localstack.plist` (same script; no `UserName` key — the job **is** your user). Loaded in the **`user/<uid>`** domain first, then **`gui/<uid>`** if needed.
+
+Both modes include:
+
 - `KeepAlive=true` (auto restart on crash/exit)
-- HTTPS enabled
+- HTTPS enabled (via `start-local-macos-service.sh`)
 - standard ports (443 for web)
 - dynamic TLS SAN including current `en0` IP each start
-- Logs under the repo: `tmp/nova-localstack.log` and `tmp/nova-localstack.err.log` (writable by that user)
+- Logs under the repo: `tmp/nova-localstack.log` and `tmp/nova-localstack.err.log`
 
 Always install as: `cd …/Nova && sudo bash ./scripts/install-macos-service.sh` — **not** from `sudo su -` (no `SUDO_USER`).
+
+**LaunchAgent note:** the fallback runs in your **user** launchd domain. On a Mac with no GUI login yet, ensure that user has a session (local login or SSH with user `launchd` active) if the stack does not start immediately.
 
 ## 2) Daily use
 
@@ -71,14 +78,12 @@ so existing `.git` ownership is repaired.
 
 ## 6) Troubleshooting: `Bootstrap failed: 5: Input/output error`
 
-This is a generic launchd error. For Nova’s plist, common causes were:
+Some macOS versions still reject the **system** `UserName` daemon. Re-run **`sudo bash ./scripts/install-macos-service.sh`** — the script now **falls back to a user LaunchAgent** automatically and prints which mode it used.
 
-- **Missing `LimitLoadToSessionType`:** system jobs with `UserName` must not default to an Aqua GUI session. Current installer sets **`LimitLoadToSessionType` = `Background`**.
-- **Bad plist:** run `sudo plutil -lint /Library/LaunchDaemons/com.nova.localstack.plist`.
-- **Stale job name:** `sudo launchctl bootout system/com.nova.localstack` then re-run the installer.
-- **Logs not writable:** logs live under the repo `tmp/` and are `chown`’d to your user before load.
+Other checks:
 
-If it still fails, capture recent launchd lines (replace the label if you changed it):
+- **Bad plist:** `sudo plutil -lint /Library/LaunchDaemons/com.nova.localstack.plist` or `plutil -lint ~/Library/LaunchAgents/com.nova.localstack.plist`
+- **Stale job:** `sudo launchctl bootout system/com.nova.localstack` then reinstall.
 
 ```bash
 log show --style syslog --predicate 'eventMessage CONTAINS[c] "com.nova.localstack"' --last 5m | tail -40
