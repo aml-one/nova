@@ -8,13 +8,27 @@ if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+SERVICE_USER="${SUDO_USER:-}"
+if [[ -z "${SERVICE_USER}" || "${SERVICE_USER}" == "root" ]]; then
+  echo "Install must be invoked from your login user so the service runs as you (not root), e.g.:" >&2
+  echo "  cd ${ROOT_DIR} && sudo bash ./scripts/install-macos-service.sh" >&2
+  echo "Avoid: sudo su - then bash install (no SUDO_USER → git would run as root again)." >&2
+  exit 1
+fi
+
 LABEL="com.nova.localstack"
 PLIST_PATH="/Library/LaunchDaemons/${LABEL}.plist"
 RUNNER="${ROOT_DIR}/scripts/start-local-macos-service.sh"
+LOG_OUT="${ROOT_DIR}/tmp/nova-localstack.log"
+LOG_ERR="${ROOT_DIR}/tmp/nova-localstack.err.log"
 
 if [[ ! -x "${RUNNER}" ]]; then
   chmod +x "${RUNNER}"
 fi
+
+mkdir -p "${ROOT_DIR}/tmp"
+touch "${LOG_OUT}" "${LOG_ERR}"
+chown "${SERVICE_USER}:staff" "${LOG_OUT}" "${LOG_ERR}"
 
 cat > "${PLIST_PATH}" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -33,6 +47,11 @@ cat > "${PLIST_PATH}" <<EOF
   <key>WorkingDirectory</key>
   <string>${ROOT_DIR}</string>
 
+  <key>UserName</key>
+  <string>${SERVICE_USER}</string>
+  <key>GroupName</key>
+  <string>staff</string>
+
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
@@ -45,9 +64,9 @@ cat > "${PLIST_PATH}" <<EOF
   <true/>
 
   <key>StandardOutPath</key>
-  <string>/var/log/nova-localstack.log</string>
+  <string>${LOG_OUT}</string>
   <key>StandardErrorPath</key>
-  <string>/var/log/nova-localstack.err.log</string>
+  <string>${LOG_ERR}</string>
 </dict>
 </plist>
 EOF
@@ -60,9 +79,12 @@ launchctl bootstrap system "${PLIST_PATH}"
 launchctl enable system/${LABEL}
 launchctl kickstart -k system/${LABEL}
 
-echo "Installed and started ${LABEL}"
+echo "Installed and started ${LABEL} (runs as user ${SERVICE_USER}, not root — safe for git in ~/…)"
 echo "Logs:"
-echo "  /var/log/nova-localstack.log"
-echo "  /var/log/nova-localstack.err.log"
+echo "  ${LOG_OUT}"
+echo "  ${LOG_ERR}"
+echo ""
+echo "If .git was damaged by an older root-based install, run once:"
+echo "  sudo bash ./scripts/repair-nova-git-ownership.sh"
 echo ""
 echo "Web UI should be on https://<this-mac-ip>/"

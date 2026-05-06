@@ -12,10 +12,14 @@ sudo bash ./scripts/install-macos-service.sh
 ```
 
 It installs `com.nova.localstack` as a LaunchDaemon with:
+- **`UserName` = the account that ran `sudo`** (`SUDO_USER`) so **git / pnpm never run as root** in your checkout (avoids root-owned `.git/objects` and lockouts).
 - `KeepAlive=true` (auto restart on crash/exit)
 - HTTPS enabled
 - standard ports (443 for web)
 - dynamic TLS SAN including current `en0` IP each start
+- Logs under the repo: `tmp/nova-localstack.log` and `tmp/nova-localstack.err.log` (writable by that user)
+
+Always install as: `cd …/Nova && sudo bash ./scripts/install-macos-service.sh` — **not** from `sudo su -` (no `SUDO_USER`).
 
 ## 2) Daily use
 
@@ -29,8 +33,8 @@ No manual SSH stop/pull/start should be needed.
 
 ```bash
 sudo launchctl print system/com.nova.localstack
-tail -f /var/log/nova-localstack.log
-tail -f /var/log/nova-localstack.err.log
+tail -f ./tmp/nova-localstack.log
+tail -f ./tmp/nova-localstack.err.log
 ```
 
 ## 4) Remove service
@@ -57,4 +61,10 @@ sudo git config --global --add safe.directory /Users/ambrus/projects/Nova
 
 Use your real checkout path (`pwd` inside the Nova repo).
 
-**Why it happens:** system LaunchDaemons run as root by default; your project lives under `/Users/ambrus/...` owned by `ambrus`. Git refuses cross-user repos unless explicitly allowed.
+**Why it happened on older installs:** the plist used to omit `UserName`, so the job ran as **root** and `git` wrote root-owned objects under `.git/`. Re-run **`sudo bash ./scripts/install-macos-service.sh`** from your user (see above), then once:
+
+```bash
+sudo bash ./scripts/repair-nova-git-ownership.sh
+```
+
+so existing `.git` ownership is repaired.
