@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { getDatabase } from "../storage/sqlite.js";
 import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
 import { gitSafeDirectoryEnvForRepo } from "../util/git-safe-directory-env.js";
+import { chownRepoGitIfConfigured } from "../util/chown-repo-git-if-configured.js";
 
 export type UpdateSettings = {
   enabled: boolean;
@@ -253,6 +254,7 @@ export class UpdateManager {
     if (result.status !== 0) {
       return { ok: false, message: (result.stderr || result.stdout || "update command failed").slice(0, 2000) };
     }
+    chownRepoGitIfConfigured(repoRoot);
     this.touchWebNextCleanFlag(repoRoot);
     return { ok: true, message: (result.stdout || "update applied").slice(0, 2000) };
   }

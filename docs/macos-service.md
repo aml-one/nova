@@ -1,8 +1,12 @@
-# Run Nova as a macOS service (HTTPS + auto restart)
+# Run Nova as a macOS service (HTTPS on 443 + auto restart)
 
 This removes the need to SSH and manually run:
 
 `sudo env NOVA_WEB_HTTPS=true NOVA_WEB_STANDARD_PORTS=1 NOVA_WEB_TLS_SAN=... bash ./scripts/start-local.sh`
+
+The supported layout is a **root system LaunchDaemon** (`com.nova.localstack`). Only root can bind **port 443** reliably on macOS, so the service runs `start-local-macos-service.sh` as root. The plist sets **`NOVA_REPO_GIT_CHOWN=${SUDO_USER}:staff`** so agent-core can re-own **`.git`** after `git pull` / identity backup (so your normal user can `git pull` again).
+
+Always install as: `cd …/Nova && sudo bash ./scripts/install-macos-service.sh` — **not** from `sudo su -` (no `SUDO_USER`).
 
 ## 1) Install once (on the Mac running Nova)
 
@@ -11,28 +15,21 @@ cd ~/source/Nova
 sudo bash ./scripts/install-macos-service.sh
 ```
 
-The installer tries, in order:
-
-1. **System LaunchDaemon** (`/Library/LaunchDaemons/com.nova.localstack.plist`) with **`UserName` = `SUDO_USER`** and **`LimitLoadToSessionType` = `Background`** so **git / pnpm are not root** in your checkout.
-2. If macOS refuses that job (`Bootstrap failed: 5`), it falls back to a **per-user LaunchAgent** at `~/Library/LaunchAgents/com.nova.localstack.plist` (same script; no `UserName` key — the job **is** your user). The installer loads it with **`launchctl asuser <uid> …`** (not plain `sudo -u … launchctl`), which targets the correct Mach bootstrap namespace; it tries **`user/<uid>`** first, then **`gui/<uid>`**.
-
-Both modes include:
+The job includes:
 
 - `KeepAlive=true` (auto restart on crash/exit)
-- HTTPS enabled (via `start-local-macos-service.sh`)
-- standard ports (443 for web)
-- dynamic TLS SAN including current `en0` IP each start
+- HTTPS via `start-local-macos-service.sh`
+- **Standard ports** (443 for web when `NOVA_WEB_PORT` is unset)
+- Dynamic TLS SAN including current `en0` IP each start
 - Logs under the repo: `tmp/nova-localstack.log` and `tmp/nova-localstack.err.log`
 
-Always install as: `cd …/Nova && sudo bash ./scripts/install-macos-service.sh` — **not** from `sudo su -` (no `SUDO_USER`).
-
-**LaunchAgent note:** the fallback runs in your **user** launchd domain. On a Mac with no GUI login yet, ensure that user has a session (local login or SSH with user `launchd` active) if the stack does not start immediately.
+**Web UI:** `https://<this-mac-LAN-ip>/` (or `https://127.0.0.1/` from the same machine).
 
 ## 2) Daily use
 
-- Open Settings -> Updates.
+- Open Settings → Updates.
 - Use **Apply latest**.
-- UI now shows "applying/restarting" and auto-reloads when Nova is back.
+- UI shows applying/restarting and auto-reloads when Nova is back.
 
 No manual SSH stop/pull/start should be needed.
 
@@ -50,40 +47,35 @@ tail -f ./tmp/nova-localstack.err.log
 sudo bash ./scripts/uninstall-macos-service.sh
 ```
 
-## 5) Troubleshooting: “dubious ownership” on Apply latest
+This removes the system daemon and any leftover **user** LaunchAgent copy from older installers (same label).
 
-Nova’s updater runs `git pull` from **agent-core**. If the LaunchDaemon runs that process as **root** while the repo directory is owned by your user (`ambrus`), Git 2.35+ prints:
+## 5) Troubleshooting: `.git` owned by root / `git pull` fails
 
-```text
-fatal: detected dubious ownership in repository at '...'
-```
-
-**Preferred fix (built in):** current Nova passes `safe.directory` for the repo **only during the apply command**, so Apply latest works without touching global Git config. Pull the newest code once (manual `git pull` in your repo as your user), restart the stack, then use Apply latest again.
-
-**Manual alternative (global, for root’s Git):** if you still see the error on an older build:
-
-```bash
-sudo git config --global --add safe.directory /Users/ambrus/projects/Nova
-```
-
-Use your real checkout path (`pwd` inside the Nova repo).
-
-**Why it happened on older installs:** the plist used to omit `UserName`, so the job ran as **root** and `git` wrote root-owned objects under `.git/`. Re-run **`sudo bash ./scripts/install-macos-service.sh`** from your user (see above), then once:
+If Apply latest or backup already ran as root without `NOVA_REPO_GIT_CHOWN`, fix once:
 
 ```bash
 sudo bash ./scripts/repair-nova-git-ownership.sh
 ```
 
-so existing `.git` ownership is repaired.
+Then reinstall so the plist includes `NOVA_REPO_GIT_CHOWN` (current installer does this automatically).
 
-## 6) Troubleshooting: `Bootstrap failed: 5: Input/output error`
+## 6) Troubleshooting: “dubious ownership” on Apply latest
 
-Some macOS versions still reject the **system** `UserName` daemon. Re-run **`sudo bash ./scripts/install-macos-service.sh`** — the script now **falls back to a user LaunchAgent** automatically and prints which mode it used.
+Nova passes `safe.directory` for the repo during apply on current builds. If you still see it on an older tree, pull manually as your user once, or:
 
-Other checks:
+```bash
+sudo git config --global --add safe.directory "$(pwd)"
+```
 
-- **Bad plist:** `sudo plutil -lint /Library/LaunchDaemons/com.nova.localstack.plist` or `plutil -lint ~/Library/LaunchAgents/com.nova.localstack.plist`
-- **Stale job:** `sudo launchctl bootout system/com.nova.localstack` then reinstall.
+## 7) Troubleshooting: `Bootstrap failed: 5: Input/output error`
+
+Often a **bad or stale plist**, SIP/domain quirks, or a duplicate label. Try:
+
+```bash
+sudo plutil -lint /Library/LaunchDaemons/com.nova.localstack.plist
+sudo launchctl bootout system/com.nova.localstack
+sudo bash ./scripts/install-macos-service.sh
+```
 
 ```bash
 log show --style syslog --predicate 'eventMessage CONTAINS[c] "com.nova.localstack"' --last 5m | tail -40

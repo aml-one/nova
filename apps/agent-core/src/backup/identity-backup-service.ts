@@ -6,6 +6,7 @@ import { getDatabase } from "../storage/sqlite.js";
 import { PersonaLoader } from "../persona/persona-loader.js";
 import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
 import { gitSafeDirectoryEnvForRepo } from "../util/git-safe-directory-env.js";
+import { chownRepoGitIfConfigured } from "../util/chown-repo-git-if-configured.js";
 
 type SanityReport = {
   ok: boolean;
@@ -243,6 +244,7 @@ export class IdentityBackupService {
       return branch;
     } finally {
       checkoutRestoreAfterBackup(repoRoot, previousBranch);
+      chownRepoGitIfConfigured(repoRoot);
     }
   }
 

@@ -29,4 +29,4 @@ if [[ -n "${UNINSTALL_USER}" && "${UNINSTALL_USER}" != "root" ]]; then
   fi
 fi
 
-echo "Removed ${LABEL} (system daemon and, if present, user LaunchAgent)"
+echo "Removed ${LABEL}"
