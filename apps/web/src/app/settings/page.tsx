@@ -3586,7 +3586,8 @@ export default function SettingsPage() {
             <p className="text-xs text-muted">Automatic checks run at most once per day. Use "Check now" anytime for a manual check.</p>
             <p className="text-xs text-muted">
               Recommended on macOS: run Nova under a launchd service once, then this button can update + restart without manual SSH. See{" "}
-              <code className="rounded bg-black/15 px-1 py-0.5 text-[10px]">scripts/install-macos-service.sh</code>.
+              <code className="rounded bg-black/15 px-1 py-0.5 text-[10px]">scripts/install-macos-service.sh</code>{" "}
+              (<code className="text-[10px]">docs/macos-service.md</code>): the installer runs the stack as <strong>your</strong> macOS user, so <strong>Apply latest</strong> (automatic <code className="text-[10px]">git pull</code> inside agent-core) never writes root-owned files under <code className="text-[10px]">.git</code>. Re-run the installer after upgrading Nova; if <code className="text-[10px]">.git</code> was already damaged, run <code className="text-[10px]">sudo bash scripts/repair-nova-git-ownership.sh</code> once from your user.
             </p>
             <label className="flex items-center gap-2"><Checkbox checked={settings.updates.enabled} onChange={(e) => setSettings((p) => ({ ...p, updates: { ...p.updates, enabled: e.target.checked } }))} /> Enable update checks</label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.updates.autoApply} onChange={(e) => setSettings((p) => ({ ...p, updates: { ...p.updates, autoApply: e.target.checked } }))} /> Auto apply updates in background</label>
