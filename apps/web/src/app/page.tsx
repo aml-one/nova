@@ -2434,14 +2434,15 @@ export default function HomePage() {
         );
       } else {
         const raw = error instanceof Error ? error.message : "Unknown error";
-        const hint =
-          /fetch failed|failed to fetch/i.test(raw)
-            ? " Check that agent-core is running and NOVA_AGENT_API_URL matches where it listens."
-            : "";
+        const looksTransient =
+          /network error|fetch failed|failed to fetch|load failed|connection (closed|reset|refused)|the operation could not be completed|stream failed/i.test(raw);
+        const friendly = looksTransient
+          ? "Nova was momentarily unreachable (the agent service was likely restarting). Please try again in a few seconds."
+          : `Error: ${raw}`;
         setTurns((prev) =>
           prev.map((turn) =>
             turn.id === assistantId
-              ? { ...turn, text: `Error: ${raw}${hint}`, thinkingText: undefined }
+              ? { ...turn, text: friendly, thinkingText: undefined }
               : turn.id === userTurn.id
                 ? { ...turn, isPending: false }
                 : turn

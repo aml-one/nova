@@ -236,9 +236,11 @@ function getSystemEventDelta(
     return { valenceDelta: 0.18, arousalDelta: 0.38, hintLabel: "curious" };
   }
   if (event === "task_success") {
-    return { valenceDelta: 0.35, arousalDelta: 0.28, hintLabel: "joyful" };
+    // Routine chat replies must not flip the label to "joyful" — keep deltas small and skip the
+    // hint so casual conversation doesn't cause a complete mood change every turn.
+    return { valenceDelta: 0.06, arousalDelta: 0.04 };
   }
-  return { valenceDelta: -0.5, arousalDelta: 0.4, hintLabel: "anxious" };
+  return { valenceDelta: -0.08, arousalDelta: 0.06 };
 }
 
 function appraiseInput(
@@ -280,11 +282,11 @@ function appraiseInput(
 }
 
 function deriveLabel(valence: number, arousal: number, hint?: EmotionState["label"]): EmotionState["label"] {
-  if (hint) {
-    return hint;
-  }
   if (Math.abs(valence) < 0.16 && Math.abs(arousal) < 0.2) {
     return "neutral";
+  }
+  if (hint) {
+    return hint;
   }
   if (valence > 0.48 && arousal > 0.34) return "joyful";
   if (valence > 0.12 && arousal > 0.5) return "curious";
