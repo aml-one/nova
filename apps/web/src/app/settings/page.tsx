@@ -52,6 +52,16 @@ function normalizeIdentityBackupGitRemote(value: string | undefined, fallback: s
   return t;
 }
 
+async function readJsonOrEmpty<T>(response: Response): Promise<T> {
+  try {
+    const raw = await response.text();
+    if (!raw.trim()) return {} as T;
+    return JSON.parse(raw) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
 function messageLooksLikeSignalCaptchaRequired(message: string): boolean {
   return message.toLowerCase().includes("captcha");
 }
@@ -701,7 +711,7 @@ export default function SettingsPage() {
 
   async function loadSettings(): Promise<void> {
     const response = await apiFetch("/api/settings");
-    const data = (await response.json()) as { settings?: Partial<SettingsState> };
+    const data = await readJsonOrEmpty<{ settings?: Partial<SettingsState> }>(response);
     if (response.ok) {
       const normalized = normalizeSettings(data.settings);
       setSettings(normalized);
@@ -710,32 +720,32 @@ export default function SettingsPage() {
   }
   async function loadHealth(): Promise<void> {
     const response = await apiFetch("/api/system/health");
-    const data = (await response.json()) as { health?: FullHealth };
+    const data = await readJsonOrEmpty<{ health?: FullHealth }>(response);
     if (response.ok) setHealth(data.health ?? null);
   }
   async function loadCatalog(): Promise<void> {
     const response = await apiFetch("/api/providers/catalog");
-    const data = (await response.json()) as ProviderCatalog;
+    const data = await readJsonOrEmpty<ProviderCatalog>(response);
     if (response.ok) setCatalog(data);
   }
   async function loadUpdateStatus(): Promise<void> {
     const response = await apiFetch("/api/system/update/status");
-    const data = (await response.json()) as { status?: UpdateStatus };
+    const data = await readJsonOrEmpty<{ status?: UpdateStatus }>(response);
     if (response.ok) setUpdateStatus(data.status ?? null);
   }
   async function loadSkillManifests(): Promise<void> {
     const response = await apiFetch("/api/skills/manifests");
-    const data = (await response.json()) as { items?: SkillManifest[] };
+    const data = await readJsonOrEmpty<{ items?: SkillManifest[] }>(response);
     if (response.ok) setSkillManifests(data.items ?? []);
   }
   async function loadWebsites(): Promise<void> {
     const response = await apiFetch("/api/websites");
-    const data = (await response.json()) as { items?: WebsiteProject[] };
+    const data = await readJsonOrEmpty<{ items?: WebsiteProject[] }>(response);
     if (response.ok) setWebsites(data.items ?? []);
   }
   async function loadDefaultPersona(): Promise<void> {
     const response = await apiFetch("/api/persona/default");
-    const data = (await response.json()) as { persona?: PersonaState; source?: "file" | "fallback"; filePath?: string };
+    const data = await readJsonOrEmpty<{ persona?: PersonaState; source?: "file" | "fallback"; filePath?: string }>(response);
     if (!response.ok || !data.persona) return;
     setDefaultPersona({
       id: data.persona.id || "default",
@@ -748,21 +758,21 @@ export default function SettingsPage() {
   }
   async function loadPersonaVersions(): Promise<void> {
     const response = await apiFetch("/api/personas/versions?personaId=default&rewritesOnly=true");
-    const data = (await response.json()) as { items?: PersonaVersion[] };
+    const data = await readJsonOrEmpty<{ items?: PersonaVersion[] }>(response);
     if (response.ok) {
       setPersonaVersions(Array.isArray(data.items) ? data.items : []);
     }
   }
   async function loadImprovementHistory(): Promise<void> {
     const response = await apiFetch("/api/improvement/history");
-    const data = (await response.json()) as { itemsByDate?: ImprovementHistoryByDate };
+    const data = await readJsonOrEmpty<{ itemsByDate?: ImprovementHistoryByDate }>(response);
     if (response.ok) {
       setImprovementHistoryByDate(data.itemsByDate ?? {});
     }
   }
   async function loadIdentityBackupStatus(): Promise<void> {
     const response = await apiFetch("/api/backup/identity/status");
-    const data = (await response.json()) as { latestSuccess?: BackupRunState; latestRun?: BackupRunState };
+    const data = await readJsonOrEmpty<{ latestSuccess?: BackupRunState; latestRun?: BackupRunState }>(response);
     if (response.ok) {
       setLatestIdentityBackup(data.latestSuccess ?? data.latestRun ?? null);
     }
@@ -856,7 +866,7 @@ export default function SettingsPage() {
 
   async function checkUpdates(): Promise<void> {
     const response = await apiFetch("/api/system/update/check", { method: "POST" });
-    const data = (await response.json()) as { status?: UpdateStatus; error?: string };
+    const data = await readJsonOrEmpty<{ status?: UpdateStatus; error?: string }>(response);
     if (!response.ok) setError(data.error ?? "Update check failed");
     else setUpdateStatus(data.status ?? null);
   }
@@ -868,7 +878,7 @@ export default function SettingsPage() {
     try {
       markAgentRestartExpected();
       const response = await apiFetch("/api/system/update/apply", { method: "POST" });
-      const data = (await response.json()) as { result?: { message?: string }; error?: string };
+      const data = await readJsonOrEmpty<{ result?: { message?: string }; error?: string }>(response);
       if (!response.ok) {
         clearAgentRestartExpected();
         setError(data.error ?? "Update apply failed");
@@ -900,7 +910,7 @@ export default function SettingsPage() {
           cache: "no-store"
         });
         if (response.ok) {
-          const data = (await response.json()) as { status?: UpdateStatus };
+          const data = await readJsonOrEmpty<{ status?: UpdateStatus }>(response);
           setUpdateStatus(data.status ?? null);
           return;
         }
