@@ -241,6 +241,26 @@ function buildProposalQueueSnapshot(improvement: SelfImprovementLoop): Record<st
   }
 }
 
+/** Module-level throttle: only one "cycle started" thought per cooldown window across all daemons in this process. */
+let lastCycleStartThoughtAt = 0;
+
+function shouldLogCycleStartThought(): boolean {
+  const now = Date.now();
+  const minIntervalMs = Math.max(
+    60_000,
+    Number(process.env.NOVA_LEARNING_CYCLE_START_THOUGHT_MS ?? String(60 * 60 * 1000))
+  );
+  if (lastCycleStartThoughtAt > 0 && now - lastCycleStartThoughtAt < minIntervalMs) {
+    return false;
+  }
+  lastCycleStartThoughtAt = now;
+  return true;
+}
+
+function fingerprintLearningCompleted(result: string, summary: string): string {
+  return createHash("sha256").update(`${result}\n--\n${summary}`).digest("hex");
+}
+
 async function withTimeout<T>(task: Promise<T>, timeoutMs: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
   try {
