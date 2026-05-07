@@ -13,6 +13,19 @@ type EmotionState = {
 const POLL_VISIBLE_MS = 900;
 const POLL_HIDDEN_MS = 8000;
 
+/**
+ * Stored token `"neutral"` is shown to users as **"Calm"** ("neutral" reads like a settings
+ * dropdown, not a mood). The token itself stays unchanged so existing rows / IDs / styling
+ * switches keep working.
+ */
+function humanizeMoodLabel(label: string): string {
+  return label === "neutral" ? "calm" : label;
+}
+
+function capitalizeFirst(value: string): string {
+  return value.length === 0 ? value : `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
 function moodAccent(label: string): { dot: string; glow: string } {
   switch (label) {
     case "joyful":
@@ -147,11 +160,13 @@ export function EmotionBadge({ userId = WEB_CHAT_EMOTION_USER_ID }: { userId?: s
   const { dot, glow } = useMemo(() => moodAccent(label), [label]);
   const chrome = useMemo(() => moodChrome(label), [label]);
 
+  const displayLabel = state ? capitalizeFirst(humanizeMoodLabel(state.label)) : "";
+
   return (
     <div
       title={
         state
-          ? `Nova is ${state.label} (valence=${state.valence.toFixed(2)}, arousal=${state.arousal.toFixed(2)}) · one mood for all channels & users`
+          ? `Nova is ${humanizeMoodLabel(state.label)} (valence=${state.valence.toFixed(2)}, arousal=${state.arousal.toFixed(2)}) · one mood for all channels & users`
           : "Nova emotional state unavailable (enable emotion core in Settings)"
       }
       className={cn(
@@ -169,15 +184,7 @@ export function EmotionBadge({ userId = WEB_CHAT_EMOTION_USER_ID }: { userId?: s
         aria-hidden
       />
       <span className="max-w-[11rem] truncate text-[11px] font-medium leading-tight text-slate-800 dark:text-slate-100">
-        {state ? (
-          <>
-            Nova&apos;s{" "}
-            {state.label.charAt(0).toUpperCase()}
-            {state.label.slice(1)}
-          </>
-        ) : (
-          <span className="text-muted">Mood unavailable</span>
-        )}
+        {state ? <>Nova&apos;s {displayLabel}</> : <span className="text-muted">Mood unavailable</span>}
       </span>
     </div>
   );

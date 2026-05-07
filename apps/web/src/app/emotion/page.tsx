@@ -22,6 +22,11 @@ type EmotionEvent = {
   metadata?: Record<string, unknown>;
 };
 
+/** Stored token `"neutral"` is shown in the UI as `"calm"` for human readability. */
+function humanizeMoodLabel(label: string): string {
+  return label === "neutral" ? "calm" : label;
+}
+
 export default function EmotionPage() {
   const [itemsByDate, setItemsByDate] = useState<Record<string, EmotionEvent[]>>({});
   const [loading, setLoading] = useState(true);
@@ -115,7 +120,7 @@ function EmotionTimelineCard({ item }: { item: EmotionEvent }) {
               moodHue
             )}
           >
-            {item.label}
+            {humanizeMoodLabel(item.label)}
           </span>
           <MeterChip label="Valence" value={item.valence} chroma="from-emerald-400/90 to-teal-600/90" />
           <MeterChip label="Arousal" value={item.arousal} chroma="from-amber-400/90 to-orange-600/90" />

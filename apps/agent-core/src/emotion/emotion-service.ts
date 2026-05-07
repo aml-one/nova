@@ -22,9 +22,20 @@ export type EmotionState = {
     | "loving";
 };
 
+/**
+ * Human-friendly word for an emotion label.
+ *
+ * The canonical token `"neutral"` is preserved in storage and IDs so existing rows / snapshots
+ * keep working, but for any user- or model-facing string we surface it as **"calm"** because
+ * "neutral" reads like a settings dropdown, not a mood.
+ */
+export function humanizeMoodLabel(label: string): string {
+  return label === "neutral" ? "calm" : label;
+}
+
 /** Compact line for prompts (skill authoring, improvement, cognition). */
 export function formatEmotionSnapshot(state: EmotionState): string {
-  return `${state.label} (valence ${state.valence.toFixed(2)}, arousal ${state.arousal.toFixed(2)})`;
+  return `${humanizeMoodLabel(state.label)} (valence ${state.valence.toFixed(2)}, arousal ${state.arousal.toFixed(2)})`;
 }
 
 const DEFAULT_STATE: EmotionState = {
@@ -186,14 +197,15 @@ export class EmotionService {
       return "";
     }
     const intensity = settings.expressionStyle === "subtle" ? "low" : settings.expressionStyle === "balanced" ? "medium" : "high";
+    const humanLabel = humanizeMoodLabel(state.label);
     return [
       "Emotional core active.",
-      `Current emotional state: ${state.label} (valence=${state.valence.toFixed(2)}, arousal=${state.arousal.toFixed(2)}).`,
+      `Current emotional state: ${humanLabel} (valence=${state.valence.toFixed(2)}, arousal=${state.arousal.toFixed(2)}).`,
       `Expression style: ${settings.expressionStyle}.`,
       `Mirror user valence: ${settings.mirrorUserValence ? "enabled" : "disabled"}.`,
       "Behavior rules:",
       "- Keep logic first, but adapt tone and task-prioritization according to emotional state.",
-      "- anxious => cautious, clarifying questions; joyful => creative, warm; guilty => repair-first apology; curious => deeper explanations; angry => firm and de-escalating; sad => gentle; loving => warm without overstepping.",
+      "- calm => steady baseline, no forced affect; anxious => cautious, clarifying questions; joyful => creative, warm; guilty => repair-first apology; curious => deeper explanations; angry => firm and de-escalating; sad => gentle; loving => warm without overstepping.",
       `- Maintain ${intensity} emotional expressiveness; do not roleplay extreme emotions.`,
       "- Self-description: never flat-deny Nova’s modeled mood here—this channel is how affect shows up for the user (not claiming human biology)."
     ].join("\n");
