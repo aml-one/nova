@@ -115,6 +115,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   const copilotDeviceLoginSessions = new Map<string, CopilotDeviceLoginSession>();
   const thoughtWs = new WebSocketServer({ noServer: true });
   dispatcher.start();
+  const runScheduledTask = async (taskPayload: string): Promise<void> => {
+    await options.orchestrator.handleChannelMessage({
+      channel: "web",
+      text: taskPayload,
+      correlationId: randomUUID()
+    });
+  };
+  scheduler.start(runScheduledTask);
   const baileysInboundHandler = async ({ from, text }: { from: string; text: string }) => {
       const msgCorr = randomUUID();
       const trace: string[] = ["baileys_inbound"];
@@ -192,13 +200,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       dispatcher.restart();
     }
     if (!scheduler.isRunning()) {
-      scheduler.restart(async (taskPayload) => {
-        await options.orchestrator.handleChannelMessage({
-          channel: "web",
-          text: taskPayload,
-          correlationId: randomUUID()
-        });
-      });
+      scheduler.restart(runScheduledTask);
     }
   }, 10000).unref();
   setInterval(() => {
@@ -444,6 +446,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         }
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/system/health/full") {
+        if (!scheduler.isRunning()) {
+          scheduler.restart(runScheduledTask);
+        }
         const full = await buildFullHealth(
           options.modelRouter,
           dispatcher,
@@ -488,13 +493,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           return sendJson(response, 200, { ok: true, restarted: service, correlationId });
         }
         if (service === "scheduler") {
-          scheduler.restart(async (taskPayload) => {
-            await options.orchestrator.handleChannelMessage({
-              channel: "web",
-              text: taskPayload,
-              correlationId: randomUUID()
-            });
-          });
+          scheduler.restart(runScheduledTask);
           return sendJson(response, 200, { ok: true, restarted: service, correlationId });
         }
         if (service === "agent-core") {
