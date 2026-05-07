@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { getDatabase } from "../storage/sqlite.js";
 import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
@@ -25,6 +25,10 @@ type UpdateStatus = {
   lastCheckedAt?: string;
   lastAppliedAt?: string;
   lastError?: string;
+  /** Set when the supervisor rolled back the most recent update because the new code never became healthy. */
+  lastRollback?: { at: string; toCommitSha: string };
+  /** Set while we're between an applied update and the supervisor confirming it's healthy / rolled back. */
+  pendingPostUpdateProbe?: { previousCommitSha: string; appliedAt: string };
 };
 
 export class UpdateManager {
@@ -123,6 +127,7 @@ export class UpdateManager {
     }>;
     const lastCheck = row.find((item) => item.event_type === "check");
     const lastApply = row.find((item) => item.event_type === "apply");
+    const repoRoot = resolveNovaRepoRoot();
     return {
       installedAt,
       latestPushedAt: lastCheck?.target_version,
@@ -131,7 +136,9 @@ export class UpdateManager {
         new Date(lastCheck?.target_version ?? "1970-01-01T00:00:00.000Z").getTime() > new Date(installedAt).getTime(),
       lastCheckedAt: lastCheck?.created_at,
       lastAppliedAt: lastApply?.status === "success" ? lastApply.created_at : undefined,
-      lastError: lastApply?.status === "failed" ? lastApply.details : undefined
+      lastError: lastApply?.status === "failed" ? lastApply.details : undefined,
+      lastRollback: readRollbackDoneMarker(repoRoot),
+      pendingPostUpdateProbe: readRollbackMarker(repoRoot)
     };
   }
 
@@ -245,6 +252,10 @@ export class UpdateManager {
     const pnpmInstallCmd = "(corepack pnpm install || pnpm install || npx --yes pnpm install)";
     const pnpmBuildCmd = "(corepack pnpm -r build || pnpm -r build || npx --yes pnpm -r build)";
     const cmd = includeBuild ? `git pull && ${pnpmInstallCmd} && ${pnpmBuildCmd}` : `git pull && ${pnpmInstallCmd}`;
+    const prevSha = captureCurrentCommitSha(repoRoot);
+    if (prevSha) {
+      writeUpdateRollbackMarker(repoRoot, prevSha);
+    }
     const result = spawnSync(cmd, {
       cwd: repoRoot,
       shell: true,
@@ -252,6 +263,8 @@ export class UpdateManager {
       env: gitSafeDirectoryEnvForRepo(repoRoot)
     });
     if (result.status !== 0) {
+      // Update never made it to a runnable state — clear the marker so the supervisor doesn't try to roll back later.
+      removeUpdateRollbackMarker(repoRoot);
       return { ok: false, message: (result.stderr || result.stdout || "update command failed").slice(0, 2000) };
     }
     chownRepoGitIfConfigured(repoRoot);
@@ -284,5 +297,73 @@ export class UpdateManager {
         `
       )
       .run(randomUUID(), eventType, status, currentVersion, targetVersion ?? null, details ?? null);
+  }
+}
+
+/**
+ * Capture the current HEAD SHA so the supervisor can roll back to it if the post-update
+ * stack never becomes healthy (broken code, broken deps, missing helper, etc).
+ */
+function captureCurrentCommitSha(repoRoot: string): string {
+  const result = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: repoRoot,
+    shell: false,
+    encoding: "utf8",
+    env: gitSafeDirectoryEnvForRepo(repoRoot)
+  });
+  if (result.status !== 0) return "";
+  return (result.stdout ?? "").trim();
+}
+
+function writeUpdateRollbackMarker(repoRoot: string, prevSha: string): void {
+  try {
+    const dir = resolve(repoRoot, "tmp");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      resolve(dir, ".nova-update-applied"),
+      `prev_sha=${prevSha}\napplied_at=${new Date().toISOString()}\n`,
+      "utf8"
+    );
+  } catch {
+    // non-fatal: rollback marker is a best-effort safety net
+  }
+}
+
+function removeUpdateRollbackMarker(repoRoot: string): void {
+  try {
+    const file = resolve(repoRoot, "tmp", ".nova-update-applied");
+    if (existsSync(file)) {
+      unlinkSync(file);
+    }
+  } catch {
+    // non-fatal
+  }
+}
+
+function readRollbackMarker(repoRoot: string): { previousCommitSha: string; appliedAt: string } | undefined {
+  try {
+    const file = resolve(repoRoot, "tmp", ".nova-update-applied");
+    if (!existsSync(file)) return undefined;
+    const text = readFileSync(file, "utf8");
+    const prevSha = /^prev_sha=(.+)$/m.exec(text)?.[1]?.trim() ?? "";
+    const appliedAt = /^applied_at=(.+)$/m.exec(text)?.[1]?.trim() ?? "";
+    if (!prevSha) return undefined;
+    return { previousCommitSha: prevSha, appliedAt: appliedAt || new Date().toISOString() };
+  } catch {
+    return undefined;
+  }
+}
+
+function readRollbackDoneMarker(repoRoot: string): { at: string; toCommitSha: string } | undefined {
+  try {
+    const file = resolve(repoRoot, "tmp", ".nova-update-rolled-back");
+    if (!existsSync(file)) return undefined;
+    const text = readFileSync(file, "utf8").trim();
+    // Format written by start-local.sh: "<ISO timestamp> rolled-back-to=<sha>"
+    const match = /^(\S+)\s+rolled-back-to=(\S+)/.exec(text);
+    if (!match) return undefined;
+    return { at: match[1], toCommitSha: match[2] };
+  } catch {
+    return undefined;
   }
 }

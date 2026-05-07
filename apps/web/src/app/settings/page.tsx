@@ -98,6 +98,8 @@ type UpdateStatus = {
   lastCheckedAt?: string;
   lastAppliedAt?: string;
   lastError?: string;
+  lastRollback?: { at: string; toCommitSha: string };
+  pendingPostUpdateProbe?: { previousCommitSha: string; appliedAt: string };
 };
 type SettingsState = {
   delegatedFolders: string[];
@@ -3619,6 +3621,18 @@ export default function SettingsPage() {
                 <div>Available: {updateStatus.updateAvailable ? "Yes" : "No"}</div>
                 <div>Last checked: {updateStatus.lastCheckedAt ? new Date(updateStatus.lastCheckedAt).toLocaleString() : "-"}</div>
                 <div>Last applied: {updateStatus.lastAppliedAt ? new Date(updateStatus.lastAppliedAt).toLocaleString() : "-"}</div>
+                {updateStatus.pendingPostUpdateProbe ? (
+                  <div className="text-amber-600 dark:text-amber-300">
+                    Post-update health probe in progress. If Nova does not become healthy, the supervisor will roll back to{" "}
+                    <code>{updateStatus.pendingPostUpdateProbe.previousCommitSha.slice(0, 10)}</code> automatically.
+                  </div>
+                ) : null}
+                {updateStatus.lastRollback ? (
+                  <div className="text-amber-600 dark:text-amber-300">
+                    Last automatic rollback: {new Date(updateStatus.lastRollback.at).toLocaleString()} → reverted to{" "}
+                    <code>{updateStatus.lastRollback.toCommitSha.slice(0, 10)}</code>. The latest update was reverted because the new code never became healthy.
+                  </div>
+                ) : null}
                 {updateErrorMessage ? <div className="text-red-600">{updateErrorMessage}</div> : null}
               </div>
             ) : null}

@@ -100,6 +100,56 @@ agent_http_healthy() {
   curl -fsS --max-time 2 "http://127.0.0.1:${AGENT_PORT}/v1/health" >/dev/null 2>&1
 }
 
+# Rollback marker is written by the in-app update flow before `git pull`.
+# After an update we monitor health more aggressively; if it never comes back,
+# we reset to the previous commit so a bad release can never permanently break Nova.
+ROLLBACK_MARKER="${ROOT_DIR}/tmp/.nova-update-applied"
+ROLLBACK_DONE_MARKER="${ROOT_DIR}/tmp/.nova-update-rolled-back"
+
+read_prev_sha_from_marker() {
+  if [[ ! -f "${ROLLBACK_MARKER}" ]]; then
+    return 1
+  fi
+  PREV_SHA="$(grep -E '^prev_sha=' "${ROLLBACK_MARKER}" 2>/dev/null | head -1 | sed 's/^prev_sha=//')"
+  [[ -n "${PREV_SHA}" ]]
+}
+
+rollback_to_last_good() {
+  if ! read_prev_sha_from_marker; then
+    echo "rollback: no usable prev_sha marker; clearing marker only"
+    rm -f "${ROLLBACK_MARKER}"
+    return 0
+  fi
+  echo "rollback: agent never came back healthy after update; resetting repo to ${PREV_SHA}"
+  (
+    cd "${ROOT_DIR}" || exit 0
+    git reset --hard "${PREV_SHA}" || echo "rollback: git reset --hard failed (continuing)"
+    run_pnpm install || echo "rollback: pnpm install failed (continuing)"
+  )
+  if [[ -n "${NOVA_REPO_GIT_CHOWN:-}" ]]; then
+    chown -R "${NOVA_REPO_GIT_CHOWN}" "${ROOT_DIR}/.git" 2>/dev/null || true
+  fi
+  date -u +"%Y-%m-%dT%H:%M:%SZ rolled-back-to=${PREV_SHA}" > "${ROLLBACK_DONE_MARKER}" 2>/dev/null || true
+  rm -f "${ROLLBACK_MARKER}"
+  rm -rf "${ROOT_DIR}/apps/web/.next" 2>/dev/null || true
+}
+
+# Drop stale markers older than 24h — an old marker means the supervisor never restarted
+# to do its post-update probe, so the agent has obviously been running fine on the new commit.
+prune_stale_rollback_marker() {
+  if [[ ! -f "${ROLLBACK_MARKER}" ]]; then
+    return 0
+  fi
+  local mtime now age
+  mtime="$(stat -f %m "${ROLLBACK_MARKER}" 2>/dev/null || stat -c %Y "${ROLLBACK_MARKER}" 2>/dev/null || echo 0)"
+  now="$(date +%s)"
+  age=$((now - mtime))
+  if [[ "${age}" -gt 86400 ]]; then
+    echo "rollback: clearing stale update marker (age=${age}s)"
+    rm -f "${ROLLBACK_MARKER}"
+  fi
+}
+
 trap 'echo "Stopping Nova local stack..."; cleanup; exit 0' INT TERM
 
 echo "Starting Nova local stack supervisor..."
@@ -147,6 +197,14 @@ while true; do
     echo "Cleared apps/web/.next after in-app update (avoids stale Next dev chunks)."
   fi
 
+  prune_stale_rollback_marker
+
+  POST_UPDATE_PROBE=0
+  if [[ -f "${ROLLBACK_MARKER}" ]]; then
+    POST_UPDATE_PROBE=1
+    echo "post-update health probe armed (marker: ${ROLLBACK_MARKER})"
+  fi
+
   free_tcp_port_if_requested
 
   echo "Launching agent-core and web..."
@@ -178,16 +236,36 @@ while true; do
 
   # If either process exits (for example after update apply), restart both.
   AGENT_HEALTH_FAILS=0
-  AGENT_HEALTH_GRACE_UNTIL=$((SECONDS + ${NOVA_AGENT_HEALTH_GRACE_SECONDS:-25}))
+  if [[ "${POST_UPDATE_PROBE}" -eq 1 ]]; then
+    # First boot after an update may take longer (cold install, fresh tsx watch warmup).
+    AGENT_HEALTH_GRACE_UNTIL=$((SECONDS + ${NOVA_POST_UPDATE_GRACE_SECONDS:-90}))
+    AGENT_HEALTH_FAIL_THRESHOLD="${NOVA_POST_UPDATE_FAIL_THRESHOLD:-4}"
+  else
+    AGENT_HEALTH_GRACE_UNTIL=$((SECONDS + ${NOVA_AGENT_HEALTH_GRACE_SECONDS:-25}))
+    AGENT_HEALTH_FAIL_THRESHOLD="${NOVA_AGENT_HEALTH_FAIL_THRESHOLD:-3}"
+  fi
   AGENT_HEALTH_EVERY_SECONDS="${NOVA_AGENT_HEALTH_EVERY_SECONDS:-5}"
   NEXT_AGENT_HEALTH_AT=0
+  POST_UPDATE_DEADLINE=$((SECONDS + ${NOVA_POST_UPDATE_DEADLINE_SECONDS:-300}))
   while true; do
     if ! kill -0 "${AGENT_PID}" 2>/dev/null; then
+      if [[ "${POST_UPDATE_PROBE}" -eq 1 ]]; then
+        echo "post-update: agent-core process died; rolling back to last known good commit"
+        cleanup
+        rollback_to_last_good
+        break
+      fi
       echo "agent-core exited; restarting full stack..."
       cleanup
       break
     fi
     if ! kill -0 "${WEB_PID}" 2>/dev/null; then
+      if [[ "${POST_UPDATE_PROBE}" -eq 1 ]]; then
+        echo "post-update: web process died; rolling back to last known good commit"
+        cleanup
+        rollback_to_last_good
+        break
+      fi
       echo "web exited; restarting full stack..."
       cleanup
       break
@@ -196,15 +274,33 @@ while true; do
       NEXT_AGENT_HEALTH_AT=$((SECONDS + AGENT_HEALTH_EVERY_SECONDS))
       if agent_http_healthy; then
         AGENT_HEALTH_FAILS=0
+        if [[ "${POST_UPDATE_PROBE}" -eq 1 ]]; then
+          echo "post-update: agent-core healthy on port ${AGENT_PORT}; clearing rollback marker"
+          rm -f "${ROLLBACK_MARKER}"
+          POST_UPDATE_PROBE=0
+        fi
       else
         AGENT_HEALTH_FAILS=$((AGENT_HEALTH_FAILS + 1))
-        echo "agent-core health check failed (${AGENT_HEALTH_FAILS}/3) on port ${AGENT_PORT}"
-        if [[ "${AGENT_HEALTH_FAILS}" -ge 3 ]]; then
+        echo "agent-core health check failed (${AGENT_HEALTH_FAILS}/${AGENT_HEALTH_FAIL_THRESHOLD}) on port ${AGENT_PORT}"
+        if [[ "${AGENT_HEALTH_FAILS}" -ge "${AGENT_HEALTH_FAIL_THRESHOLD}" ]]; then
+          if [[ "${POST_UPDATE_PROBE}" -eq 1 ]]; then
+            echo "post-update: agent-core repeatedly unhealthy; rolling back to last known good commit"
+            cleanup
+            rollback_to_last_good
+            break
+          fi
           echo "agent-core process is alive but HTTP is unavailable; restarting full stack..."
           cleanup
           break
         fi
       fi
+    fi
+    # Hard deadline: if the post-update stack hasn't hit healthy by NOVA_POST_UPDATE_DEADLINE_SECONDS, force rollback.
+    if [[ "${POST_UPDATE_PROBE}" -eq 1 && "${SECONDS}" -ge "${POST_UPDATE_DEADLINE}" ]]; then
+      echo "post-update: deadline exceeded without sustained healthy probe; rolling back"
+      cleanup
+      rollback_to_last_good
+      break
     fi
     sleep 1
   done
