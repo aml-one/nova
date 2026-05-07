@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -210,7 +210,7 @@ export class IdentityBackupService {
         "- Ephemeral TLS keys under tmp/ unless you copy them manually",
         "- Media uploads under data/uploads/",
         "",
-        "Git push: branches identity-backup/* go to the configured remote (Settings → Backup). Prefer a private repo + PAT when the Nova app repo is public; treat any remote that receives nova.db as sensitive.",
+        "Git push: branches identity-backup/* go to the configured remote (Settings → Backup). Each branch is an orphan commit containing ONLY this snapshot directory (no Nova source code). Prefer a private repo + SSH deploy key or PAT; treat any remote that receives nova.db as sensitive.",
         ""
       ].join("\n"),
       "utf8"
@@ -235,15 +235,39 @@ export class IdentityBackupService {
       throw new Error("identity snapshot path is outside the Git checkout; check NOVA_REPO_ROOT and working directory");
     }
     const branch = `identity-backup/${Date.now()}`;
-    const previousBranch = getCurrentBranchName(repoRoot);
+    // Parentless commit built via a temporary index — the pushed branch contains ONLY the snapshot
+    // files, never the Nova source tree. The current branch / working tree are untouched.
+    const tempIndex = resolve(repoRoot, ".git", `index.identity-backup-${Date.now()}-${randomUUID()}`);
+    const env = { ...gitEnv(repoRoot), GIT_INDEX_FILE: tempIndex };
     try {
-      runGit(["checkout", "-B", branch]);
-      runGit(["add", relativePath]);
-      runGit(["commit", "-m", `chore(backup): add identity snapshot ${new Date().toISOString()}`]);
-      runGit(["push", "-u", gitRemote, branch]);
+      runGitInEnv(["read-tree", "--empty"], env);
+      runGitInEnv(["add", "--force", "--", relativePath], env);
+      const treeSha = runGitInEnv(["write-tree"], env).trim();
+      if (!treeSha) {
+        throw new Error("git write-tree produced no output for identity snapshot");
+      }
+      const commitMsg = `chore(backup): add identity snapshot ${new Date().toISOString()}`;
+      const commitResult = spawnSync("git", ["commit-tree", treeSha, "-m", commitMsg], {
+        cwd: repoRoot,
+        shell: false,
+        encoding: "utf8",
+        env
+      });
+      if (commitResult.status !== 0) {
+        throw new Error(identityBackupGitFailureMessage(["commit-tree"], (commitResult.stderr ?? "").trim()));
+      }
+      const commitSha = (commitResult.stdout ?? "").trim();
+      if (!commitSha) {
+        throw new Error("git commit-tree produced no output for identity snapshot");
+      }
+      runGit(["push", gitRemote, `${commitSha}:refs/heads/${branch}`]);
       return branch;
     } finally {
-      checkoutRestoreAfterBackup(repoRoot, previousBranch);
+      try {
+        unlinkSync(tempIndex);
+      } catch {
+        // best-effort: temp index is harmless if it lingers
+      }
       chownRepoGitIfConfigured(repoRoot);
     }
   }
@@ -319,51 +343,18 @@ function gitEnv(cwd: string): NodeJS.ProcessEnv {
   };
 }
 
-/** Empty when detached HEAD or unreadable. */
-function getCurrentBranchName(repoRoot: string): string | undefined {
-  const result = spawnSync("git", ["branch", "--show-current"], {
-    cwd: repoRoot,
-    shell: false,
-    encoding: "utf8",
-    env: gitEnv(repoRoot)
-  });
-  if (result.status !== 0) {
-    return undefined;
-  }
-  const name = (result.stdout ?? "").trim();
-  return name.length > 0 ? name : undefined;
-}
-
-/**
- * Return to the branch we were on before identity-backup checkout, so `git pull` and dev workflows keep working.
- * Best-effort: never throws.
- */
-function checkoutRestoreAfterBackup(repoRoot: string, previousBranch: string | undefined): void {
-  const tryCheckout = (ref: string): boolean => {
-    const r = spawnSync("git", ["checkout", ref], {
-      cwd: repoRoot,
-      shell: false,
-      encoding: "utf8",
-      env: gitEnv(repoRoot)
-    });
-    return r.status === 0;
-  };
-  if (previousBranch && !previousBranch.startsWith("identity-backup/") && tryCheckout(previousBranch)) {
-    return;
-  }
-  if (tryCheckout("main")) {
-    return;
-  }
-  void tryCheckout("master");
-}
-
 function runGit(args: string[]): string {
+  const cwd = gitWorkTree();
+  return runGitInEnv(args, gitEnv(cwd));
+}
+
+function runGitInEnv(args: string[], env: NodeJS.ProcessEnv): string {
   const cwd = gitWorkTree();
   const result = spawnSync("git", args, {
     cwd,
     shell: false,
     encoding: "utf8",
-    env: gitEnv(cwd)
+    env
   });
   if (result.status !== 0) {
     const stderr = (result.stderr ?? "").trim();
