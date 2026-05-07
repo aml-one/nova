@@ -142,6 +142,8 @@ const NOVA_CHAT_MIC_SILENCE_MIN_RECORD_MS = 520;
 /** Web Speech anti-hallucination: only accept text near detected speech energy. */
 const NOVA_CHAT_WEB_SPEECH_ENERGY_RMS_THRESHOLD = 0.018;
 const NOVA_CHAT_WEB_SPEECH_ENERGY_WINDOW_MS = 2200;
+/** Stop voice re-listen if the user stays silent; never transcribe pure room tone. */
+const NOVA_CHAT_STT_NO_SPEECH_STOP_MS = 8000;
 const NOVA_CHAT_STT_SERVER_HINT =
   "Server speech-to-text is not configured on the agent (set OPENAI_API_KEY or NOVA_STT_COMMAND). Use Chrome or Edge for in-browser dictation, or configure the agent.";
 
@@ -519,7 +521,7 @@ function ChatSessionHeaderControls({
               <div className="min-w-0 pr-1">
                 <span className="text-xs text-text">Auto-send after silence</span>
                 <p className="mt-0.5 text-[10px] leading-snug text-muted">
-                  Sends the composer when dictation pauses (delay in Settings → General).
+                  Sends only STT-created drafts when dictation pauses (never typed text).
                 </p>
               </div>
               <IosSwitch
@@ -665,6 +667,7 @@ export default function HomePage() {
   const chatSttChunksRef = useRef<BlobPart[]>([]);
   const chatMicSilenceRafRef = useRef<number | null>(null);
   const chatMicSilenceCtxRef = useRef<AudioContext | null>(null);
+  const chatMicHeardSpeechRef = useRef(false);
   const chatWebSpeechEnergyRafRef = useRef<number | null>(null);
   const chatWebSpeechEnergyCtxRef = useRef<AudioContext | null>(null);
   const chatWebSpeechEnergyStreamRef = useRef<MediaStream | null>(null);
@@ -684,6 +687,8 @@ export default function HomePage() {
   const chatFormRef = useRef<HTMLFormElement | null>(null);
   const dictationAutoSendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messageRef = useRef("");
+  /** True only when the current composer draft was produced/modified by STT, never by keyboard typing. */
+  const messageDraftHasVoiceInputRef = useRef(false);
   const loadingRef = useRef(false);
   const voiceDictationAutoSendRef = useRef(false);
   const voiceDictationSilenceSecRef = useRef(2);
@@ -1578,7 +1583,7 @@ export default function HomePage() {
       return;
     }
     const trimmed = message.trim();
-    if (!trimmed) {
+    if (!trimmed || !messageDraftHasVoiceInputRef.current) {
       if (dictationAutoSendTimerRef.current) {
         clearTimeout(dictationAutoSendTimerRef.current);
         dictationAutoSendTimerRef.current = null;
@@ -1593,7 +1598,7 @@ export default function HomePage() {
       dictationAutoSendTimerRef.current = null;
       if (!voiceDictationAutoSendRef.current || loadingRef.current || sttTranscribingRef.current) return;
       const m = messageRef.current.trim();
-      if (!m) return;
+      if (!m || !messageDraftHasVoiceInputRef.current) return;
       voiceDictationAutoSubmitRef.current = true;
       chatFormRef.current?.requestSubmit();
     }, ms);
@@ -1890,11 +1895,15 @@ export default function HomePage() {
       const now = performance.now();
       if (rms > NOVA_CHAT_MIC_SILENCE_RMS_THRESHOLD) {
         heardSpeech = true;
+        chatMicHeardSpeechRef.current = true;
         lastAbove = now;
       }
       const quietFor = now - lastAbove;
       const elapsed = now - t0;
-      if (heardSpeech && elapsed >= NOVA_CHAT_MIC_SILENCE_MIN_RECORD_MS && quietFor >= silenceMs) {
+      if (
+        (heardSpeech && elapsed >= NOVA_CHAT_MIC_SILENCE_MIN_RECORD_MS && quietFor >= silenceMs) ||
+        (!heardSpeech && elapsed >= NOVA_CHAT_STT_NO_SPEECH_STOP_MS)
+      ) {
         disarmChatMicSilenceMonitor();
         try {
           if (recorder.state === "recording") {
@@ -1936,6 +1945,7 @@ export default function HomePage() {
         return;
       }
       sttServerConfiguredRef.current = true;
+      messageDraftHasVoiceInputRef.current = true;
       setMessage((prev) => (prev.trim().length ? `${prev.trim()} ${transcript}` : transcript));
     } catch {
       setSttError("Could not transcribe audio.");
@@ -1955,6 +1965,7 @@ export default function HomePage() {
     const recorder = new MediaRecorder(stream);
     chatSttRecorderRef.current = recorder;
     chatSttChunksRef.current = [];
+    chatMicHeardSpeechRef.current = false;
     recorder.ondataavailable = (event) => {
       if (event.data && event.data.size > 0) chatSttChunksRef.current.push(event.data);
     };
@@ -1968,9 +1979,12 @@ export default function HomePage() {
       chatSttRecorderRef.current = null;
       setSttRecording(false);
       sttRecordingRef.current = false;
-      if (blob.size >= NOVA_CHAT_STT_MIN_AUDIO_BYTES) {
+      if (chatMicHeardSpeechRef.current && blob.size >= NOVA_CHAT_STT_MIN_AUDIO_BYTES) {
         void transcribeBlobToMessage(blob);
+      } else {
+        setSttError("No speech detected.");
       }
+      chatMicHeardSpeechRef.current = false;
     };
     recorder.start();
     armChatMicSilenceMonitor(stream, recorder);
@@ -2050,6 +2064,7 @@ export default function HomePage() {
             const prefix = sttWebSpeechPrefixRef.current;
             const spoken = sttWebAcceptedChunksRef.current.join(" ").trim();
             const next = spoken ? (prefix ? `${prefix} ${spoken}` : spoken) : prefix;
+            messageDraftHasVoiceInputRef.current = true;
             setMessage(next.trim());
           };
           rec.onerror = (event: SpeechRecognitionErrorEvent) => {
@@ -2176,11 +2191,12 @@ export default function HomePage() {
     voiceDictationAutoSubmitRef.current = false;
     sttRecordingRef.current = sttRecording;
     sttTranscribingRef.current = sttTranscribing;
-    const viaActiveMic = sttRecording || sttTranscribing;
-    replyChainsVoiceListeningRef.current = Boolean(viaVoiceAutoSend || viaActiveMic);
+    const viaVoiceDraft = messageDraftHasVoiceInputRef.current;
+    replyChainsVoiceListeningRef.current = Boolean(viaVoiceDraft && (viaVoiceAutoSend || sttRecording || sttTranscribing));
     stopMicTranscription();
     const trimmed = message.trim();
     if (!trimmed || loading) return;
+    messageDraftHasVoiceInputRef.current = false;
     const streamAbort = new AbortController();
     streamAbortRef.current = streamAbort;
     const readyUploads = await ensureUploads(streamAbort.signal);
@@ -3153,7 +3169,14 @@ export default function HomePage() {
             </button>
             <textarea
               value={message}
-              onChange={(event) => setMessage(event.target.value)}
+              onChange={(event) => {
+                messageDraftHasVoiceInputRef.current = false;
+                if (dictationAutoSendTimerRef.current) {
+                  clearTimeout(dictationAutoSendTimerRef.current);
+                  dictationAutoSendTimerRef.current = null;
+                }
+                setMessage(event.target.value);
+              }}
               onKeyDown={(event) => {
                 if (!sendOnEnter) return;
                 if (event.key === "Enter" && !event.shiftKey) {
