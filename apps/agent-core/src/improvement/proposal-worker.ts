@@ -34,12 +34,19 @@ import { gitSafeDirectoryEnvForRepo } from "../util/git-safe-directory-env.js";
 import type { ImprovementProposal } from "./improvement-proposal-repository.js";
 
 export type ProposalWorkerOutcome =
-  | { kind: "implemented"; reason: string; files: string[]; commitSha?: string }
+  | { kind: "implemented"; reason: string; files: string[]; commitSha?: string; provider?: string; model?: string }
   | { kind: "needs_human"; reason: string }
   | { kind: "not_applicable"; reason: string };
 
+export type ProposalWorkerSettingsView = {
+  activeProvider: "ollama" | "lmstudio" | "copilot";
+  models: { defaultByProvider: { ollama: string; lmstudio: string; copilot: string } };
+};
+
 export type ProposalWorkerOptions = {
   modelRouter?: ModelRouter;
+  /** Used to pick the configured default model id when Copilot wins the code-drafting race. */
+  getSettings?: () => ProposalWorkerSettingsView;
   /** Override the default safe roots (paths are resolved relative to the repo root). */
   safeRoots?: string[];
   /** Override the daily cap. */
@@ -110,6 +117,7 @@ export class ProposalWorker {
   private readonly dailyCap: number;
   private readonly counterPath: string;
   private readonly modelRouter?: ModelRouter;
+  private readonly getSettings?: () => ProposalWorkerSettingsView;
 
   constructor(options: ProposalWorkerOptions = {}) {
     this.repoRoot = options.repoRoot ?? resolveNovaRepoRoot();
@@ -118,6 +126,7 @@ export class ProposalWorker {
     this.counterPath =
       options.counterPath ?? resolve(this.repoRoot, "data", "state", "proposal-worker-counter.json");
     this.modelRouter = options.modelRouter;
+    this.getSettings = options.getSettings;
   }
 
   async run(proposal: ImprovementProposal): Promise<ProposalWorkerOutcome> {
@@ -152,7 +161,7 @@ export class ProposalWorker {
 
     const backup = readBackup(target.absolutePath);
     try {
-      writeFileEnsured(target.absolutePath, draft);
+      writeFileEnsured(target.absolutePath, draft.content);
       const tsResult = this.runTypecheck(target.absolutePath);
       if (tsResult.kind === "skipped") {
         return rollbackBackup(backup, {
@@ -168,11 +177,14 @@ export class ProposalWorker {
       }
       const commit = this.commitChange(proposal, target);
       this.incrementDailyCount(todayKey);
+      const providerLabel = draft.provider ? ` via ${draft.provider}${draft.model ? `/${draft.model}` : ""}` : "";
       return {
         kind: "implemented",
-        reason: `Autonomously applied proposal (${target.action} ${target.relativePath}); typecheck passed${commit ? `; commit ${commit.slice(0, 10)}` : ""}`,
+        reason: `Autonomously applied proposal${providerLabel} (${target.action} ${target.relativePath}); typecheck passed${commit ? `; commit ${commit.slice(0, 10)}` : ""}`,
         files: [target.relativePath],
-        commitSha: commit
+        commitSha: commit,
+        provider: draft.provider,
+        model: draft.model
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -202,20 +214,27 @@ export class ProposalWorker {
     return undefined;
   }
 
-  private async draftFileContent(proposal: ImprovementProposal, target: ParsedTarget): Promise<string | undefined> {
+  private async draftFileContent(
+    proposal: ImprovementProposal,
+    target: ParsedTarget
+  ): Promise<{ content: string; provider?: string; model?: string } | undefined> {
     const router = this.modelRouter;
     if (!router) return undefined;
     const existing = target.action === "edit" && existsSync(target.absolutePath)
       ? readFileSync(target.absolutePath, "utf8")
       : undefined;
     const messages: ChatMessage[] = buildPrompt(proposal, target, existing);
+    // Code drafting always prefers Copilot (it's the strongest at structured code output);
+    // falls back to local providers only if Copilot is disabled, unhealthy, or in backoff.
+    const settings = this.getSettings?.();
+    const preferredModel = pickPreferredModelForCodeDrafting(settings);
     try {
-      const response = await router.chatLocalFirst(messages);
+      const response = await router.chatPreferCopilot(messages, preferredModel);
       const cleaned = stripCodeFences(response.content);
       if (!isPlausibleCode(cleaned, target.absolutePath)) {
         return undefined;
       }
-      return cleaned;
+      return { content: cleaned, provider: response.provider, model: response.model };
     } catch {
       return undefined;
     }
@@ -409,6 +428,20 @@ function isPlausibleCode(content: string, absolutePath: string): boolean {
     return /[{};=]|export |import |function |const |class /.test(content);
   }
   return true;
+}
+
+/**
+ * Pick the best model id for code drafting. Strongly prefers the configured Copilot model
+ * (since `chatPreferCopilot` will try Copilot first); if no Copilot model is configured
+ * we fall back to the active provider's default so local providers still get a sensible id
+ * if they end up handling the request.
+ */
+function pickPreferredModelForCodeDrafting(settings: ProposalWorkerSettingsView | undefined): string | undefined {
+  if (!settings) return undefined;
+  const copilotModel = settings.models.defaultByProvider.copilot?.trim();
+  if (copilotModel) return copilotModel;
+  const activeModel = settings.models.defaultByProvider[settings.activeProvider]?.trim();
+  return activeModel || undefined;
 }
 
 function pickTypecheckProject(absolutePath: string, repoRoot: string): string | undefined {

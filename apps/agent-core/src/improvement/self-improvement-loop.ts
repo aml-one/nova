@@ -528,7 +528,24 @@ export class SelfImprovementLoop {
       this.proposalRepo.setStatus(next.id, "in_progress", "Nova picked up approved proposal", "nova");
     }
 
-    const worker = new ProposalWorker({ modelRouter: this.modelRouter });
+    const worker = new ProposalWorker({
+      modelRouter: this.modelRouter,
+      getSettings: this.getSettings
+        ? () => {
+            const s = this.getSettings!();
+            return {
+              activeProvider: s.activeProvider,
+              models: {
+                defaultByProvider: {
+                  ollama: s.models.defaultByProvider.ollama,
+                  lmstudio: s.models.defaultByProvider.lmstudio,
+                  copilot: s.models.defaultByProvider.copilot
+                }
+              }
+            };
+          }
+        : undefined
+    });
     const workerOutcome = await worker.run(next);
 
     if (workerOutcome.kind === "implemented") {
@@ -550,7 +567,9 @@ export class SelfImprovementLoop {
           proposalTitle: next.title,
           status: "implemented",
           files: workerOutcome.files,
-          commitSha: workerOutcome.commitSha
+          commitSha: workerOutcome.commitSha,
+          provider: workerOutcome.provider,
+          model: workerOutcome.model
         }
       );
       return `idle cycle implemented accepted proposal: ${next.title}`;

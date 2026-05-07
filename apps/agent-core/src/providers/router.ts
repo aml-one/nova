@@ -125,6 +125,71 @@ export class ModelRouter {
     throw lastError ?? new Error("no model providers are available");
   }
 
+  /**
+   * Code-drafting path: prefer Copilot first (it's the strongest at structured code output),
+   * then fall back to local providers (Ollama, then LM Studio) if Copilot is unavailable,
+   * disabled, or in circuit-breaker backoff. Used by the autonomous proposal worker so
+   * Nova always reaches for the best code model first when self-implementing proposals.
+   */
+  async chatPreferCopilot(messages: ChatMessage[], model?: string): Promise<ModelResponse> {
+    await this.maybeRefreshHealth();
+    const preferredOrder = ["copilot", "ollama", "lmstudio"] as const;
+    const ordered = preferredOrder
+      .filter((name) => name !== "copilot" || !isCopilotIntegrationDisabled())
+      .filter((name) => name !== "ollama" || !isOllamaIntegrationDisabled())
+      .filter((name) => name !== "lmstudio" || !isLmStudioIntegrationDisabled())
+      .map((name) => this.providers.find((provider) => provider.name === name))
+      .filter((provider): provider is (typeof this.providers)[number] => Boolean(provider));
+    let lastError: Error | undefined;
+    let attempted = false;
+    for (const provider of ordered) {
+      const providerState = this.state.get(provider.name);
+      if (!providerState || providerState.openUntil > Date.now()) {
+        continue;
+      }
+      attempted = true;
+      try {
+        const request: ChatRequest = { messages, model };
+        const response = await provider.chat(request);
+        providerState.failures = 0;
+        providerState.openUntil = 0;
+        return response;
+      } catch (error) {
+        providerState.failures += 1;
+        const backoff = Math.min(
+          providerState.maxBackoffMs,
+          providerState.baseBackoffMs * Math.pow(2, Math.max(0, providerState.failures - 1))
+        );
+        providerState.openUntil = Date.now() + backoff;
+        lastError = error instanceof Error ? error : new Error("provider request failed");
+      }
+    }
+    if (!attempted) {
+      for (const provider of ordered) {
+        const providerState = this.state.get(provider.name);
+        if (!providerState) {
+          continue;
+        }
+        try {
+          const request: ChatRequest = { messages, model };
+          const response = await provider.chat(request);
+          providerState.failures = 0;
+          providerState.openUntil = 0;
+          return response;
+        } catch (error) {
+          providerState.failures += 1;
+          const backoff = Math.min(
+            providerState.maxBackoffMs,
+            providerState.baseBackoffMs * Math.pow(2, Math.max(0, providerState.failures - 1))
+          );
+          providerState.openUntil = Date.now() + backoff;
+          lastError = error instanceof Error ? error : new Error("provider request failed");
+        }
+      }
+    }
+    throw lastError ?? new Error("no model providers are available");
+  }
+
   async chatLocalFirst(messages: ChatMessage[], model?: string): Promise<ModelResponse> {
     await this.maybeRefreshHealth();
     const preferredOrder = ["ollama", "lmstudio", "copilot"] as const;
