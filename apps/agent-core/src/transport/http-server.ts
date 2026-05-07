@@ -3108,15 +3108,27 @@ function checkSecurityConfig(): HealthCheckResult[] {
     {
       id: "webhook-whatsapp-secret",
       name: "WhatsApp Webhook Signature",
+      // WhatsApp Cloud API actually signs webhooks with the App Secret, so configuring it is a real
+      // hardening win. Without it we accept all unsigned posts (still safe on loopback, but visibly
+      // weaker), so flag it as a soft warning rather than a failure.
       level: process.env.WHATSAPP_APP_SECRET ? "green" : "orange",
-      detail: process.env.WHATSAPP_APP_SECRET ? "secret configured" : "signature secret missing",
+      detail: process.env.WHATSAPP_APP_SECRET
+        ? "secret configured (HMAC enforced on inbound /v1/webhooks/whatsapp)"
+        : "optional: set WHATSAPP_APP_SECRET to enforce HMAC on inbound /v1/webhooks/whatsapp (only WhatsApp Cloud signs; not WhatsApp Web)",
       fingerprint: fingerprintSecret(process.env.WHATSAPP_APP_SECRET)
     },
     {
       id: "webhook-signal-secret",
       name: "Signal Webhook Signature",
-      level: process.env.SIGNAL_WEBHOOK_SECRET ? "green" : "orange",
-      detail: process.env.SIGNAL_WEBHOOK_SECRET ? "secret configured" : "signature secret missing",
+      // signal-cli-rest-api (bbernhard's image, the one Nova bootstraps as the bridge) does not sign
+      // its outgoing webhook posts at all, and inbound /v1/webhooks/signal is loopback-only. Setting
+      // SIGNAL_WEBHOOK_SECRET would actively BREAK reception (verifier would reject every unsigned
+      // request) — so the unset state is both correct and the recommended posture, while the SET
+      // state is what should actually warn the operator.
+      level: process.env.SIGNAL_WEBHOOK_SECRET ? "orange" : "green",
+      detail: process.env.SIGNAL_WEBHOOK_SECRET
+        ? "WARNING: signal-cli-rest-api does not sign webhooks; with a secret set, every inbound Signal post is rejected. Unset SIGNAL_WEBHOOK_SECRET to receive messages."
+        : "not required — signal-cli-rest-api does not sign webhooks; inbound /v1/webhooks/signal is loopback-only. Leave SIGNAL_WEBHOOK_SECRET unset.",
       fingerprint: fingerprintSecret(process.env.SIGNAL_WEBHOOK_SECRET)
     },
     {
