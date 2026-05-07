@@ -1242,26 +1242,24 @@ export default function SettingsPage() {
         dockerPromise
       ]);
       if (!msgRes.ok) {
+        // Transient errors (agent-core restart, brief 401 during session refresh, 5xx) must not wipe
+        // the visible trace — the entries are still in the backend buffer once the connection recovers.
         setChannelDebugError(msgData.error ?? `HTTP ${msgRes.status}`);
-        setChannelDebugEntries([]);
       } else {
         setChannelDebugEntries(Array.isArray(msgData.items) ? msgData.items : []);
       }
       if (!dockerRes.ok) {
-        setSignalDockerLogs("");
         setSignalDockerNote(dockerData.error ?? `Docker logs HTTP ${dockerRes.status}`);
       } else if (dockerData.ok === false) {
-        setSignalDockerLogs("");
         setSignalDockerNote(dockerData.detail ?? dockerData.error ?? "Docker logs unavailable on this host.");
       } else {
         setSignalDockerLogs(typeof dockerData.logs === "string" ? dockerData.logs : "");
         setSignalDockerNote(null);
       }
     } catch (e) {
+      // Network-level failure: surface the message but keep the previously rendered entries visible
+      // so a momentary outage doesn't blank the page.
       setChannelDebugError(e instanceof Error ? e.message : String(e));
-      setChannelDebugEntries([]);
-      setSignalDockerLogs("");
-      setSignalDockerNote(null);
     } finally {
       setChannelDebugLoading(false);
     }
