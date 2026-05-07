@@ -3185,33 +3185,36 @@ async function checkSignalConnectionForBase(baseUrl: string): Promise<{ ok: bool
   return { ok: false, detail: "endpoint returned 404 (tried /v1/about, /about, and base URL)" };
 }
 
-function isLoopbackWebOrigin(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
-}
-
 /**
  * Browser sends Settings origin for webhook URL. Inside Docker, `localhost` is the container,
  * not the Mac host — same-machine setups must use host.docker.internal to reach agent-core.
+ *
+ * For the typical "Mac runs both the bridge container and agent-core" case (which is what Nova
+ * actually bootstraps via `ensureSignalDockerBridge`), we ALWAYS prefer the host.docker.internal
+ * path — using the browser's https://nova/... origin would force the bridge to hit the Next.js
+ * dev TLS cert, which is only valid for `localhost` / `127.0.0.1`, so signal-cli-rest-api refuses
+ * to deliver inbound messages with `tls: failed to verify certificate: x509: certificate is valid
+ * for localhost, not nova`.
+ *
+ * Operators with a remote bridge (bridge on a different host than agent-core) should set
+ * SIGNAL_RECEIVE_WEBHOOK_URL explicitly; that takes precedence in `resolveSignalReceiveWebhookUrl`.
  */
 function buildReceiveWebhookUrlFromBootstrap(webhookPublicOrigin?: string): string | undefined {
+  const agentPort = process.env.NOVA_AGENT_PORT?.trim() || "8787";
+  const sameMachineUrl = `http://host.docker.internal:${agentPort}/v1/webhooks/signal`;
   const o = typeof webhookPublicOrigin === "string" ? webhookPublicOrigin.trim() : "";
   if (!o) {
-    return undefined;
+    return sameMachineUrl;
   }
   try {
     const withProto = /^https?:\/\//i.test(o) ? o : `https://${o}`;
     const u = new URL(withProto);
     if (!u.hostname) {
-      return undefined;
+      return sameMachineUrl;
     }
-    if (isLoopbackWebOrigin(u.hostname)) {
-      const agentPort = process.env.NOVA_AGENT_PORT?.trim() || "8787";
-      return `http://host.docker.internal:${agentPort}/v1/webhooks/signal`;
-    }
-    return `${u.origin}/api/webhooks/signal`;
+    return sameMachineUrl;
   } catch {
-    return undefined;
+    return sameMachineUrl;
   }
 }
 
