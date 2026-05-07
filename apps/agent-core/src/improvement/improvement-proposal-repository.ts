@@ -136,6 +136,56 @@ export class ImprovementProposalRepository {
     return updated;
   }
 
+  /**
+   * Edit the user-facing fields of a proposal in place. Only `title`, `summary` and `details`
+   * (the "done signal" line) are mutable; status/timestamps are managed by `setStatus` and the
+   * lifecycle helpers. Returns the updated proposal, or `undefined` if the id was not found.
+   */
+  updateContent(
+    id: string,
+    edits: { title?: string; summary?: string; details?: string | null },
+    actor: string = "user"
+  ): ImprovementProposal | undefined {
+    const before = this.getById(id);
+    if (!before) return undefined;
+    const nextTitle = edits.title !== undefined ? edits.title.trim() : before.title;
+    const nextSummary = edits.summary !== undefined ? edits.summary.trim() : before.summary;
+    const nextDetails =
+      edits.details === null
+        ? null
+        : edits.details !== undefined
+          ? edits.details.trim() || null
+          : before.details ?? null;
+    if (!nextTitle || !nextSummary) {
+      return before;
+    }
+    if (nextTitle === before.title && nextSummary === before.summary && (nextDetails ?? null) === (before.details ?? null)) {
+      return before;
+    }
+    getDatabase()
+      .prepare(
+        `
+        UPDATE improvement_proposals
+        SET title = ?, summary = ?, details = ?
+        WHERE id = ?
+        `
+      )
+      .run(nextTitle, nextSummary, nextDetails, id);
+    const noteParts: string[] = [];
+    if (nextTitle !== before.title) noteParts.push(`title updated`);
+    if (nextSummary !== before.summary) noteParts.push(`summary updated`);
+    if ((nextDetails ?? null) !== (before.details ?? null)) noteParts.push(`done signal updated`);
+    this.addEvent({
+      proposalId: id,
+      eventType: "status_changed",
+      statusFrom: before.status,
+      statusTo: before.status,
+      note: noteParts.length > 0 ? `Proposal edited: ${noteParts.join(", ")}` : "Proposal edited",
+      actor
+    });
+    return this.getById(id);
+  }
+
   hasSimilarRecent(title: string, withinHours = 24): boolean {
     const row = getDatabase()
       .prepare(

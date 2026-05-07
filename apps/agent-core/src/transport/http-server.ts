@@ -1172,6 +1172,36 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         }
         return sendJson(response, 200, { item, correlationId });
       }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/improvement/proposals/edit") {
+        const payload = (await readJson(request)) as {
+          id?: string;
+          title?: string;
+          summary?: string;
+          details?: string | null;
+        };
+        const id = payload.id?.trim() ?? "";
+        if (!id) {
+          return sendJson(response, 400, { error: "id is required", correlationId });
+        }
+        const edits: { title?: string; summary?: string; details?: string | null } = {};
+        if (typeof payload.title === "string") edits.title = payload.title;
+        if (typeof payload.summary === "string") edits.summary = payload.summary;
+        if (payload.details === null || typeof payload.details === "string") edits.details = payload.details;
+        if (Object.keys(edits).length === 0) {
+          return sendJson(response, 400, { error: "no editable fields provided", correlationId });
+        }
+        if (edits.title !== undefined && edits.title.trim().length === 0) {
+          return sendJson(response, 400, { error: "title cannot be empty", correlationId });
+        }
+        if (edits.summary !== undefined && edits.summary.trim().length === 0) {
+          return sendJson(response, 400, { error: "summary cannot be empty", correlationId });
+        }
+        const item = options.improvement.updateImprovementProposalContent(id, edits);
+        if (!item) {
+          return sendJson(response, 404, { error: "proposal not found", correlationId });
+        }
+        return sendJson(response, 200, { item, correlationId });
+      }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/improvement/proposals/events") {
         const id = (parsedUrl.searchParams.get("id") ?? "").trim();
         const limit = Math.max(10, Math.min(500, Number(parsedUrl.searchParams.get("limit") ?? "100")));

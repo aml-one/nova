@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { Textarea } from "../../components/ui/textarea";
 
 type LearningItem = {
   id: string;
@@ -67,6 +69,12 @@ export default function LearningPage() {
   const [pendingOnly, setPendingOnly] = useState(true);
   const [eventMap, setEventMap] = useState<Record<string, ImprovementProposalEvent[]>>({});
   const [expandedProposalId, setExpandedProposalId] = useState<string | null>(null);
+  const [editingProposalId, setEditingProposalId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<{ title: string; summary: string; details: string }>({
+    title: "",
+    summary: "",
+    details: ""
+  });
   const workingOnNowRef = useRef<HTMLDivElement | null>(null);
   const pendingScrollToWorkingNowRef = useRef(false);
 
@@ -114,6 +122,59 @@ export default function LearningPage() {
     if (nextStatus === "approved") {
       pendingScrollToWorkingNowRef.current = true;
     }
+    await load();
+    setBusyProposalId(null);
+  }
+
+  function startEditingProposal(proposal: ImprovementProposal): void {
+    setEditingProposalId(proposal.id);
+    setEditDraft({
+      title: proposal.title,
+      summary: proposal.summary,
+      details: proposal.details ?? ""
+    });
+  }
+
+  function cancelEditingProposal(): void {
+    setEditingProposalId(null);
+    setEditDraft({ title: "", summary: "", details: "" });
+  }
+
+  async function saveProposalEdits(id: string): Promise<void> {
+    const title = editDraft.title.trim();
+    const summary = editDraft.summary.trim();
+    if (!title) {
+      setStatus("Title cannot be empty");
+      return;
+    }
+    if (!summary) {
+      setStatus("Summary cannot be empty");
+      return;
+    }
+    setBusyProposalId(id);
+    const response = await fetch("/api/improvement/proposals/edit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        id,
+        title,
+        summary,
+        details: editDraft.details.trim() ? editDraft.details.trim() : null
+      })
+    });
+    const data = (await response.json()) as { error?: string };
+    if (!response.ok) {
+      setStatus(data.error ?? "Failed to save proposal edits");
+      setBusyProposalId(null);
+      return;
+    }
+    setStatus("Proposal updated");
+    setEventMap((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    cancelEditingProposal();
     await load();
     setBusyProposalId(null);
   }
@@ -167,6 +228,61 @@ export default function LearningPage() {
       workingOnNowRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 50);
   }, [activeProposal]);
+
+  function renderProposalEditor(proposal: ImprovementProposal): ReactNode {
+    if (editingProposalId !== proposal.id) return null;
+    return (
+      <div className="rounded-ui border bg-surface p-3 space-y-2">
+        <div className="text-xs font-medium text-muted">Edit proposal</div>
+        <label className="block text-xs text-muted">
+          Title
+          <Input
+            className="mt-1"
+            value={editDraft.title}
+            onChange={(e) => setEditDraft((d) => ({ ...d, title: e.target.value }))}
+            placeholder="Short title"
+          />
+        </label>
+        <label className="block text-xs text-muted">
+          Summary
+          <Textarea
+            className="mt-1"
+            rows={4}
+            value={editDraft.summary}
+            onChange={(e) => setEditDraft((d) => ({ ...d, summary: e.target.value }))}
+            placeholder="What should Nova do? Reference a single file path inside apps/agent-core/src/, apps/web/src/, packages/sdk/src/, or skills/."
+          />
+        </label>
+        <label className="block text-xs text-muted">
+          Done signal (optional)
+          <Textarea
+            className="mt-1"
+            rows={2}
+            value={editDraft.details}
+            onChange={(e) => setEditDraft((d) => ({ ...d, details: e.target.value }))}
+            placeholder="How Nova will know she finished (e.g. tsc passes; unit test green)."
+          />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            tone="green"
+            disabled={busyProposalId === proposal.id}
+            onClick={() => void saveProposalEdits(proposal.id)}
+          >
+            Save
+          </Button>
+          <Button type="button" tone="neutral" onClick={cancelEditingProposal}>
+            Cancel
+          </Button>
+        </div>
+        <div className="text-xs text-muted">
+          Tip: paths must live under <code>apps/agent-core/src/</code>, <code>apps/web/src/</code>,{" "}
+          <code>packages/sdk/src/</code>, or <code>skills/</code>. After saving, click <em>Re-approve &amp; Retry</em>.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -229,10 +345,25 @@ export default function LearningPage() {
               >
                 Mark Implemented
               </Button>
+              <Button
+                type="button"
+                tone="purple"
+                disabled={busyProposalId === activeProposal.id}
+                onClick={() => {
+                  if (editingProposalId === activeProposal.id) {
+                    cancelEditingProposal();
+                  } else {
+                    startEditingProposal(activeProposal);
+                  }
+                }}
+              >
+                {editingProposalId === activeProposal.id ? "Cancel Edit" : "Edit"}
+              </Button>
               <Button type="button" tone="purple" onClick={() => void toggleProposalDetails(activeProposal.id)}>
                 {expandedProposalId === activeProposal.id ? "Hide Activity" : "Show Activity"}
               </Button>
             </div>
+            {renderProposalEditor(activeProposal)}
             {expandedProposalId === activeProposal.id ? (
               <div className="rounded-ui border bg-surface p-2 text-xs">
                 {(eventMap[activeProposal.id] ?? []).length === 0 ? (
@@ -311,10 +442,25 @@ export default function LearningPage() {
                 >
                   Mark Implemented
                 </Button>
+                <Button
+                  type="button"
+                  tone="purple"
+                  disabled={busyProposalId === item.id}
+                  onClick={() => {
+                    if (editingProposalId === item.id) {
+                      cancelEditingProposal();
+                    } else {
+                      startEditingProposal(item);
+                    }
+                  }}
+                >
+                  {editingProposalId === item.id ? "Cancel Edit" : "Edit"}
+                </Button>
                 <Button type="button" tone="purple" onClick={() => void toggleProposalDetails(item.id)}>
                   {expandedProposalId === item.id ? "Hide Activity" : "Show Activity"}
                 </Button>
               </div>
+              {renderProposalEditor(item)}
               {expandedProposalId === item.id ? (
                 <div className="rounded-ui border bg-surface p-2 text-xs">
                   {(eventMap[item.id] ?? []).length === 0 ? (

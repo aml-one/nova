@@ -395,6 +395,13 @@ export class SelfImprovementLoop {
     return this.proposalRepo.setStatus(id, status, `Set by user to ${status}`, "user");
   }
 
+  updateImprovementProposalContent(
+    id: string,
+    edits: { title?: string; summary?: string; details?: string | null }
+  ): ImprovementProposal | undefined {
+    return this.proposalRepo.updateContent(id, edits, "user");
+  }
+
   listImprovementProposalEvents(id: string, limit = 100): ImprovementProposalEvent[] {
     return this.proposalRepo.listEvents(id, limit);
   }
