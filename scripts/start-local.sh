@@ -106,7 +106,9 @@ agent_http_healthy() {
   if ! command -v curl >/dev/null 2>&1; then
     return 0
   fi
-  curl -fsS --max-time 2 "http://127.0.0.1:${AGENT_PORT}/health" >/dev/null 2>&1
+  # 5s timeout (was 2s): agent-core occasionally takes a beat to respond when it's also serving
+  # the channel-debug poller, the learning daemon, and Next.js dev compilations in parallel.
+  curl -fsS --max-time 5 "http://127.0.0.1:${AGENT_PORT}/health" >/dev/null 2>&1
 }
 
 # Rollback marker is written by the in-app update flow before `git pull`.
@@ -248,10 +250,15 @@ while true; do
   if [[ "${POST_UPDATE_PROBE}" -eq 1 ]]; then
     # First boot after an update may take longer (cold install, fresh tsx watch warmup).
     AGENT_HEALTH_GRACE_UNTIL=$((SECONDS + ${NOVA_POST_UPDATE_GRACE_SECONDS:-90}))
-    AGENT_HEALTH_FAIL_THRESHOLD="${NOVA_POST_UPDATE_FAIL_THRESHOLD:-4}"
+    AGENT_HEALTH_FAIL_THRESHOLD="${NOVA_POST_UPDATE_FAIL_THRESHOLD:-6}"
   else
-    AGENT_HEALTH_GRACE_UNTIL=$((SECONDS + ${NOVA_AGENT_HEALTH_GRACE_SECONDS:-25}))
-    AGENT_HEALTH_FAIL_THRESHOLD="${NOVA_AGENT_HEALTH_FAIL_THRESHOLD:-3}"
+    # Steady-state: tsx watch occasionally drops port 8787 for ~3-10s while it recompiles after
+    # a `git pull` or file edit. With the previous default of 3 fails × 5s = 15s tolerance the
+    # supervisor would tear down the entire stack mid-recompile, wiping the in-memory channel
+    # debug buffer. 6 fails × 5s = 30s of downtime is more than enough to cover any normal hot
+    # reload, and a real hang still gets caught within a minute.
+    AGENT_HEALTH_GRACE_UNTIL=$((SECONDS + ${NOVA_AGENT_HEALTH_GRACE_SECONDS:-45}))
+    AGENT_HEALTH_FAIL_THRESHOLD="${NOVA_AGENT_HEALTH_FAIL_THRESHOLD:-6}"
   fi
   AGENT_HEALTH_EVERY_SECONDS="${NOVA_AGENT_HEALTH_EVERY_SECONDS:-5}"
   NEXT_AGENT_HEALTH_AT=0
