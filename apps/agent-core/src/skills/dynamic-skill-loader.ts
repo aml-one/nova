@@ -37,9 +37,9 @@ type RuntimeSkillModule = {
 };
 
 const skillsRootCandidates = () => [
-  resolve(process.cwd(), "skills"),
   resolve(process.cwd(), "..", "..", "skills"),
-  resolve(process.cwd(), "..", "skills")
+  resolve(process.cwd(), "..", "skills"),
+  resolve(process.cwd(), "skills")
 ];
 
 export function resolveWorkspaceSkillsRoot(): string | undefined {
