@@ -152,19 +152,37 @@ export default function LearningPage() {
       return;
     }
     setBusyProposalId(id);
-    const response = await fetch("/api/improvement/proposals/edit", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        id,
-        title,
-        summary,
-        details: editDraft.details.trim() ? editDraft.details.trim() : null
-      })
-    });
-    const data = (await response.json()) as { error?: string };
+    let response: Response;
+    try {
+      response = await fetch("/api/improvement/proposals/edit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id,
+          title,
+          summary,
+          details: editDraft.details.trim() ? editDraft.details.trim() : null
+        })
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "network error";
+      setStatus(`Could not reach the server while saving: ${message}`);
+      setBusyProposalId(null);
+      return;
+    }
+    let data: { item?: unknown; error?: string } = {};
+    try {
+      const raw = await response.text();
+      if (raw.trim()) {
+        data = JSON.parse(raw) as { item?: unknown; error?: string };
+      }
+    } catch {
+      data = {
+        error: `Server returned a non-JSON response (HTTP ${response.status} ${response.statusText}). Agent-core may need to be restarted with the latest code.`
+      };
+    }
     if (!response.ok) {
-      setStatus(data.error ?? "Failed to save proposal edits");
+      setStatus(data.error ?? `Failed to save proposal edits (HTTP ${response.status})`);
       setBusyProposalId(null);
       return;
     }
