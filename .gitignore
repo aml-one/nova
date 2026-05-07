@@ -8,6 +8,10 @@ node_modules/
 dist/
 .next/
 data/identity-archive/
+apps/agent-core/data/state/
+apps/agent-core/data/reset-backups/
+apps/agent-core/data/identity-archive/
+apps/agent-core/data/uploads/
 api_keys/
 *.env
 !.env.example
