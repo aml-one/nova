@@ -17,7 +17,14 @@ export type ChannelDebugEntry = {
   error?: string;
 };
 
-const MAX = 500;
+/**
+ * In-memory ring buffer for the Settings → Channels trace view.
+ *
+ * 5,000 entries is large enough to survive thousands of inbound webhook hits without losing context,
+ * yet small enough that worst-case memory stays bounded (each row is < 1 KB → < 5 MB total). The buffer
+ * is wiped on agent-core restart by design — durable trace logs belong in the structured logger, not here.
+ */
+const MAX = 5000;
 const buffer: ChannelDebugEntry[] = [];
 
 export function previewChannelText(text: string, max = 180): string {

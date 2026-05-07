@@ -429,6 +429,37 @@ export class SettingsService {
     return next;
   }
 
+  /**
+   * Auto-link a Signal sealed-sender UUID to an existing channel-tier row keyed by phone.
+   *
+   * Called once per inbound Signal envelope where BOTH `sourceNumber` AND `sourceUuid` are present.
+   * Subsequent sealed-sender messages from the same UUID can then be matched even though `sourceNumber`
+   * is hidden on the wire. Returns true when the link was actually written (new or changed).
+   */
+  linkSignalUuidToPhone(phone: string, signalUuid: string): boolean {
+    const normalizedPhone = normalizePhone(phone);
+    const normalizedUuid = normalizeSignalUuid(signalUuid);
+    if (!normalizedPhone || !normalizedUuid) return false;
+    const current = this.get();
+    const rows = current.messagingAccess.channelTiers.signal;
+    const idx = rows.findIndex((row) => row.phone === normalizedPhone);
+    if (idx < 0) return false;
+    if (rows[idx].signalUuid === normalizedUuid) return false;
+    const nextRows = rows.map((row, i) => (i === idx ? { ...row, signalUuid: normalizedUuid } : row));
+    const next: AppSettings = {
+      ...current,
+      messagingAccess: {
+        ...current.messagingAccess,
+        channelTiers: {
+          ...current.messagingAccess.channelTiers,
+          signal: nextRows
+        }
+      }
+    };
+    this.repo.upsert(next);
+    return true;
+  }
+
   private normalize(settings: AppSettings): AppSettings {
     const delegatedFolders = settings.delegatedFolders
       .map((entry) => resolvePath(entry))
@@ -818,7 +849,9 @@ function normalizeImportantPeople(
 function normalizeChannelTiers(
   values: AppSettings["messagingAccess"]["channelTiers"] | undefined
 ): AppSettings["messagingAccess"]["channelTiers"] {
-  const normalizeRows = (rows: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }> | undefined) => {
+  const normalizeWhatsAppRows = (
+    rows: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }> | undefined
+  ) => {
     const out: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }> = [];
     for (const row of rows ?? []) {
       const phone = normalizePhone(row.phone);
@@ -833,12 +866,32 @@ function normalizeChannelTiers(
     }
     return out;
   };
-  const signal = normalizeRows(values?.signal);
-  const whatsapp = normalizeRows(values?.whatsapp);
+  const normalizeSignalRows = (
+    rows: Array<{ phone: string; signalUuid?: string; tier: "admin" | "co_admin" | "restricted" | "guest" }> | undefined
+  ) => {
+    const out: Array<{ phone: string; signalUuid?: string; tier: "admin" | "co_admin" | "restricted" | "guest" }> = [];
+    for (const row of rows ?? []) {
+      const phone = normalizePhone(row.phone);
+      if (!phone) continue;
+      const tier =
+        row.tier === "admin" || row.tier === "co_admin" || row.tier === "restricted" || row.tier === "guest"
+          ? row.tier
+          : "guest";
+      const uuid = normalizeSignalUuid(row.signalUuid);
+      if (!out.find((x) => x.phone === phone)) {
+        const next: { phone: string; signalUuid?: string; tier: typeof tier } = { phone, tier };
+        if (uuid) next.signalUuid = uuid;
+        out.push(next);
+      }
+    }
+    return out;
+  };
+  const signal = normalizeSignalRows(values?.signal);
+  const whatsapp = normalizeWhatsAppRows(values?.whatsapp);
 
   // Safety: exactly one admin maximum globally across channels.
   let adminTaken = false;
-  const clampAdmin = (rows: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>) =>
+  const clampAdmin = <T extends { tier: "admin" | "co_admin" | "restricted" | "guest" }>(rows: T[]): T[] =>
     rows.map((row) => {
       if (row.tier !== "admin") return row;
       if (!adminTaken) {
@@ -852,6 +905,18 @@ function normalizeChannelTiers(
     signal: clampAdmin(signal),
     whatsapp: clampAdmin(whatsapp)
   };
+}
+
+/**
+ * Lower-cased, hyphen-stripped UUID-shape validator. Returns "" when the input doesn't look like
+ * a Signal sealed-sender UUID (e.g. `b1b166c7-c4cb-46f8-be4d-e596336a3355`).
+ */
+function normalizeSignalUuid(value: string | undefined): string {
+  if (typeof value !== "string") return "";
+  const t = value.trim().toLowerCase();
+  if (!t) return "";
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(t)) return "";
+  return t;
 }
 
 function normalizeLabelPrefix(value: string | undefined): string {

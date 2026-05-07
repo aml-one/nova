@@ -5,6 +5,8 @@ export type RoleName = "admin" | "co_admin" | "restricted" | "important" | "gues
 export type ChannelAccessProfile = {
   role: RoleName;
   allowed: boolean;
+  /** When `true`, the match was made by Signal sealed-sender UUID rather than phone. */
+  matchedBySignalUuid?: boolean;
   capabilities: {
     cameraAccess: boolean;
     shellAccess: boolean;
@@ -13,73 +15,84 @@ export type ChannelAccessProfile = {
   };
 };
 
+export type ChannelAccessOptions = {
+  /**
+   * Optional Signal sealed-sender Service ID. When provided and `channel === "signal"`, sealed-sender
+   * messages are matched against `messagingAccess.channelTiers.signal[].signalUuid` even when the
+   * E.164 phone number is hidden on the wire.
+   */
+  signalUuid?: string;
+};
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function tierCapabilities(tier: "admin" | "co_admin" | "restricted" | "guest"): ChannelAccessProfile["capabilities"] {
+  if (tier === "admin" || tier === "co_admin") {
+    return {
+      cameraAccess: true,
+      shellAccess: true,
+      securityCenterAccess: true,
+      schedulerAccess: true
+    };
+  }
+  if (tier === "restricted") {
+    return {
+      cameraAccess: true,
+      shellAccess: false,
+      securityCenterAccess: false,
+      schedulerAccess: false
+    };
+  }
+  return {
+    cameraAccess: false,
+    shellAccess: false,
+    securityCenterAccess: false,
+    schedulerAccess: false
+  };
+}
+
+function tierToRole(tier: "admin" | "co_admin" | "restricted" | "guest"): RoleName {
+  return tier;
+}
+
 export function resolveChannelAccess(
   channel: "whatsapp" | "signal" | "web",
   phoneNumber: string | undefined,
-  settings: AppSettings
+  settings: AppSettings,
+  options: ChannelAccessOptions = {}
 ): ChannelAccessProfile {
-  const normalized = normalizePhone(phoneNumber);
   const access = settings.messagingAccess;
+  const normalized = normalizePhone(phoneNumber);
+  const signalUuid = normalizeSignalUuid(options.signalUuid);
+
+  // Signal sealed-sender — try to match by UUID first when phone is missing or unknown.
+  if (channel === "signal" && signalUuid) {
+    const channelRows = access.channelTiers?.signal ?? [];
+    const uuidRow = channelRows.find((entry) => entry.signalUuid && entry.signalUuid.toLowerCase() === signalUuid);
+    if (uuidRow) {
+      return {
+        role: tierToRole(uuidRow.tier),
+        allowed: true,
+        matchedBySignalUuid: true,
+        capabilities: tierCapabilities(uuidRow.tier)
+      };
+    }
+  }
+
   if (!normalized) {
     return {
       role: "unknown",
       allowed: access.denyUnknownNumbers !== true,
-      capabilities: {
-        cameraAccess: false,
-        shellAccess: false,
-        securityCenterAccess: false,
-        schedulerAccess: false
-      }
+      capabilities: tierCapabilities("guest")
     };
   }
   const channelRows = channel === "signal" || channel === "whatsapp" ? access.channelTiers?.[channel] ?? [] : [];
   const channelTier = channelRows.find((entry) => entry.phone === normalized)?.tier;
-  if (channelTier === "admin") {
+  if (channelTier) {
     return {
-      role: "admin",
+      role: tierToRole(channelTier),
       allowed: true,
-      capabilities: {
-        cameraAccess: true,
-        shellAccess: true,
-        securityCenterAccess: true,
-        schedulerAccess: true
-      }
-    };
-  }
-  if (channelTier === "co_admin") {
-    return {
-      role: "co_admin",
-      allowed: true,
-      capabilities: {
-        cameraAccess: true,
-        shellAccess: true,
-        securityCenterAccess: true,
-        schedulerAccess: true
-      }
-    };
-  }
-  if (channelTier === "restricted") {
-    return {
-      role: "restricted",
-      allowed: true,
-      capabilities: {
-        cameraAccess: true,
-        shellAccess: false,
-        securityCenterAccess: false,
-        schedulerAccess: false
-      }
-    };
-  }
-  if (channelTier === "guest") {
-    return {
-      role: "guest",
-      allowed: true,
-      capabilities: {
-        cameraAccess: false,
-        shellAccess: false,
-        securityCenterAccess: false,
-        schedulerAccess: false
-      }
+      capabilities: tierCapabilities(channelTier)
     };
   }
   // Legacy fallback (pre-tier settings).
@@ -87,12 +100,7 @@ export function resolveChannelAccess(
     return {
       role: "admin",
       allowed: true,
-      capabilities: {
-        cameraAccess: true,
-        shellAccess: true,
-        securityCenterAccess: true,
-        schedulerAccess: true
-      }
+      capabilities: tierCapabilities("admin")
     };
   }
   const important = access.importantPeople.find((entry) => entry.phone === normalized);
@@ -112,23 +120,13 @@ export function resolveChannelAccess(
     return {
       role: "guest",
       allowed: true,
-      capabilities: {
-        cameraAccess: false,
-        shellAccess: false,
-        securityCenterAccess: false,
-        schedulerAccess: false
-      }
+      capabilities: tierCapabilities("guest")
     };
   }
   return {
     role: "unknown",
     allowed: access.denyUnknownNumbers !== true,
-    capabilities: {
-      cameraAccess: false,
-      shellAccess: false,
-      securityCenterAccess: false,
-      schedulerAccess: false
-    }
+    capabilities: tierCapabilities("guest")
   };
 }
 
@@ -136,4 +134,11 @@ function normalizePhone(value: string | undefined): string {
   const cleaned = (value ?? "").replace(/[^\d+]/g, "");
   if (!cleaned) return "";
   return cleaned.startsWith("+") ? cleaned : `+${cleaned}`;
+}
+
+function normalizeSignalUuid(value: string | undefined): string {
+  if (typeof value !== "string") return "";
+  const t = value.trim().toLowerCase();
+  if (!t || !UUID_REGEX.test(t)) return "";
+  return t;
 }

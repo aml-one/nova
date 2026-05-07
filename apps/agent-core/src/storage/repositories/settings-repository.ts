@@ -80,7 +80,12 @@ export type AppSettings = {
     novaPhoneNumber: string;
     denyUnknownNumbers: boolean;
     channelTiers: {
-      signal: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>;
+      /**
+       * Signal tier rows may carry an optional Signal `sourceUuid` (sealed-sender) — when present,
+       * sealed-sender messages from this UUID are matched against this row even though the phone number
+       * is hidden on the wire. Auto-populated on the first non-sealed message from a known phone.
+       */
+      signal: Array<{ phone: string; signalUuid?: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>;
       whatsapp: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>;
     };
     systemAdmins: string[];
@@ -347,13 +352,19 @@ export class SettingsRepository {
             signal: Array.isArray(parsed.messagingAccess?.channelTiers?.signal)
               ? parsed.messagingAccess.channelTiers.signal
                   .filter((item) => typeof item?.phone === "string")
-                  .map((item) => ({
-                    phone: String(item.phone),
-                    tier:
-                      item.tier === "admin" || item.tier === "co_admin" || item.tier === "restricted" || item.tier === "guest"
-                        ? item.tier
-                        : "guest"
-                  }))
+                  .map((item) => {
+                    const row: { phone: string; signalUuid?: string; tier: "admin" | "co_admin" | "restricted" | "guest" } = {
+                      phone: String(item.phone),
+                      tier:
+                        item.tier === "admin" || item.tier === "co_admin" || item.tier === "restricted" || item.tier === "guest"
+                          ? item.tier
+                          : "guest"
+                    };
+                    if (typeof item.signalUuid === "string" && item.signalUuid.trim().length > 0) {
+                      row.signalUuid = String(item.signalUuid).trim().toLowerCase();
+                    }
+                    return row;
+                  })
               : [],
             whatsapp: Array.isArray(parsed.messagingAccess?.channelTiers?.whatsapp)
               ? parsed.messagingAccess.channelTiers.whatsapp
