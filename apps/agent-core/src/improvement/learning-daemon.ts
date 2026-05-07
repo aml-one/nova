@@ -227,13 +227,15 @@ function buildLatestLearningDetails(history: Array<Record<string, unknown>>): {
 function buildProposalQueueSnapshot(improvement: SelfImprovementLoop): Record<string, unknown> {
   try {
     const items = improvement.listImprovementProposals(250);
-    const count = (s: "proposed" | "approved" | "in_progress" | "implemented") => items.filter((i) => i.status === s).length;
+    const count = (s: "proposed" | "approved" | "in_progress" | "implemented" | "needs_human") =>
+      items.filter((i) => i.status === s).length;
     const top = items.slice(0, 4).map((i) => ({ title: i.title, status: i.status }));
     return {
       proposed: count("proposed"),
       approved: count("approved"),
       in_progress: count("in_progress"),
       implemented: count("implemented"),
+      needs_human: count("needs_human"),
       recent: top
     };
   } catch {

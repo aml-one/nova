@@ -34,6 +34,7 @@ import {
   type ImprovementProposal,
   type ImprovementProposalStatus
 } from "./improvement-proposal-repository.js";
+import { ProposalWorker } from "./proposal-worker.js";
 
 type Outcome = {
   runId: string;
@@ -526,30 +527,79 @@ export class SelfImprovementLoop {
     if (next.status === "approved") {
       this.proposalRepo.setStatus(next.id, "in_progress", "Nova picked up approved proposal", "nova");
     }
+
+    const worker = new ProposalWorker({ modelRouter: this.modelRouter });
+    const workerOutcome = await worker.run(next);
+
+    if (workerOutcome.kind === "implemented") {
+      this.proposalRepo.setStatus(next.id, "implemented", workerOutcome.reason, "nova");
+      this.proposalRepo.addEvent({
+        proposalId: next.id,
+        eventType: "work_attempt",
+        note: workerOutcome.reason + (workerOutcome.files.length ? ` · files: ${workerOutcome.files.join(", ")}` : ""),
+        actor: "nova",
+        statusTo: "implemented"
+      });
+      this.learningLog.append(
+        "Worked accepted improvement proposal",
+        true,
+        workerOutcome.reason,
+        "improvement",
+        {
+          proposalId: next.id,
+          proposalTitle: next.title,
+          status: "implemented",
+          files: workerOutcome.files,
+          commitSha: workerOutcome.commitSha
+        }
+      );
+      return `idle cycle implemented accepted proposal: ${next.title}`;
+    }
+
+    if (workerOutcome.kind === "needs_human") {
+      this.proposalRepo.setStatus(next.id, "needs_human", workerOutcome.reason, "nova");
+      this.proposalRepo.addEvent({
+        proposalId: next.id,
+        eventType: "work_attempt",
+        note: workerOutcome.reason,
+        actor: "nova",
+        statusTo: "needs_human"
+      });
+      this.learningLog.append(
+        "Autonomous worker stopped; needs human decision",
+        false,
+        workerOutcome.reason,
+        "improvement",
+        { proposalId: next.id, proposalTitle: next.title, status: "needs_human" }
+      );
+      return `idle cycle paused proposal (needs human): ${next.title}`;
+    }
+
+    // not_applicable: fall back to the legacy skill-stub path so the historical "auto-apply skills"
+    // behaviour still works for proposals that don't reference a single target file.
     const improvementResult = await this.maybeApplySkillImprovement(next.title);
-    const succeeded =
+    const skillSucceeded =
       improvementResult.includes("generated and validated skill") || improvementResult.includes("pending user approval");
-    this.proposalRepo.setStatus(
-      next.id,
-      succeeded ? "implemented" : "in_progress",
-      succeeded ? "Work result marked implemented" : "Work attempt incomplete; staying in progress",
-      "nova"
-    );
+    const finalStatus: ImprovementProposalStatus = skillSucceeded ? "implemented" : "needs_human";
+    const finalNote = skillSucceeded
+      ? `Skill stub generated: ${improvementResult}`
+      : `Cannot apply autonomously: ${workerOutcome.reason}; skill fallback also failed: ${improvementResult}`;
+    this.proposalRepo.setStatus(next.id, finalStatus, finalNote, "nova");
     this.proposalRepo.addEvent({
       proposalId: next.id,
       eventType: "work_attempt",
-      note: improvementResult,
+      note: finalNote,
       actor: "nova",
-      statusTo: succeeded ? "implemented" : "in_progress"
+      statusTo: finalStatus
     });
     this.learningLog.append(
       "Worked accepted improvement proposal",
-      succeeded,
-      improvementResult,
+      skillSucceeded,
+      finalNote,
       "improvement",
-      { proposalId: next.id, proposalTitle: next.title, status: succeeded ? "implemented" : "in_progress" }
+      { proposalId: next.id, proposalTitle: next.title, status: finalStatus }
     );
-    return `idle cycle worked accepted proposal: ${next.title}`;
+    return `idle cycle handled accepted proposal: ${next.title} (${finalStatus})`;
   }
 }
 

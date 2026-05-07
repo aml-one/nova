@@ -16,13 +16,15 @@ type LearningItem = {
   details?: Record<string, unknown>;
 };
 
+type ProposalStatus = "proposed" | "approved" | "in_progress" | "implemented" | "needs_human";
+
 type ImprovementProposal = {
   id: string;
   title: string;
   summary: string;
   details?: string;
   source: string;
-  status: "proposed" | "approved" | "in_progress" | "implemented";
+  status: ProposalStatus;
   createdAt: string;
   approvedAt?: string;
   startedAt?: string;
@@ -33,12 +35,27 @@ type ImprovementProposalEvent = {
   id: string;
   proposalId: string;
   eventType: "created" | "status_changed" | "work_attempt";
-  statusFrom?: "proposed" | "approved" | "in_progress" | "implemented";
-  statusTo?: "proposed" | "approved" | "in_progress" | "implemented";
+  statusFrom?: ProposalStatus;
+  statusTo?: ProposalStatus;
   note?: string;
   actor: string;
   createdAt: string;
 };
+
+function statusLabel(status: ProposalStatus): string {
+  if (status === "needs_human") return "needs you";
+  return status.replace("_", " ");
+}
+
+function latestNeedsHumanReason(events: ImprovementProposalEvent[] | undefined): string | undefined {
+  if (!events) return undefined;
+  for (const evt of events) {
+    if (evt.eventType === "work_attempt" && (evt.statusTo === "needs_human" || evt.note?.toLowerCase().includes("needs human"))) {
+      return evt.note;
+    }
+  }
+  return undefined;
+}
 
 export default function LearningPage() {
   const [itemsByDate, setItemsByDate] = useState<Record<string, LearningItem[]>>({});
@@ -123,9 +140,24 @@ export default function LearningPage() {
     () =>
       proposals.find((item) => item.status === "in_progress") ??
       proposals.find((item) => item.status === "approved") ??
+      proposals.find((item) => item.status === "needs_human") ??
       null,
     [proposals]
   );
+
+  useEffect(() => {
+    if (!activeProposal) return;
+    if (eventMap[activeProposal.id]) return;
+    void (async () => {
+      try {
+        const response = await fetch(`/api/improvement/proposals/events?id=${encodeURIComponent(activeProposal.id)}`);
+        const data = (await response.json()) as { events?: ImprovementProposalEvent[] };
+        setEventMap((prev) => ({ ...prev, [activeProposal.id]: Array.isArray(data.events) ? data.events : [] }));
+      } catch {
+        // ignore — Show Activity button will retry on demand
+      }
+    })();
+  }, [activeProposal, eventMap]);
 
   useEffect(() => {
     if (!pendingScrollToWorkingNowRef.current) return;
@@ -160,13 +192,19 @@ export default function LearningPage() {
           <article className="rounded-ui border bg-surface2 p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
               <div className="font-medium">{activeProposal.title}</div>
-              <div className="text-xs uppercase tracking-wide text-muted">
-                {activeProposal.status.replace("_", " ")}
-              </div>
+              <div className="text-xs uppercase tracking-wide text-muted">{statusLabel(activeProposal.status)}</div>
             </div>
             <div className="text-sm">{activeProposal.summary}</div>
             {activeProposal.details ? <div className="text-xs text-muted">Done signal: {activeProposal.details}</div> : null}
-            <div className="flex gap-2">
+            {activeProposal.status === "needs_human" ? (
+              <div className="rounded-ui border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+                <div className="font-medium text-amber-200">Nova stopped and is waiting for you</div>
+                <div className="text-muted">
+                  {latestNeedsHumanReason(eventMap[activeProposal.id]) ?? "Open Show Activity for the reason; re-approve to retry."}
+                </div>
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
                 tone="blue"
@@ -174,6 +212,14 @@ export default function LearningPage() {
                 onClick={() => void updateProposalStatus(activeProposal.id, "in_progress")}
               >
                 Start Work
+              </Button>
+              <Button
+                type="button"
+                tone="green"
+                disabled={busyProposalId === activeProposal.id || activeProposal.status !== "needs_human"}
+                onClick={() => void updateProposalStatus(activeProposal.id, "approved")}
+              >
+                Re-approve & Retry
               </Button>
               <Button
                 type="button"
@@ -225,19 +271,29 @@ export default function LearningPage() {
             <article key={item.id} className="rounded-ui border bg-surface2 p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="font-medium">{item.title}</div>
-                <div className="text-xs uppercase tracking-wide text-muted">{item.status.replace("_", " ")}</div>
+                <div className="text-xs uppercase tracking-wide text-muted">{statusLabel(item.status)}</div>
               </div>
               <div className="text-sm">{item.summary}</div>
               {item.details ? <div className="text-xs text-muted">Done signal: {item.details}</div> : null}
               <div className="text-xs text-muted">Created: {new Date(item.createdAt).toLocaleString()}</div>
-              <div className="flex gap-2">
+              {item.status === "needs_human" ? (
+                <div className="rounded-ui border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+                  <div className="font-medium text-amber-200">Needs you</div>
+                  <div className="text-muted">
+                    {latestNeedsHumanReason(eventMap[item.id]) ?? "Click Show Activity for the latest reason. Re-approve to let Nova try again."}
+                  </div>
+                </div>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   tone="green"
-                  disabled={busyProposalId === item.id || item.status !== "proposed"}
+                  disabled={
+                    busyProposalId === item.id || (item.status !== "proposed" && item.status !== "needs_human")
+                  }
                   onClick={() => void updateProposalStatus(item.id, "approved")}
                 >
-                  Accept
+                  {item.status === "needs_human" ? "Re-approve & Retry" : "Accept"}
                 </Button>
                 <Button
                   type="button"

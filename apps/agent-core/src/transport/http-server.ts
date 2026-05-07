@@ -1160,12 +1160,12 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const payload = (await readJson(request)) as { id?: string; status?: string };
         const id = payload.id?.trim() ?? "";
         const status = payload.status?.trim() ?? "";
-        if (!id || !["proposed", "approved", "in_progress", "implemented"].includes(status)) {
+        if (!id || !["proposed", "approved", "in_progress", "implemented", "needs_human"].includes(status)) {
           return sendJson(response, 400, { error: "id and valid status are required", correlationId });
         }
         const item = options.improvement.updateImprovementProposalStatus(
           id,
-          status as "proposed" | "approved" | "in_progress" | "implemented"
+          status as "proposed" | "approved" | "in_progress" | "implemented" | "needs_human"
         );
         if (!item) {
           return sendJson(response, 404, { error: "proposal not found", correlationId });

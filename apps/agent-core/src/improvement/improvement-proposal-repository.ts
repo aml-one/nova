@@ -2,7 +2,17 @@ import { randomUUID } from "node:crypto";
 import { sqliteUtcDatetimeToIso } from "../util/sqlite-timestamp.js";
 import { getDatabase } from "../storage/sqlite.js";
 
-export type ImprovementProposalStatus = "proposed" | "approved" | "in_progress" | "implemented";
+/**
+ * Lifecycle for an improvement proposal.
+ * - `proposed`     — Nova suggested it from the idle learning cycle.
+ * - `approved`     — user accepted it.
+ * - `in_progress`  — the autonomous worker has picked it up.
+ * - `implemented`  — the worker (or a human) finished and committed the change.
+ * - `needs_human`  — the worker refused to act autonomously (path outside the safe whitelist,
+ *                    proposal too vague, validation failed, daily cap hit, etc). Human action required;
+ *                    the autonomous worker will not retry until the user re-approves.
+ */
+export type ImprovementProposalStatus = "proposed" | "approved" | "in_progress" | "implemented" | "needs_human";
 
 export type ImprovementProposal = {
   id: string;
@@ -92,7 +102,13 @@ export class ImprovementProposalRepository {
                 startedAt: "COALESCE(started_at, CURRENT_TIMESTAMP)",
                 completedAt: "CURRENT_TIMESTAMP"
               }
-            : { approvedAt: "NULL", startedAt: "NULL", completedAt: "NULL" };
+            : status === "needs_human"
+              ? {
+                  approvedAt: "COALESCE(approved_at, CURRENT_TIMESTAMP)",
+                  startedAt: "COALESCE(started_at, CURRENT_TIMESTAMP)",
+                  completedAt: "NULL"
+                }
+              : { approvedAt: "NULL", startedAt: "NULL", completedAt: "NULL" };
     getDatabase()
       .prepare(
         `
@@ -217,7 +233,7 @@ function mapRow(row: Row): ImprovementProposal {
 }
 
 function normalizeStatus(raw: string): ImprovementProposalStatus {
-  if (raw === "approved" || raw === "in_progress" || raw === "implemented") return raw;
+  if (raw === "approved" || raw === "in_progress" || raw === "implemented" || raw === "needs_human") return raw;
   return "proposed";
 }
 

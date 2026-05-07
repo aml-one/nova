@@ -321,7 +321,7 @@ const DEFAULT_SETTINGS: SettingsState = {
   },
   shell: { timeoutMs: 30000, maxOutputBytes: 1024 * 1024 },
   skills: { isolationEnabled: false, timeoutMs: 15000, maxMemoryMb: 256, skillAuthoringDisabled: false },
-  identityBackup: { enabled: false, intervalDays: 1, labelPrefix: "nova-core" },
+  identityBackup: { enabled: false, intervalDays: 1, labelPrefix: "nova-core", gitRemote: "" },
   models: { defaultByProvider: { ollama: "", lmstudio: "", copilot: "" }, ollamaThinkingEnabled: false },
   copilot: { baseUrl: "", apiKey: "", defaultModel: "gpt-4o-mini", disabled: false },
   visionProviderPriority: ["lmstudio", "ollama", "cloud"],
