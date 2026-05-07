@@ -12,6 +12,15 @@ HTTPS_KEY_PATH="${NOVA_WEB_HTTPS_KEY:-${ROOT_DIR}/tmp/dev-key.pem}"
 # launchd has a minimal PATH; include common Homebrew/bin locations.
 export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
 
+# Load repo-local environment for agent-core + web when running under launchd.
+# launchd does not read shell profiles, so secrets like NOVA_SETTINGS_SECRET would otherwise be missing.
+if [[ -f "${ROOT_DIR}/.env" ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  . "${ROOT_DIR}/.env"
+  set +a
+fi
+
 run_pnpm() {
   if command -v corepack >/dev/null 2>&1; then
     corepack pnpm "$@"
@@ -97,7 +106,7 @@ agent_http_healthy() {
   if ! command -v curl >/dev/null 2>&1; then
     return 0
   fi
-  curl -fsS --max-time 2 "http://127.0.0.1:${AGENT_PORT}/v1/health" >/dev/null 2>&1
+  curl -fsS --max-time 2 "http://127.0.0.1:${AGENT_PORT}/health" >/dev/null 2>&1
 }
 
 # Rollback marker is written by the in-app update flow before `git pull`.

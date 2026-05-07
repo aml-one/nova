@@ -7,6 +7,8 @@ import type { AppSettings } from "../storage/repositories/settings-repository.js
 import { MemoryBearLinkRepository } from "./memory-bear-link-repository.js";
 import { memoryBearCreateEndUser, memoryBearReadSync, memoryBearWriteSync } from "./memory-bear-client.js";
 
+const memoryBearWarnings = new Set<string>();
+
 export class MemoryService {
   private readonly repository = new MemoryRepository();
   private readonly memoryBearLinks = new MemoryBearLinkRepository();
@@ -83,7 +85,11 @@ export class MemoryService {
 
   private async ensureMemoryBearUser(userId: string) {
     const settings = this.getSettings().memoryBear;
-    if (!settings.enabled || !settings.apiKey.trim() || !settings.baseUrl.trim()) {
+    if (!settings.enabled) {
+      return undefined;
+    }
+    if (!settings.apiKey.trim() || !settings.baseUrl.trim()) {
+      warnMemoryBearOnce("missing-config", "MemoryBear is enabled but base URL or API key is empty; skipping MemoryBear user link.");
       return undefined;
     }
     const existing = this.memoryBearLinks.get(userId);
@@ -97,6 +103,10 @@ export class MemoryService {
       otherName: userId
     });
     if (!created) {
+      warnMemoryBearOnce(
+        "create-user-failed",
+        "MemoryBear end-user creation failed; check MemoryBear API key, memory scope, default memory config, and API reachability."
+      );
       return undefined;
     }
     const link = {
@@ -111,13 +121,16 @@ export class MemoryService {
   private async syncMemoryBearTurn(userId: string, userText: string, assistantText: string): Promise<void> {
     const settings = this.getSettings().memoryBear;
     if (!settings.enabled || !settings.syncWrites || !settings.apiKey.trim() || !settings.baseUrl.trim()) {
+      if (settings.enabled && settings.syncWrites) {
+        warnMemoryBearOnce("write-missing-config", "MemoryBear write sync is enabled but base URL or API key is empty.");
+      }
       return;
     }
     const link = await this.ensureMemoryBearUser(userId);
     if (!link) {
       return;
     }
-    await memoryBearWriteSync({
+    const ok = await memoryBearWriteSync({
       baseUrl: settings.baseUrl,
       apiKey: settings.apiKey,
       endUserId: link.endUserId,
@@ -126,6 +139,9 @@ export class MemoryService {
       assistantText,
       storageType: settings.storageType
     });
+    if (!ok) {
+      warnMemoryBearOnce("write-failed", "MemoryBear write/sync failed; memories are still stored locally in SQLite.");
+    }
   }
 
   private extractAndStoreMemory(userId: string, text: string): void {
@@ -134,4 +150,10 @@ export class MemoryService {
       this.addLongTermMemory(userId, item);
     }
   }
+}
+
+function warnMemoryBearOnce(key: string, message: string): void {
+  if (memoryBearWarnings.has(key)) return;
+  memoryBearWarnings.add(key);
+  console.warn(`[nova] ${message}`);
 }

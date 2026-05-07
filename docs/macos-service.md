@@ -21,6 +21,7 @@ The job includes:
 - HTTPS via `start-local-macos-service.sh`
 - **Standard ports** (443 for web when `NOVA_WEB_PORT` is unset)
 - Dynamic TLS SAN including current `en0` IP each start
+- repo `.env` loading before agent-core/web start, so encrypted settings can decrypt with `NOVA_SETTINGS_SECRET`
 - Logs under the repo: `tmp/nova-localstack.log` and `tmp/nova-localstack.err.log`
 
 **Web UI:** `https://<this-mac-LAN-ip>/` (or `https://127.0.0.1/` from the same machine).
