@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 RESTART_DELAY_SECONDS=2
 WEB_HOST="${NOVA_WEB_HOST:-0.0.0.0}"
+AGENT_PORT="${NOVA_AGENT_PORT:-8787}"
 ENABLE_HTTPS="${NOVA_WEB_HTTPS:-false}"
 HTTPS_CERT_PATH="${NOVA_WEB_HTTPS_CERT:-${ROOT_DIR}/tmp/dev-cert.pem}"
 HTTPS_KEY_PATH="${NOVA_WEB_HTTPS_KEY:-${ROOT_DIR}/tmp/dev-key.pem}"
@@ -92,6 +93,13 @@ free_tcp_port_if_requested() {
   sleep 1
 }
 
+agent_http_healthy() {
+  if ! command -v curl >/dev/null 2>&1; then
+    return 0
+  fi
+  curl -fsS --max-time 2 "http://127.0.0.1:${AGENT_PORT}/v1/health" >/dev/null 2>&1
+}
+
 trap 'echo "Stopping Nova local stack..."; cleanup; exit 0' INT TERM
 
 echo "Starting Nova local stack supervisor..."
@@ -169,6 +177,10 @@ while true; do
   echo "agent-core PID ${AGENT_PID}, web PID ${WEB_PID}"
 
   # If either process exits (for example after update apply), restart both.
+  AGENT_HEALTH_FAILS=0
+  AGENT_HEALTH_GRACE_UNTIL=$((SECONDS + ${NOVA_AGENT_HEALTH_GRACE_SECONDS:-25}))
+  AGENT_HEALTH_EVERY_SECONDS="${NOVA_AGENT_HEALTH_EVERY_SECONDS:-5}"
+  NEXT_AGENT_HEALTH_AT=0
   while true; do
     if ! kill -0 "${AGENT_PID}" 2>/dev/null; then
       echo "agent-core exited; restarting full stack..."
@@ -179,6 +191,20 @@ while true; do
       echo "web exited; restarting full stack..."
       cleanup
       break
+    fi
+    if [[ "${SECONDS}" -ge "${AGENT_HEALTH_GRACE_UNTIL}" && "${SECONDS}" -ge "${NEXT_AGENT_HEALTH_AT}" ]]; then
+      NEXT_AGENT_HEALTH_AT=$((SECONDS + AGENT_HEALTH_EVERY_SECONDS))
+      if agent_http_healthy; then
+        AGENT_HEALTH_FAILS=0
+      else
+        AGENT_HEALTH_FAILS=$((AGENT_HEALTH_FAILS + 1))
+        echo "agent-core health check failed (${AGENT_HEALTH_FAILS}/3) on port ${AGENT_PORT}"
+        if [[ "${AGENT_HEALTH_FAILS}" -ge 3 ]]; then
+          echo "agent-core process is alive but HTTP is unavailable; restarting full stack..."
+          cleanup
+          break
+        fi
+      fi
     fi
     sleep 1
   done

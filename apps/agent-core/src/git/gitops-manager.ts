@@ -80,7 +80,8 @@ export class GitOpsManager {
     ensureRepo();
     const tag = tagName === "latest" ? this.checkpoints.latestCheckpoint(this.policy.checkpointTagPrefix) : tagName;
     if (!tag) {
-      throw new Error("no checkpoint tag available for rollback");
+      console.warn("[nova] rollback skipped: no checkpoint tag available");
+      return;
     }
     await this.rollbackService.rollback(tag);
   }
