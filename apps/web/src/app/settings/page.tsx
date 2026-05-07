@@ -996,12 +996,12 @@ export default function SettingsPage() {
         whatsAppAppSecret: values.whatsAppAppSecret ?? ""
       })
     });
-    const data = (await response.json()) as {
+    const data = await readJsonOrEmpty<{
       signal?: SetupCheckResult;
       whatsApp?: SetupCheckResult;
       suggestedEnv?: string;
       error?: string;
-    };
+    }>(response);
     if (!response.ok) {
       setError(data.error ?? "Channel setup test failed");
       return;
@@ -1021,7 +1021,7 @@ export default function SettingsPage() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ signalAccountNumber, webhookPublicOrigin })
     });
-    const data = (await response.json()) as SignalBootstrapResult;
+    const data = await readJsonOrEmpty<SignalBootstrapResult>(response);
     if (!response.ok) {
       setError(data.error ?? "Could not bootstrap Signal bridge.");
       return;
@@ -1057,7 +1057,7 @@ export default function SettingsPage() {
         ...(signalRegistrationUseVoice ? { useVoice: true } : {})
       })
     });
-    const data = (await response.json()) as { detail?: string; endpointTried?: string; error?: string };
+    const data = await readJsonOrEmpty<{ detail?: string; endpointTried?: string; error?: string }>(response);
     if (!response.ok) {
       const message = (typeof data.error === "string" && data.error.trim()) || "Could not start Signal registration.";
       const detail = typeof data.detail === "string" ? data.detail.trim() : "";
@@ -1103,7 +1103,7 @@ export default function SettingsPage() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ signalApiUrl, signalAccountNumber, code })
     });
-    const data = (await response.json()) as { detail?: string; endpointTried?: string; error?: string };
+    const data = await readJsonOrEmpty<{ detail?: string; endpointTried?: string; error?: string }>(response);
     if (!response.ok) {
       const message = data.error ?? "Could not verify Signal code.";
       setSignalRegisterStatus({ ok: false, detail: message });
@@ -1136,13 +1136,13 @@ export default function SettingsPage() {
           deviceName: signalQrDeviceName.trim() || "Nova Agent Web"
         })
       });
-      const data = (await response.json()) as {
+      const data = await readJsonOrEmpty<{
         error?: string;
         detail?: string;
         imageBase64?: string;
         mimeType?: string;
         endpointTried?: string;
-      };
+      }>(response);
       if (!response.ok) {
         setSignalQrImageUrl(null);
         setError(data.error ?? data.detail ?? "Could not load Signal link QR.");
@@ -1177,7 +1177,7 @@ export default function SettingsPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ signalApiUrl })
       });
-      const data = (await response.json()) as { error?: string; detail?: string; accounts?: string[] };
+      const data = await readJsonOrEmpty<{ error?: string; detail?: string; accounts?: string[] }>(response);
       if (!response.ok) {
         setSignalLinkedAccounts(null);
         setError(data.error ?? data.detail ?? "Could not list Signal accounts.");
@@ -2827,7 +2827,7 @@ export default function SettingsPage() {
                         whatsAppAppSecret: ""
                       })
                     });
-                    const data = (await response.json()) as { signal?: SetupCheckResult; suggestedEnv?: string; error?: string };
+                    const data = await readJsonOrEmpty<{ signal?: SetupCheckResult; suggestedEnv?: string; error?: string }>(response);
                     if (!response.ok) {
                       setError(data.error ?? "Signal setup test failed");
                       return;
