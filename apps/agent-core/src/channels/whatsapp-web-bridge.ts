@@ -7,6 +7,7 @@ import makeWASocket, {
   type WASocket
 } from "@whiskeysockets/baileys";
 import pino from "pino";
+import { resolveWhatsAppInboundSenderJid } from "./whatsapp-sender-jid.js";
 
 /** Optional override for bundled WA Web client version `[major, minor, build]`, e.g. `2,3000,1030100000` */
 function waWebVersionFromEnv(): [number, number, number] | undefined {
@@ -201,13 +202,15 @@ class WhatsAppWebBridge {
       if (evt.type !== "notify") return;
       for (const msg of evt.messages) {
         if (msg.key.fromMe) continue;
-        const from = msg.key.remoteJid ?? "";
+        const rawRemote = msg.key.remoteJid ?? "";
         const text =
           msg.message?.conversation?.trim() ||
           msg.message?.extendedTextMessage?.text?.trim() ||
           "";
-        if (!from || !text) continue;
+        if (!rawRemote || !text) continue;
         try {
+          const from = await resolveWhatsAppInboundSenderJid(msg, sock);
+          if (!from) continue;
           await this.inboundHandler?.({ from, text });
         } catch {
           // Keep bridge alive even if orchestration fails.
