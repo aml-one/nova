@@ -60,6 +60,7 @@ import { ProviderCatalogService } from "../providers/provider-catalog.js";
 import { UpdateManager } from "../update/update-manager.js";
 import { ThoughtRepository } from "../storage/repositories/thought-repository.js";
 import { PeopleRepository } from "../storage/repositories/people-repository.js";
+import { IdentityRepository } from "../storage/repositories/identity-repository.js";
 import { PersonIdentitiesRepository } from "../storage/repositories/person-identities-repository.js";
 import { PersonFieldLocksRepository } from "../storage/repositories/person-field-locks-repository.js";
 import { PersonChannelStateRepository } from "../storage/repositories/person-channel-state-repository.js";
@@ -592,6 +593,83 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           const ok = people.deleteCascadeById(id);
           if (!ok) return sendJson(response, 404, { error: "not found or cannot delete", correlationId });
           return sendJson(response, 200, { ok: true, correlationId });
+        }
+
+        if (request.method === "POST" && parsedUrl.pathname === "/v1/admin/people/create") {
+          const payload = (await readJson(request)) as {
+            id?: string;
+            displayName?: string;
+            preferredChannel?: "web" | "signal" | "whatsapp";
+            signalPhone?: string;
+            signalUuid?: string;
+          };
+          const id = payload.id?.trim() ?? "";
+          if (!id) return sendJson(response, 400, { error: "id is required", correlationId });
+          if (people.getById(id)) {
+            return sendJson(response, 409, { error: "person id already exists", correlationId });
+          }
+          const UUID_HEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          const phoneRaw = payload.signalPhone?.trim() ?? "";
+          const phone = phoneRaw ? normalizeE164Phone(phoneRaw) : "";
+          if (phoneRaw && !phone) {
+            return sendJson(response, 400, { error: "signalPhone could not be normalized to E.164", correlationId });
+          }
+          let signalUuid = (payload.signalUuid ?? "").trim().toLowerCase();
+          if (signalUuid && !UUID_HEX.test(signalUuid)) {
+            return sendJson(response, 400, { error: "signalUuid must be a UUID", correlationId });
+          }
+          if (!signalUuid && UUID_HEX.test(id)) {
+            signalUuid = id.toLowerCase();
+          }
+          if (phone) {
+            const conflict = identities.findPersonIdByIdentity("phone_e164", phone);
+            if (conflict) {
+              return sendJson(response, 409, { error: `phone_e164 already linked to person ${conflict}`, correlationId });
+            }
+          }
+          if (signalUuid) {
+            const conflict = identities.findPersonIdByIdentity("signal_uuid", signalUuid);
+            if (conflict) {
+              return sendJson(response, 409, { error: `signal_uuid already linked to person ${conflict}`, correlationId });
+            }
+          }
+          const preferredChannel =
+            payload.preferredChannel === "web" || payload.preferredChannel === "signal" || payload.preferredChannel === "whatsapp"
+              ? payload.preferredChannel
+              : phone || signalUuid
+                ? "signal"
+                : undefined;
+          const displayName = typeof payload.displayName === "string" ? payload.displayName.trim() : "";
+          people.upsert({
+            id,
+            ...(displayName ? { displayName } : {}),
+            rating: 50,
+            interestScore: 0.5,
+            rudenessScore: 0,
+            topics: [],
+            optedOut: false,
+            blocked: false,
+            ...(preferredChannel ? { preferredChannel } : {})
+          });
+          if (phone) {
+            identities.upsertIdentity(id, "phone_e164", phone);
+          }
+          if (signalUuid) {
+            identities.upsertIdentity(id, "signal_uuid", signalUuid);
+          }
+          const legacy = new IdentityRepository();
+          if (phone) {
+            legacy.upsertChannelMapping("signal", phone, id);
+          }
+          if (signalUuid) {
+            legacy.upsertChannelMapping("signal", signalUuid, id);
+          }
+          events.append(id, "admin_create_person", { displayName: displayName || undefined, phone: phone || undefined, signalUuid: signalUuid || undefined });
+          return sendJson(response, 200, {
+            item: people.getById(id),
+            identities: identities.listIdentitiesForPerson(id),
+            correlationId
+          });
         }
 
         if (request.method === "POST" && parsedUrl.pathname === "/v1/admin/people/merge") {
