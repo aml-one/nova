@@ -1,4 +1,4 @@
-import { getAgentBaseUrl } from "./agent-core";
+import { getAgentBaseUrl, getAgentBaseUrlDebug, type AgentBaseUrlDebug } from "./agent-core";
 
 /**
  * Interpret agent `/v1/auth/state` loginEnabled (handles occasional stringly JSON).
@@ -75,7 +75,8 @@ export async function fetchAgentAuthState(request: Request): Promise<AgentAuthSt
     return { needsSetup: false, loginEnabled: fb };
   };
   try {
-    const res = await fetch(`${getAgentBaseUrl(request)}/v1/auth/state`, {
+    const debug = getAgentBaseUrlDebug(request);
+    const res = await fetch(`${debug.baseUrl}/v1/auth/state`, {
       headers: { accept: "application/json" },
       cache: "no-store"
     });
@@ -96,4 +97,8 @@ export async function fetchAgentAuthState(request: Request): Promise<AgentAuthSt
     }
     return (await fromFallback()) ?? undefined;
   }
+}
+
+export function agentUrlDebugForRequest(request: Request): AgentBaseUrlDebug {
+  return getAgentBaseUrlDebug(request);
 }

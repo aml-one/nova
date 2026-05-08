@@ -12,6 +12,14 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [agentUnreachable, setAgentUnreachable] = useState(false);
+  const [agentDebug, setAgentDebug] = useState<{
+    agentUrl?: string;
+    agentUrlSource?: string;
+    agentUrlUsedHeader?: string | null;
+    agentForwardedHost?: string | null;
+    agentHost?: string | null;
+    agentPort?: string;
+  } | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -20,7 +28,21 @@ export default function LoginPage() {
         needsSetup?: boolean;
         loginEnabled?: boolean;
         agentUnreachable?: boolean;
+        agentUrl?: string;
+        agentUrlSource?: string;
+        agentUrlUsedHeader?: string | null;
+        agentForwardedHost?: string | null;
+        agentHost?: string | null;
+        agentPort?: string;
       };
+      setAgentDebug({
+        agentUrl: stateData.agentUrl,
+        agentUrlSource: stateData.agentUrlSource,
+        agentUrlUsedHeader: stateData.agentUrlUsedHeader ?? null,
+        agentForwardedHost: stateData.agentForwardedHost ?? null,
+        agentHost: stateData.agentHost ?? null,
+        agentPort: stateData.agentPort
+      });
       if (stateData.agentUnreachable && isAgentRestartGraceActive()) {
         setAgentUnreachable(false);
       } else if (stateData.agentUnreachable) {
@@ -77,6 +99,19 @@ export default function LoginPage() {
       {agentUnreachable ? (
         <p style={{ marginTop: 10, color: "#856404", fontSize: 13, background: "#fff3cd", padding: "8px 10px", borderRadius: 6 }}>
           Nova could not read auth settings from the agent (check <code>NOVA_AGENT_API_URL</code> and that agent-core is running).
+          <br />
+          <span style={{ fontSize: 12 }}>
+            Tried: <code>{String(agentDebug?.agentUrl ?? "")}</code> (source: <code>{String(agentDebug?.agentUrlSource ?? "")}</code>)
+          </span>
+          {agentDebug?.agentForwardedHost || agentDebug?.agentHost ? (
+            <>
+              <br />
+              <span style={{ fontSize: 12 }}>
+                Headers: x-forwarded-host=<code>{String(agentDebug.agentForwardedHost ?? "")}</code>, host=
+                <code>{String(agentDebug.agentHost ?? "")}</code>
+              </span>
+            </>
+          ) : null}
           To open the UI anyway: set <code>NOVA_WEB_LOGIN_ENABLED=false</code> for the web process and restart web,{" "}
           <strong>or</strong> copy <code>public/nova-login-fallback.json.example</code> to <code>public/nova-login-fallback.json</code> with{" "}
           <code>{`{ "loginEnabled": false }`}</code> (no rebuild; refresh the page).

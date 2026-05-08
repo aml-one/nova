@@ -6,6 +6,15 @@ function agentListenPort(): string {
   return process.env.NOVA_AGENT_PORT?.trim() || "8787";
 }
 
+export type AgentBaseUrlDebug = {
+  baseUrl: string;
+  source: "explicit_env" | "infer_from_host" | "infer_disabled" | "fallback_localhost";
+  usedHeader?: "x-forwarded-host" | "host";
+  forwardedHost?: string | null;
+  host?: string | null;
+  port: string;
+};
+
 /** Host part only: supports `host:port` and `[ipv6]:port`. */
 function hostnameFromHostHeader(host: string | null): string | null {
   if (!host) return null;
@@ -36,15 +45,20 @@ function hostnameFromHostHeader(host: string | null): string | null {
  * - Fallback: `http://127.0.0.1:<port>`.
  */
 export function getAgentBaseUrl(request?: Request): string {
+  return getAgentBaseUrlDebug(request).baseUrl;
+}
+
+export function getAgentBaseUrlDebug(request?: Request): AgentBaseUrlDebug {
+  const port = agentListenPort();
   const explicit = process.env.NOVA_AGENT_API_URL?.trim();
   if (explicit) {
-    return stripTrailingSlashes(explicit);
+    return { baseUrl: stripTrailingSlashes(explicit), source: "explicit_env", port };
   }
 
   const inferDisabled =
     process.env.NOVA_AGENT_API_INFER_FROM_HOST === "0" || process.env.NOVA_AGENT_API_INFER_FROM_HOST === "false";
   if (inferDisabled) {
-    return `http://127.0.0.1:${agentListenPort()}`;
+    return { baseUrl: `http://127.0.0.1:${port}`, source: "infer_disabled", port };
   }
 
   if (request) {
@@ -57,11 +71,20 @@ export function getAgentBaseUrl(request?: Request): string {
       if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
         continue;
       }
-      return `http://${hostname}:${agentListenPort()}`;
+      const usedHeader: AgentBaseUrlDebug["usedHeader"] =
+        candidate === forwardedHost ? "x-forwarded-host" : "host";
+      return {
+        baseUrl: `http://${hostname}:${port}`,
+        source: "infer_from_host",
+        usedHeader,
+        forwardedHost,
+        host: directHost,
+        port
+      };
     }
   }
 
-  return `http://127.0.0.1:${agentListenPort()}`;
+  return { baseUrl: `http://127.0.0.1:${port}`, source: "fallback_localhost", port };
 }
 
 export function getAgentHeaders(request?: Request, includeJsonContentType = false): HeadersInit {
