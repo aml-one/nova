@@ -42,4 +42,25 @@ describe("SignalChannelAdapter", () => {
     expect(messages).toHaveLength(1);
     expect(messages[0]?.text).toBe("Real inbound");
   });
+
+  it("captures sealed-sender UUID, profile name, and omits phoneNumber when E.164 missing", async () => {
+    const adapter = new SignalChannelAdapter();
+    const uuid = "f2dfef3b-f8ec-4e92-998f-1f39d6fa5be8";
+    const messages = await adapter.ingestSignalEvent({
+      envelope: {
+        source: uuid,
+        sourceNumber: null,
+        sourceUuid: uuid,
+        sourceName: "nit",
+        timestamp: 1_700_000_003,
+        dataMessage: { message: "Hello" }
+      }
+    });
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.from).toBe(uuid);
+    expect(messages[0]?.phoneNumber).toBeUndefined();
+    expect(messages[0]?.signalUuid).toBe(uuid);
+    expect(messages[0]?.signalSourceProfileName).toBe("nit");
+    expect(messages[0]?.text).toBe("Hello");
+  });
 });

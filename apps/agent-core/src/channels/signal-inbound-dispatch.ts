@@ -11,13 +11,14 @@ import { stripOrpheusSpeechCues } from "../voice/tts-text.js";
 export type SignalInboundTransport = "webhook" | "receive_ws";
 
 /**
- * Cross-transport dedupe — keeps the last N envelope identifiers we've already processed so a Signal
- * message that arrives via BOTH the receive_ws stream AND the HTTP webhook isn't replied to twice.
- * Each entry expires after `DEDUPE_TTL_MS` to avoid unbounded growth.
+ * Cross-transport dedupe — the same Signal DM is often delivered on BOTH the receive WebSocket and the
+ * HTTP webhook. We must not reply twice, but we also must NOT "burn" the dedupe key on a failed attempt
+ * (e.g. access_denied on one transport), or the other transport will see `deduped_other_transport` and
+ * never deliver the message.
+ *
+ * Claim = INSERT a row; release = DELETE when this attempt will not produce a reply.
  */
 const DEDUPE_TTL_MS = 5 * 60 * 1000;
-const DEDUPE_MAX = 1000;
-const recentEnvelopes = new Map<string, number>();
 
 function envelopeKey(message: ChannelMessage): string | undefined {
   if (typeof message.envelopeTimestamp !== "number") return undefined;
@@ -26,32 +27,27 @@ function envelopeKey(message: ChannelMessage): string | undefined {
   return `${id}:${message.envelopeTimestamp}`;
 }
 
-function dedupeShouldSkip(key: string | undefined): boolean {
-  if (!key) return false;
+function signalInboundTryClaimEnvelope(key: string | undefined): boolean {
+  if (!key) return true;
   const now = Date.now();
-  // Sweep stale entries opportunistically before checking, to keep memory bounded.
-  for (const [k, expiresAt] of recentEnvelopes) {
-    if (expiresAt <= now) recentEnvelopes.delete(k);
-  }
-  if (recentEnvelopes.has(key)) return true;
-  recentEnvelopes.set(key, now + DEDUPE_TTL_MS);
-  if (recentEnvelopes.size > DEDUPE_MAX) {
-    const firstKey = recentEnvelopes.keys().next().value;
-    if (firstKey !== undefined) recentEnvelopes.delete(firstKey);
-  }
-  return persistentDedupeShouldSkip(key, now);
-}
-
-function persistentDedupeShouldSkip(key: string, now: number): boolean {
   try {
     const db = getDatabase();
     db.prepare("DELETE FROM channel_message_dedupe WHERE expires_at_ms <= ?").run(now);
     const inserted = db
       .prepare("INSERT OR IGNORE INTO channel_message_dedupe (dedupe_key, expires_at_ms) VALUES (?, ?)")
       .run(key, now + DEDUPE_TTL_MS);
-    return inserted.changes === 0;
+    return inserted.changes === 1;
   } catch {
-    return false;
+    return true;
+  }
+}
+
+function signalInboundReleaseEnvelope(key: string | undefined): void {
+  if (!key) return;
+  try {
+    getDatabase().prepare("DELETE FROM channel_message_dedupe WHERE dedupe_key = ?").run(key);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -74,9 +70,8 @@ export async function dispatchSignalInboundMessages(
     const msgCorr = randomUUID();
     const trace: string[] = [baseTrace, "parsed_inbound"];
 
-    // Skip if we already replied to this envelope on the other transport.
     const dedupeKey = envelopeKey(message);
-    if (dedupeShouldSkip(dedupeKey)) {
+    if (!signalInboundTryClaimEnvelope(dedupeKey)) {
       trace.push("deduped_other_transport");
       pushChannelDebug({
         channel: "signal",
@@ -100,6 +95,16 @@ export async function dispatchSignalInboundMessages(
           }
         } catch {
           // Settings link is best-effort; never let it block message dispatch.
+        }
+      }
+      if (message.signalUuid) {
+        try {
+          deps.settings.ensureSignalTierUuidFromProfileDisplayName(
+            message.signalUuid,
+            message.signalSourceProfileName
+          );
+        } catch {
+          // Best-effort: match tier `name` to Signal profile display name for sealed sender.
         }
       }
       if (message.signalUuid) {
@@ -133,6 +138,7 @@ export async function dispatchSignalInboundMessages(
           trace,
           error: "Blocked by channel access policy"
         });
+        signalInboundReleaseEnvelope(dedupeKey);
         continue;
       }
       // signal-cli-rest-api typing indicators auto-expire after ~15 s. Re-issue them every 10 s while the
@@ -196,6 +202,7 @@ export async function dispatchSignalInboundMessages(
         reachedNova: false,
         error: msg
       });
+      signalInboundReleaseEnvelope(dedupeKey);
     } finally {
       await deps.dispatcher.signalTyping(message.from, false);
     }

@@ -9,6 +9,11 @@ export type ChannelMessage = {
   signalUuid?: string;
   /** Original envelope timestamp (ms since epoch) — used for cross-transport dedupe. */
   envelopeTimestamp?: number;
+  /**
+   * Signal profile display name from the envelope (`sourceName`), when present. Used with channel tier
+   * `name` to link sealed-sender UUIDs when there is no People row yet.
+   */
+  signalSourceProfileName?: string;
   text: string;
 };
 

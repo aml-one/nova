@@ -502,6 +502,51 @@ export class SettingsService {
     this.repo.upsert(next);
   }
 
+  /**
+   * When sealed-sender hides phone, Signal still sends `sourceName` (profile display name). If exactly
+   * one Signal channel tier row uses that same display `name`, attach this UUID to that row so access
+   * checks and outbound typing/send target the right recipient.
+   */
+  ensureSignalTierUuidFromProfileDisplayName(signalUuid: string, displayName: string | undefined): void {
+    const normalizedUuid = normalizeSignalUuid(signalUuid);
+    const nameKey = normalizeSignalProfileDisplayKey(displayName);
+    if (!normalizedUuid || nameKey.length < 2) return;
+    const current = this.get();
+    const rows = [...current.messagingAccess.channelTiers.signal];
+    if (rows.some((r) => r.signalUuid === normalizedUuid)) {
+      return;
+    }
+    const matches = rows.filter((r) => {
+      const rowKey = normalizeSignalProfileDisplayKey(r.name);
+      return rowKey.length >= 2 && rowKey === nameKey;
+    });
+    if (matches.length !== 1) {
+      return;
+    }
+    const target = matches[0]!;
+    if (target.signalUuid && target.signalUuid !== normalizedUuid) {
+      return;
+    }
+    const idx = rows.findIndex(
+      (row) =>
+        row.phone === target.phone ||
+        (Boolean(target.phone) && digitsOnlyPhone(row.phone) === digitsOnlyPhone(target.phone))
+    );
+    if (idx < 0) return;
+    const nextRows = rows.map((row, i) => (i === idx ? { ...row, signalUuid: normalizedUuid } : row));
+    const next: AppSettings = {
+      ...current,
+      messagingAccess: {
+        ...current.messagingAccess,
+        channelTiers: {
+          ...current.messagingAccess.channelTiers,
+          signal: nextRows
+        }
+      }
+    };
+    this.repo.upsert(next);
+  }
+
   private normalize(settings: AppSettings): AppSettings {
     const delegatedFolders = settings.delegatedFolders
       .map((entry) => resolvePath(entry))
@@ -863,6 +908,11 @@ function normalizePhone(value: string | undefined): string {
 
 function digitsOnlyPhone(value: string | undefined): string {
   return (value ?? "").replace(/\D/g, "");
+}
+
+function normalizeSignalProfileDisplayKey(raw: string | undefined): string {
+  if (typeof raw !== "string") return "";
+  return raw.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
 function normalizePhoneList(values: string[] | undefined): string[] {

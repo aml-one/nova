@@ -14,6 +14,8 @@ type SignalEnvelopeLike = {
   sourceNumber?: string | null;
   /** Sealed-sender Signal Service ID; present when `sourceNumber` is null on first contact. */
   sourceUuid?: string | null;
+  /** Signal contact name (visible even under sealed sender). */
+  sourceName?: string | null;
   timestamp?: number;
   dataMessage?: DataMessageLike;
   /** Edited-message wrapper seen on some envelopes. */
@@ -94,6 +96,8 @@ export class SignalChannelAdapter {
     };
     if (uuid) message.signalUuid = uuid;
     if (envelopeTimestamp) message.envelopeTimestamp = envelopeTimestamp;
+    const profileName = trimOrEmpty(envelope?.sourceName);
+    if (profileName) message.signalSourceProfileName = profileName;
     return [message];
   }
 
