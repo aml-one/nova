@@ -5,6 +5,7 @@ import type { SettingsService } from "../settings/settings-service.js";
 import type { ChannelMessage } from "./channel-router.js";
 import { resolveChannelAccess } from "../security/phone-access.js";
 import { previewChannelText, pushChannelDebug } from "./channel-debug-log.js";
+import { getDatabase } from "../storage/sqlite.js";
 
 export type SignalInboundTransport = "webhook" | "receive_ws";
 
@@ -37,7 +38,20 @@ function dedupeShouldSkip(key: string | undefined): boolean {
     const firstKey = recentEnvelopes.keys().next().value;
     if (firstKey !== undefined) recentEnvelopes.delete(firstKey);
   }
-  return false;
+  return persistentDedupeShouldSkip(key, now);
+}
+
+function persistentDedupeShouldSkip(key: string, now: number): boolean {
+  try {
+    const db = getDatabase();
+    db.prepare("DELETE FROM channel_message_dedupe WHERE expires_at_ms <= ?").run(now);
+    const inserted = db
+      .prepare("INSERT OR IGNORE INTO channel_message_dedupe (dedupe_key, expires_at_ms) VALUES (?, ?)")
+      .run(key, now + DEDUPE_TTL_MS);
+    return inserted.changes === 0;
+  } catch {
+    return false;
+  }
 }
 
 export async function dispatchSignalInboundMessages(
@@ -113,6 +127,7 @@ export async function dispatchSignalInboundMessages(
         });
         continue;
       }
+      await deps.dispatcher.signalTyping(message.from, true);
       const reply = await deps.orchestrator.handleChannelMessage({
         channel: "signal",
         phoneNumber: message.phoneNumber,
@@ -156,6 +171,8 @@ export async function dispatchSignalInboundMessages(
         reachedNova: false,
         error: msg
       });
+    } finally {
+      await deps.dispatcher.signalTyping(message.from, false);
     }
   }
   return replies;

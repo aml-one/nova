@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { getDatabase } from "../storage/sqlite.js";
 
 export type ChannelDebugTransport = "webhook" | "baileys" | "dispatcher" | "next_proxy" | "receive_ws";
 
@@ -52,10 +53,102 @@ export function pushChannelDebug(entry: Omit<ChannelDebugEntry, "id" | "at"> & P
   while (buffer.length > MAX) {
     buffer.pop();
   }
+  persistChannelDebug(row);
   return row;
 }
 
 export function listChannelDebugEntries(limit = 150): ChannelDebugEntry[] {
   const n = Math.min(Math.max(1, limit), MAX);
+  const persisted = listPersistedChannelDebugEntries(n);
+  if (persisted.length > 0) {
+    return persisted;
+  }
   return buffer.slice(0, n);
+}
+
+function persistChannelDebug(row: ChannelDebugEntry): void {
+  try {
+    const db = getDatabase();
+    db.prepare(
+      `
+      INSERT OR REPLACE INTO channel_debug_entries
+        (id, at, channel, direction, transport, correlation_id, peer, text_preview, trace_json, reached_nova, error)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `
+    ).run(
+      row.id,
+      row.at,
+      row.channel,
+      row.direction,
+      row.transport ?? null,
+      row.correlationId,
+      row.peer,
+      row.textPreview,
+      JSON.stringify(row.trace),
+      row.reachedNova === undefined ? null : row.reachedNova ? 1 : 0,
+      row.error ?? null
+    );
+    db.prepare(
+      `
+      DELETE FROM channel_debug_entries
+      WHERE id NOT IN (
+        SELECT id FROM channel_debug_entries ORDER BY at DESC LIMIT ?
+      )
+      `
+    ).run(MAX);
+  } catch {
+    // Debug logging must never break message handling.
+  }
+}
+
+function listPersistedChannelDebugEntries(limit: number): ChannelDebugEntry[] {
+  try {
+    const db = getDatabase();
+    const rows = db
+      .prepare(
+        `
+        SELECT id, at, channel, direction, transport, correlation_id, peer, text_preview, trace_json, reached_nova, error
+        FROM channel_debug_entries
+        ORDER BY at DESC
+        LIMIT ?
+        `
+      )
+      .all(limit) as Array<{
+      id: string;
+      at: string;
+      channel: "signal" | "whatsapp";
+      direction: "in" | "out";
+      transport?: ChannelDebugTransport | null;
+      correlation_id: string;
+      peer: string;
+      text_preview: string;
+      trace_json: string;
+      reached_nova?: number | null;
+      error?: string | null;
+    }>;
+    return rows.map((row) => ({
+      id: row.id,
+      at: row.at,
+      channel: row.channel,
+      direction: row.direction,
+      transport: row.transport ?? undefined,
+      correlationId: row.correlation_id,
+      peer: row.peer,
+      textPreview: row.text_preview,
+      trace: parseTrace(row.trace_json),
+      reachedNova: row.reached_nova === null || row.reached_nova === undefined ? undefined : row.reached_nova === 1,
+      error: row.error ?? undefined
+    }));
+  } catch {
+    return [];
+  }
+}
+
+function parseTrace(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
 }

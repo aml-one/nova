@@ -4,17 +4,20 @@ import { SignalChannelAdapter } from "../channels/signal.js";
 import { WhatsAppChannelAdapter } from "../channels/whatsapp.js";
 import { Logger } from "../observability/logger.js";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
+import { VoiceService } from "../voice/voice-service.js";
 import { OutboundQueueService } from "./outbound-queue.js";
 
 export class OutboundDispatcher {
   private readonly queue = new OutboundQueueService();
   private readonly wa: WhatsAppChannelAdapter;
   private readonly signal: SignalChannelAdapter;
+  private readonly voice: VoiceService;
   private readonly logger = new Logger();
 
-  constructor(getSettings: () => AppSettings) {
+  constructor(private readonly getSettings: () => AppSettings) {
     this.wa = new WhatsAppChannelAdapter(getSettings);
     this.signal = new SignalChannelAdapter(getSettings);
+    this.voice = new VoiceService(getSettings);
   }
 
   private timer: NodeJS.Timeout | undefined;
@@ -45,6 +48,32 @@ export class OutboundDispatcher {
     this.queue.enqueue(channel, recipient, payload, correlationId);
   }
 
+  async signalTyping(recipient: string, typing: boolean): Promise<void> {
+    try {
+      await this.signal.sendTypingIndicator(recipient, typing);
+      pushChannelDebug({
+        channel: "signal",
+        direction: "out",
+        transport: "dispatcher",
+        correlationId: randomUUID(),
+        peer: recipient,
+        textPreview: typing ? "(typing on)" : "(typing off)",
+        trace: [typing ? "typing_indicator_on" : "typing_indicator_off"]
+      });
+    } catch (error) {
+      pushChannelDebug({
+        channel: "signal",
+        direction: "out",
+        transport: "dispatcher",
+        correlationId: randomUUID(),
+        peer: recipient,
+        textPreview: typing ? "(typing on failed)" : "(typing off failed)",
+        trace: [typing ? "typing_indicator_on_failed" : "typing_indicator_off_failed"],
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
   private async tick(): Promise<void> {
     const jobs = this.queue.listReady(20);
     for (const job of jobs) {
@@ -52,7 +81,7 @@ export class OutboundDispatcher {
         if (job.channel === "whatsapp") {
           await this.wa.sendMessage(job.recipient, job.payload);
         } else {
-          await this.signal.sendMessage(job.recipient, job.payload);
+          await this.sendSignalWithOptionalVoice(job.recipient, job.payload);
         }
         this.queue.markSuccess(job.id);
         pushChannelDebug({
@@ -87,5 +116,44 @@ export class OutboundDispatcher {
         });
       }
     }
+  }
+
+  private async sendSignalWithOptionalVoice(recipient: string, text: string): Promise<void> {
+    try {
+      const settings = this.getSettings();
+      const tts = settings?.orpheusTts;
+      if (tts?.enabled && tts.baseUrl.trim()) {
+        const audio = await this.voice.synthesizeOrpheusBuffer(text);
+        const ext = (tts.responseFormat || "wav").replace(/[^a-z0-9]/gi, "") || "wav";
+        const mimeType = this.voice.mimeTypeForCurrentFormat();
+        await this.signal.sendMessage(recipient, text, {
+          bytes: audio,
+          mimeType,
+          filename: `nova-reply.${ext}`
+        });
+        pushChannelDebug({
+          channel: "signal",
+          direction: "out",
+          transport: "dispatcher",
+          correlationId: randomUUID(),
+          peer: recipient,
+          textPreview: previewChannelText(`voice+transcript (${audio.byteLength} bytes)`),
+          trace: ["signal_voice_attachment_sent"]
+        });
+        return;
+      }
+    } catch (error) {
+      pushChannelDebug({
+        channel: "signal",
+        direction: "out",
+        transport: "dispatcher",
+        correlationId: randomUUID(),
+        peer: recipient,
+        textPreview: previewChannelText(text),
+        trace: ["signal_voice_attachment_failed", "falling_back_to_text"],
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+    await this.signal.sendMessage(recipient, text);
   }
 }

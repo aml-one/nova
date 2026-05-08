@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 
 let database: DatabaseSync | undefined;
-const LATEST_SCHEMA_VERSION = 20;
+const LATEST_SCHEMA_VERSION = 21;
 
 export function getDatabase(): DatabaseSync {
   if (database) {
@@ -524,6 +524,32 @@ function runMigrations(db: DatabaseSync): void {
       status_to TEXT,
       note TEXT,
       actor TEXT NOT NULL DEFAULT 'nova',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+    },
+    () => {
+      db.exec(`
+    CREATE TABLE IF NOT EXISTS channel_debug_entries (
+      id TEXT PRIMARY KEY,
+      at TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      transport TEXT,
+      correlation_id TEXT NOT NULL,
+      peer TEXT NOT NULL,
+      text_preview TEXT NOT NULL,
+      trace_json TEXT NOT NULL,
+      reached_nova INTEGER,
+      error TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_channel_debug_entries_at
+      ON channel_debug_entries(at DESC);
+
+    CREATE TABLE IF NOT EXISTS channel_message_dedupe (
+      dedupe_key TEXT PRIMARY KEY,
+      expires_at_ms INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
   `);

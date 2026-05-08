@@ -34,6 +34,12 @@ type SignalWebhookPayload = {
   message?: string;
 };
 
+export type SignalVoiceAttachment = {
+  bytes: Buffer;
+  mimeType: string;
+  filename: string;
+};
+
 function textFromDataMessage(dm: DataMessageLike | undefined): string {
   if (!dm) return "";
   const raw = dm.message ?? dm.body ?? "";
@@ -96,7 +102,27 @@ export class SignalChannelAdapter {
     return [message];
   }
 
-  async sendMessage(to: string, text: string): Promise<void> {
+  async sendTypingIndicator(to: string, typing: boolean): Promise<void> {
+    const settings = this.getSettings?.();
+    const baseUrl = settings ? effectiveSignalApiUrl(settings) : (process.env.SIGNAL_API_URL ?? "").trim();
+    const account = settings ? effectiveSignalAccountNumber(settings) : (process.env.SIGNAL_ACCOUNT_NUMBER ?? "").trim();
+    if (!baseUrl || !account || !to.trim()) {
+      return;
+    }
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/typing-indicator/${encodeURIComponent(account)}`, {
+      method: typing ? "PUT" : "DELETE",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({ recipient: to })
+    });
+    if (!response.ok && response.status !== 404) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`signal typing indicator failed (${response.status}): ${body.slice(0, 300)}`);
+    }
+  }
+
+  async sendMessage(to: string, text: string, voice?: SignalVoiceAttachment): Promise<void> {
     const settings = this.getSettings?.();
     const baseUrl = settings ? effectiveSignalApiUrl(settings) : (process.env.SIGNAL_API_URL ?? "").trim();
     const account = settings ? effectiveSignalAccountNumber(settings) : (process.env.SIGNAL_ACCOUNT_NUMBER ?? "").trim();
@@ -111,8 +137,10 @@ export class SignalChannelAdapter {
       },
       body: JSON.stringify({
         message: text,
+        base64_attachments: voice ? [`data:${voice.mimeType};filename=${voice.filename};base64,${voice.bytes.toString("base64")}`] : [],
         number: account,
-        recipients: [to]
+        recipients: [to],
+        text_mode: "normal"
       })
     });
     if (!response.ok) {
