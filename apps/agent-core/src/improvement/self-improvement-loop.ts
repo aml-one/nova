@@ -350,10 +350,26 @@ export class SelfImprovementLoop {
       "Nova has a unified emotional core: let curiosity, stress, or warmth nudge emphasis (never override safety or facts).",
       "You are encouraged to propose concrete self-improvements: small code changes, tests, or refactors (describe file + change at a high level—no huge dumps).",
       "If Nova uses SOUL-style orchestration markdown on disk, propose ONE optional paragraph to add or replace that refines personality while staying consistent with the base system persona (no unsafe or deceptive goals).",
+      "",
+      "PROJECT CONSTRAINTS (do not invent paths):",
+      "- Nova is a TypeScript / Node.js monorepo. There is no Python source (no `engine/`, no `*.py`).",
+      "- The autonomous worker can ONLY edit files under one of these roots:",
+      "    apps/agent-core/src/   (Node backend; .ts files)",
+      "    apps/web/src/          (Next.js frontend; .ts/.tsx files)",
+      "    packages/sdk/src/      (shared types; .ts files)",
+      "    skills/                (skill definitions; .ts/.md/.yaml files)",
+      "  Anything else (security/auth plumbing, install scripts, env files, top-level config) is OFF-LIMITS — never propose them.",
+      "- Pick exactly ONE existing-or-plausible file under the safe roots above. Use the real file extension (.ts/.tsx). Never suggest .py / .js / .go / etc.",
+      "",
       "Return sections exactly:",
-      "1) SUMMARY: 3 bullet points",
+      "1) SUMMARY: 3 bullet points (plain English; what is the situation right now?)",
       "2) QUESTIONS_FOR_USER: up to 2 short questions only if truly unresolved after web research.",
-      "3) ACTION_PLAN: exactly one item with Title, Summary, and Done Signal (how we verify completion).",
+      "3) ACTION_PLAN: exactly one item with these labelled lines (each on its own line, in this order):",
+      "     Title: <≤ 80 chars, no jargon>",
+      "     Summary: <one short sentence: the technical change>",
+      "     Why: <2-4 plain-English sentences for a non-engineer: what changes for the user, why it helps Nova, what improves day-to-day>",
+      "     Target file: <path under one of the safe roots above, e.g. apps/agent-core/src/foo/bar.ts>",
+      "     Done Signal: <one sentence: how we verify it actually works>",
       "4) SOUL_OR_PERSONA_DELTA: one short paragraph or the word \"none\" if no change is warranted.",
       "",
       moodLine ? `Nova unified mood now: ${moodLine}` : "",
@@ -681,6 +697,8 @@ function extractActionPlan(value: string): { title: string; summary: string; don
     .filter((line) => line.length > 0 && !/^(summary|questions_for_user|soul_or_persona_delta)\s*:/i.test(line));
   let title = "";
   let summary = "";
+  let why = "";
+  let targetFile = "";
   let doneSignal = "";
   for (const line of lines) {
     const cleaned = line.replace(/^[-*]\s*/, "").trim();
@@ -692,18 +710,38 @@ function extractActionPlan(value: string): { title: string; summary: string; don
       summary = cleaned.replace(/^summary\s*:/i, "").trim();
       continue;
     }
-    if (!doneSignal && /^done signal\s*:/i.test(cleaned)) {
-      doneSignal = cleaned.replace(/^done signal\s*:/i, "").trim();
+    if (!why && /^why\s*:/i.test(cleaned)) {
+      why = cleaned.replace(/^why\s*:/i, "").trim();
+      continue;
+    }
+    if (!targetFile && /^target\s+file\s*:/i.test(cleaned)) {
+      targetFile = cleaned.replace(/^target\s+file\s*:/i, "").trim();
+      continue;
+    }
+    if (!doneSignal && /^done\s*signal\s*:/i.test(cleaned)) {
+      doneSignal = cleaned.replace(/^done\s*signal\s*:/i, "").trim();
       continue;
     }
   }
   if (!title || !summary) {
     return null;
   }
+  // The proposal repository stores a single `details` field. Pack the structured sections so the
+  // UI (and the proposal worker) can pull them back out, while still rendering as readable text in
+  // older clients that just dump `details` verbatim. Keeping plain `Why:` / `Target file:` /
+  // `Done Signal:` line prefixes makes the details column self-explanatory even without a parser.
+  const details = [
+    why ? `Why: ${why}` : null,
+    targetFile ? `Target file: ${targetFile}` : null,
+    doneSignal ? `Done Signal: ${doneSignal}` : "Done Signal: Manually verify expected behavior and logs"
+  ]
+    .filter((line): line is string => typeof line === "string" && line.length > 0)
+    .join("\n")
+    .slice(0, 1500);
   return {
     title: title.slice(0, 160),
     summary: summary.slice(0, 500),
-    doneSignal: (doneSignal || "Manually verify expected behavior and logs").slice(0, 500)
+    doneSignal: details
   };
 }
 

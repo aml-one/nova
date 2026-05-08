@@ -329,7 +329,7 @@ export default function LearningPage() {
               <div className="text-xs uppercase tracking-wide text-muted">{statusLabel(activeProposal.status)}</div>
             </div>
             <div className="text-sm">{activeProposal.summary}</div>
-            {activeProposal.details ? <div className="text-xs text-muted">Done signal: {activeProposal.details}</div> : null}
+            <ProposalDetails details={activeProposal.details} />
             {activeProposal.status === "needs_human" ? (
               <div className="rounded-ui border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
                 <div className="font-medium text-amber-200">Nova stopped and is waiting for you</div>
@@ -423,7 +423,7 @@ export default function LearningPage() {
                 <div className="text-xs uppercase tracking-wide text-muted">{statusLabel(item.status)}</div>
               </div>
               <div className="text-sm">{item.summary}</div>
-              {item.details ? <div className="text-xs text-muted">Done signal: {item.details}</div> : null}
+              <ProposalDetails details={item.details} />
               <div className="text-xs text-muted">Created: {new Date(item.createdAt).toLocaleString()}</div>
               {item.status === "needs_human" ? (
                 <div className="rounded-ui border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
@@ -521,6 +521,67 @@ export default function LearningPage() {
         ))}
     </div>
   );
+}
+
+/**
+ * Renders the structured `details` that proposal-generator now packs:
+ *   Why: …
+ *   Target file: …
+ *   Done Signal: …
+ *
+ * Older proposals only have a single line (the original "Done Signal" text). In that case we still
+ * show it under the "Done signal" label so nothing regresses for existing rows.
+ */
+function ProposalDetails({ details }: { details?: string }) {
+  const parsed = useMemo(() => parseProposalDetails(details), [details]);
+  if (!parsed) return null;
+  if (parsed.kind === "legacy") {
+    return <div className="text-xs text-muted">Done signal: {parsed.text}</div>;
+  }
+  return (
+    <div className="mt-1 space-y-1 text-xs">
+      {parsed.why ? (
+        <div>
+          <span className="font-medium text-foreground">Why this helps: </span>
+          <span className="text-muted">{parsed.why}</span>
+        </div>
+      ) : null}
+      {parsed.targetFile ? (
+        <div>
+          <span className="font-medium text-foreground">Target file: </span>
+          <code className="rounded bg-black/10 px-1 py-[1px] text-[11px] text-foreground dark:bg-white/10">{parsed.targetFile}</code>
+        </div>
+      ) : null}
+      {parsed.doneSignal ? (
+        <div>
+          <span className="font-medium text-foreground">How we'll know it works: </span>
+          <span className="text-muted">{parsed.doneSignal}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type ParsedProposalDetails =
+  | { kind: "structured"; why: string; targetFile: string; doneSignal: string }
+  | { kind: "legacy"; text: string };
+
+function parseProposalDetails(details?: string): ParsedProposalDetails | null {
+  const raw = (details ?? "").trim();
+  if (!raw) return null;
+  const why = matchLine(raw, /^Why\s*:\s*(.+)$/im);
+  const targetFile = matchLine(raw, /^Target\s+file\s*:\s*(.+)$/im);
+  const doneSignal = matchLine(raw, /^Done\s*Signal\s*:\s*(.+)$/im);
+  if (!why && !targetFile && !doneSignal) {
+    // Older proposal that just stored the raw "done signal" as a single line.
+    return { kind: "legacy", text: raw };
+  }
+  return { kind: "structured", why, targetFile, doneSignal };
+}
+
+function matchLine(haystack: string, pattern: RegExp): string {
+  const match = pattern.exec(haystack);
+  return match?.[1]?.trim() ?? "";
 }
 
 function renderLearningDetails(details?: Record<string, unknown>): ReactNode | null {

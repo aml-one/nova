@@ -79,6 +79,34 @@ const settingsLink: NavLink = {
   subtitle: "Configure providers, channels, safety, voice (tab), and UI."
 };
 
+/**
+ * Numeric badge that surfaces "new things waiting" on a sidebar link.
+ *  - `overlay` mode floats over the icon when the rail is collapsed.
+ *  - `inline` mode sits at the right edge of the row when the rail is expanded.
+ * Counts above 99 collapse to "99+" so the badge stays compact.
+ */
+function NavBadge({ count, variant }: { count: number; variant: "overlay" | "inline" }) {
+  const display = count > 99 ? "99+" : String(count);
+  if (variant === "overlay") {
+    return (
+      <span
+        className="absolute -right-1.5 -top-1.5 inline-flex min-w-[16px] items-center justify-center rounded-full bg-rose-600 px-1 text-[9px] font-semibold leading-[14px] text-white shadow-sm ring-2 ring-surface"
+        aria-hidden
+      >
+        {display}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="ml-1 inline-flex min-w-[18px] items-center justify-center rounded-full bg-rose-600 px-1.5 text-[10px] font-semibold text-white"
+      aria-hidden
+    >
+      {display}
+    </span>
+  );
+}
+
 function AppMainColumn({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const { extras } = useShellHeaderExtras();
@@ -132,9 +160,37 @@ function AppMainColumn({ children }: { children: ReactNode }) {
  */
 const NAV_COLLAPSED_STORAGE_KEY = "nova:nav-collapsed";
 
+/**
+ * Pages that surface a numeric badge in the left rail. The map is keyed by `href` so we can
+ * render the badge for any link without special-casing each one in the loop. Counts are polled
+ * once per `NAV_BADGE_REFRESH_MS` and cached in component state.
+ */
+type SidebarBadgeMap = Record<string, number>;
+const NAV_BADGE_REFRESH_MS = 30_000;
+
+async function fetchProposedProposalCount(signal?: AbortSignal): Promise<number> {
+  try {
+    const response = await fetch("/api/improvement/proposals", {
+      method: "GET",
+      headers: { accept: "application/json" },
+      signal,
+      cache: "no-store"
+    });
+    if (!response.ok) return 0;
+    const text = await response.text();
+    if (!text) return 0;
+    const data = JSON.parse(text) as { items?: Array<{ status?: string }> };
+    if (!Array.isArray(data.items)) return 0;
+    return data.items.reduce((acc, item) => (item?.status === "proposed" ? acc + 1 : acc), 0);
+  } catch {
+    return 0;
+  }
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [navCollapsed, setNavCollapsed] = useState(true);
+  const [navBadges, setNavBadges] = useState<SidebarBadgeMap>({});
 
   useEffect(() => {
     try {
@@ -159,6 +215,26 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  // Pull the count of `proposed` improvement proposals every 30 s so the Learning rail can show a
+  // small numeric badge when Nova has new ideas waiting for the user. Failures (agent-core
+  // restart, transient 5xx) are swallowed silently and just keep the previous badge value.
+  useEffect(() => {
+    let cancelled = false;
+    const ac = new AbortController();
+    const update = async () => {
+      const count = await fetchProposedProposalCount(ac.signal);
+      if (cancelled) return;
+      setNavBadges((prev) => (prev["/learning"] === count ? prev : { ...prev, "/learning": count }));
+    };
+    void update();
+    const id = setInterval(() => void update(), NAV_BADGE_REFRESH_MS);
+    return () => {
+      cancelled = true;
+      ac.abort();
+      clearInterval(id);
+    };
   }, []);
 
   const toggleNavCollapsed = useCallback(() => {
@@ -195,25 +271,39 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
         <nav className="space-y-1 overflow-y-auto">
-          {links.map((link, index) => (
+          {links.map((link, index) => {
+            const badgeCount = navBadges[link.href] ?? 0;
+            return (
             <div key={link.href}>
             <Link
               href={link.href}
               className={cn(
-                "flex items-center gap-2 rounded-ui border text-xs",
+                "relative flex items-center gap-2 rounded-ui border text-xs",
                 navCollapsed ? "mx-auto h-8 w-8 justify-center" : "px-2 py-1.5",
                 pathname === link.href ? "bg-pastelBlue border-blue-500/70 text-slate-900" : "bg-surface2"
               )}
-              title={link.label}
+              title={
+                badgeCount > 0
+                  ? `${link.label} — ${badgeCount} new ${badgeCount === 1 ? "item" : "items"} waiting`
+                  : link.label
+              }
+              aria-label={badgeCount > 0 ? `${link.label} (${badgeCount} new)` : link.label}
             >
-              <span className="inline-flex min-w-[22px] justify-center font-semibold">
+              <span className="relative inline-flex min-w-[22px] justify-center font-semibold">
                 <link.icon className="h-3.5 w-3.5" />
+                {navCollapsed && badgeCount > 0 ? <NavBadge count={badgeCount} variant="overlay" /> : null}
               </span>
-              {!navCollapsed ? <span>{link.label}</span> : null}
+              {!navCollapsed ? (
+                <>
+                  <span className="flex-1">{link.label}</span>
+                  {badgeCount > 0 ? <NavBadge count={badgeCount} variant="inline" /> : null}
+                </>
+              ) : null}
             </Link>
             {index === 1 || index === 8 || index === 13 || index === 16 ? <div className="my-2 h-px w-full bg-slate-300/40" /> : null}
             </div>
-          ))}
+            );
+          })}
           <div className="mt-2 h-px w-full bg-slate-300/40" />
           <div className="pt-2">
             <Link
