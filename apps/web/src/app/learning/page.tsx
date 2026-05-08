@@ -593,6 +593,10 @@ function renderLearningDetails(details?: Record<string, unknown>): ReactNode | n
   const failures =
     typeof details.failures === "number" || typeof details.failures === "string" ? String(details.failures) : undefined;
   const notes = typeof details.notes === "string" ? details.notes : undefined;
+  const resolvedTargetFile =
+    typeof details.resolvedTargetFile === "string" && details.resolvedTargetFile.trim().length > 0
+      ? details.resolvedTargetFile.trim()
+      : undefined;
 
   return (
     <div className="mt-1 space-y-1 text-xs text-muted">
@@ -601,6 +605,14 @@ function renderLearningDetails(details?: Record<string, unknown>): ReactNode | n
       {notes ? <div>Notes: {notes}</div> : null}
       {runId ? <div>Run: {runId}</div> : null}
       {userId ? <div>User: {userId}</div> : null}
+      {resolvedTargetFile ? (
+        <div>
+          <span className="font-medium text-foreground">Target file (resolved): </span>
+          <code className="rounded bg-black/10 px-1 py-[1px] text-[11px] text-foreground dark:bg-white/10">
+            {resolvedTargetFile}
+          </code>
+        </div>
+      ) : null}
     </div>
   );
 }

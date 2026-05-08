@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-type LearningRecord = {
+export type LearningRecord = {
   id: string;
   at: string;
   category: "outcome" | "proposal" | "research" | "improvement" | "validation" | "error";

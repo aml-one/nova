@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { GitOpsManager } from "../git/gitops-manager.js";
 import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
-import { LearningLog } from "./learning-log.js";
+import { LearningLog, type LearningRecord } from "./learning-log.js";
 import { generateSkillFromTemplate } from "./patch-generator.js";
 import { generateImprovementPrompt, summarizeOutcomes } from "./proposal-generator.js";
 import { isValidationPass, runValidationGate } from "./validation-gate.js";
@@ -36,6 +36,11 @@ import {
   type ImprovementProposalStatus
 } from "./improvement-proposal-repository.js";
 import { ProposalWorker } from "./proposal-worker.js";
+import {
+  extractExplicitTargetFileRaw,
+  sanitizeImprovementProposalDetailsBody,
+  tryResolveImprovementTargetPath
+} from "./improvement-target-path.js";
 
 type Outcome = {
   runId: string;
@@ -87,6 +92,7 @@ export class SelfImprovementLoop {
   ) {
     this.policy = loadPolicy();
     this.hydrateOutcomesFromRunHistory();
+    this.persistRepairedImprovementProposalsOnStartup();
   }
 
   recordOutcome(outcome: Outcome): void {
@@ -380,7 +386,8 @@ export class SelfImprovementLoop {
       "    packages/sdk/src/      (shared types; .ts files)",
       "    skills/                (skill definitions; .ts/.md/.yaml files)",
       "  Anything else (security/auth plumbing, install scripts, env files, top-level config) is OFF-LIMITS — never propose them.",
-      "- Pick exactly ONE existing-or-plausible file under the safe roots above. Use the real file extension (.ts/.tsx). Never suggest .py / .js / .go / etc.",
+      "- Pick at most ONE file that actually exists on disk under a safe root (verify before naming it). Never invent filenames (no guessing). If no specific existing file applies, omit the entire Target file line.",
+      "- Use the real file extension (.ts/.tsx). Never suggest .py / .js / .go / etc.",
       "",
       "Return sections exactly:",
       "1) SUMMARY: 3 bullet points (plain English; what is the situation right now?)",
@@ -389,7 +396,7 @@ export class SelfImprovementLoop {
       "     Title: <≤ 80 chars, no jargon>",
       "     Summary: <one short sentence: the technical change>",
       "     Why: <2-4 plain-English sentences for a non-engineer: what changes for the user, why it helps Nova, what improves day-to-day>",
-      "     Target file: <path under one of the safe roots above, e.g. apps/agent-core/src/foo/bar.ts>",
+      "     Target file: <existing repo-relative path under a safe root, e.g. apps/agent-core/src/foo/bar.ts> — omit this entire line if you cannot name a real file that exists now",
       "     Done Signal: <one sentence: how we verify it actually works>",
       "4) SOUL_OR_PERSONA_DELTA: one short paragraph or the word \"none\" if no change is warranted.",
       "",
@@ -417,26 +424,33 @@ export class SelfImprovementLoop {
   }
 
   getLearningHistoryGroupedByDate(): Record<string, Array<Record<string, unknown>>> {
-    return this.learningLog.getGroupedByDate();
+    const grouped = this.learningLog.getGroupedByDate();
+    const out: Record<string, Array<Record<string, unknown>>> = {};
+    for (const [date, rows] of Object.entries(grouped)) {
+      out[date] = rows.map((row) => this.attachResolvedProposalTarget(row));
+    }
+    return out;
   }
 
   getLearningHistory(): Array<Record<string, unknown>> {
-    return this.learningLog.getAll();
+    return this.learningLog.getAll().map((row) => this.attachResolvedProposalTarget(row));
   }
 
   listImprovementProposals(limit = 200): ImprovementProposal[] {
-    return this.proposalRepo.list(limit);
+    return this.proposalRepo.list(limit).map((item) => this.sanitizeProposalForView(item));
   }
 
   updateImprovementProposalStatus(id: string, status: ImprovementProposalStatus): ImprovementProposal | undefined {
-    return this.proposalRepo.setStatus(id, status, `Set by user to ${status}`, "user");
+    const item = this.proposalRepo.setStatus(id, status, `Set by user to ${status}`, "user");
+    return item ? this.sanitizeProposalForView(item) : undefined;
   }
 
   updateImprovementProposalContent(
     id: string,
     edits: { title?: string; summary?: string; details?: string | null }
   ): ImprovementProposal | undefined {
-    return this.proposalRepo.updateContent(id, edits, "user");
+    const item = this.proposalRepo.updateContent(id, edits, "user");
+    return item ? this.sanitizeProposalForView(item) : undefined;
   }
 
   listImprovementProposalEvents(id: string, limit = 100): ImprovementProposalEvent[] {
@@ -473,6 +487,74 @@ export class SelfImprovementLoop {
       },
       curiosity: this.curiosity.getStats()
     };
+  }
+
+  /** One-time-ish pass so existing SQLite rows get repaired `details` written back. */
+  private persistRepairedImprovementProposalsOnStartup(): void {
+    try {
+      for (const row of this.proposalRepo.list(500)) {
+        this.persistRepairedProposalDetailsIfChanged(row);
+      }
+    } catch {
+      // Ignore startup races (DB busy, etc.).
+    }
+  }
+
+  private normalizeProposalDetailsForCompare(value: string | undefined | null): string {
+    return (value ?? "").replace(/\r\n/g, "\n").trimEnd();
+  }
+
+  /**
+   * If sanitisation/repair changes `details`, persist to SQLite so the Learning UI and timeline stay stable
+   * without relying on read-time transforms alone.
+   */
+  private persistRepairedProposalDetailsIfChanged(item: ImprovementProposal): ImprovementProposal {
+    const raw = item.details;
+    if (!raw?.trim()) {
+      return item;
+    }
+    const repoRoot = resolveNovaRepoRoot();
+    const hintText = [item.title, item.summary].filter(Boolean).join("\n");
+    const repaired = sanitizeImprovementProposalDetailsBody(raw, repoRoot, { hintText });
+    if (this.normalizeProposalDetailsForCompare(repaired) === this.normalizeProposalDetailsForCompare(raw)) {
+      return item;
+    }
+    const updated = this.proposalRepo.patchDetails(item.id, repaired.trim() ? repaired : null);
+    return updated ?? { ...item, details: repaired || undefined };
+  }
+
+  /** When a learning row references `proposalId`, attach `resolvedTargetFile` for the timeline (repaired path). */
+  private attachResolvedProposalTarget(row: LearningRecord): Record<string, unknown> {
+    const base: Record<string, unknown> = { ...row };
+    const rawDetails = row.details;
+    if (!rawDetails || typeof rawDetails !== "object") {
+      return base;
+    }
+    const d = { ...(rawDetails as Record<string, unknown>) };
+    const pid = typeof d.proposalId === "string" ? d.proposalId.trim() : "";
+    if (!pid) {
+      return { ...base, details: d };
+    }
+    const proposal = this.proposalRepo.getById(pid);
+    if (!proposal) {
+      return { ...base, details: d };
+    }
+    const hint = [proposal.title, proposal.summary].filter(Boolean).join("\n");
+    const explicit = extractExplicitTargetFileRaw(proposal.details ?? "");
+    if (!explicit) {
+      return { ...base, details: d };
+    }
+    const resolved = tryResolveImprovementTargetPath(explicit, resolveNovaRepoRoot(), undefined, hint);
+    if (!resolved) {
+      return { ...base, details: d };
+    }
+    d.resolvedTargetFile = resolved;
+    return { ...base, details: d };
+  }
+
+  /** Strip, repair, and persist `details` when they change; returned object matches SQLite after patch. */
+  private sanitizeProposalForView(item: ImprovementProposal): ImprovementProposal {
+    return this.persistRepairedProposalDetailsIfChanged(item);
   }
 
   private pickRotatingFallbackTopics(): string[] {
@@ -746,6 +828,11 @@ function extractActionPlan(value: string): { title: string; summary: string; don
   }
   if (!title || !summary) {
     return null;
+  }
+  if (targetFile) {
+    const repoRoot = resolveNovaRepoRoot();
+    const hint = [title, summary, why].filter(Boolean).join("\n");
+    targetFile = tryResolveImprovementTargetPath(targetFile, repoRoot, undefined, hint) ?? "";
   }
   // The proposal repository stores a single `details` field. Pack the structured sections so the
   // UI (and the proposal worker) can pull them back out, while still rendering as readable text in

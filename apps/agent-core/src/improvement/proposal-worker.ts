@@ -32,6 +32,13 @@ import type { ModelRouter } from "../providers/router.js";
 import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
 import { gitSafeDirectoryEnvForRepo } from "../util/git-safe-directory-env.js";
 import type { ImprovementProposal } from "./improvement-proposal-repository.js";
+import {
+  extractExplicitTargetFileRaw,
+  IMPROVEMENT_SAFE_ROOT_PREFIXES,
+  isImprovementPathUnderSafeRoots,
+  isImprovementRepoPathDenied,
+  normalizeProposedRepoRelativePath
+} from "./improvement-target-path.js";
 
 export type ProposalWorkerOutcome =
   | { kind: "implemented"; reason: string; files: string[]; commitSha?: string; provider?: string; model?: string }
@@ -56,35 +63,6 @@ export type ProposalWorkerOptions = {
   /** Override `process.cwd()`-derived repo root. */
   repoRoot?: string;
 };
-
-const DEFAULT_SAFE_ROOTS: ReadonlyArray<string> = [
-  "apps/agent-core/src",
-  "apps/web/src",
-  "packages/sdk/src",
-  "skills"
-];
-
-/**
- * Files / directories the worker must NEVER touch even if a proposal asks for it.
- * Tested as substring matches against the path relative to the repo root, normalised to forward slashes.
- */
-const DENY_PATTERNS: ReadonlyArray<RegExp> = [
-  /(^|\/)\.env(\.|$)/,
-  /(^|\/)\.git(\/|$)/,
-  /(^|\/)node_modules(\/|$)/,
-  /(^|\/)tmp(\/|$)/,
-  /(^|\/)data(\/|$)/,
-  /(^|\/)logs(\/|$)/,
-  /(^|\/)scripts\/install-/,
-  /(^|\/)scripts\/uninstall-/,
-  /(^|\/)scripts\/start-local/,
-  /(^|\/)apps\/agent-core\/src\/transport\/http-server\.ts$/,
-  /(^|\/)apps\/agent-core\/src\/auth\//,
-  /(^|\/)apps\/agent-core\/src\/security\//,
-  /(^|\/)apps\/web\/src\/middleware\.ts$/,
-  /(^|\/)apps\/web\/src\/middleware\.tsx$/,
-  /(^|\/)apps\/web\/src\/lib\/secrets\.(ts|tsx)$/
-];
 
 const TS_EXTS = new Set([".ts", ".tsx"]);
 const JS_EXTS = new Set([".js", ".jsx", ".mjs", ".cjs"]);
@@ -121,7 +99,8 @@ export class ProposalWorker {
 
   constructor(options: ProposalWorkerOptions = {}) {
     this.repoRoot = options.repoRoot ?? resolveNovaRepoRoot();
-    this.safeRoots = options.safeRoots && options.safeRoots.length > 0 ? options.safeRoots : DEFAULT_SAFE_ROOTS;
+    this.safeRoots =
+      options.safeRoots && options.safeRoots.length > 0 ? options.safeRoots : IMPROVEMENT_SAFE_ROOT_PREFIXES;
     this.dailyCap = options.dailyCap !== undefined ? Math.max(0, options.dailyCap) : DEFAULT_DAILY_CAP;
     this.counterPath =
       options.counterPath ?? resolve(this.repoRoot, "data", "state", "proposal-worker-counter.json");
@@ -142,7 +121,7 @@ export class ProposalWorker {
       };
     }
 
-    const target = parseTarget(proposal, this.repoRoot);
+    const target = parseTarget(proposal, this.repoRoot, this.safeRoots);
     if (!target) {
       return {
         kind: "not_applicable",
@@ -203,10 +182,8 @@ export class ProposalWorker {
     if (!this.safeRoots.some((root) => rel === root || rel.startsWith(`${root}/`))) {
       return `Target path is outside the safe-roots whitelist: ${rel}`;
     }
-    for (const pattern of DENY_PATTERNS) {
-      if (pattern.test(rel)) {
-        return `Target path matches the deny list: ${rel}`;
-      }
+    if (isImprovementRepoPathDenied(rel)) {
+      return `Target path matches the deny list: ${rel}`;
     }
     if (action === "create" && existsSync(absolutePath)) {
       return `Refusing to create: file already exists at ${rel}; proposal must explicitly request edit/modify to overwrite`;
@@ -340,15 +317,45 @@ function buildPrompt(proposal: ImprovementProposal, target: ParsedTarget, existi
   return [system, { role: "user", content: userParts.join("\n\n") }];
 }
 
-function parseTarget(proposal: ImprovementProposal, repoRoot: string): ParsedTarget | undefined {
+function parseTarget(
+  proposal: ImprovementProposal,
+  repoRoot: string,
+  safeRoots: ReadonlyArray<string>
+): ParsedTarget | undefined {
   const haystack = `${proposal.title}\n${proposal.summary}\n${proposal.details ?? ""}`;
+  const createish = /\b(create|new file|add file|introduce)\b/i.test(haystack);
+
+  const explicitRaw = extractExplicitTargetFileRaw(haystack);
+  if (explicitRaw !== undefined) {
+    const rel = normalizeProposedRepoRelativePath(explicitRaw);
+    if (!rel || !isImprovementPathUnderSafeRoots(rel, safeRoots) || isImprovementRepoPathDenied(rel)) {
+      return undefined;
+    }
+    const absolutePath = resolve(repoRoot, ...rel.split("/"));
+    if (existsSync(absolutePath)) {
+      try {
+        const st = statSync(absolutePath);
+        if (!st.isFile()) {
+          return undefined;
+        }
+      } catch {
+        return undefined;
+      }
+      return { absolutePath, relativePath: rel, action: "edit" };
+    }
+    if (createish) {
+      return { absolutePath, relativePath: rel, action: "create" };
+    }
+    return undefined;
+  }
+
   const pathMatches = Array.from(haystack.matchAll(/[`'"]?([\w./@-]+\/[\w./@-]+\.[a-zA-Z0-9]{1,6})[`'"]?/g));
-  const editish = /\b(edit|modify|update|change|refactor|extend)\b/i.test(haystack);
   for (const match of pathMatches) {
     const candidate = match[1];
     if (!candidate) continue;
-    if (candidate.includes("..")) continue;
-    const lower = candidate.toLowerCase();
+    const rel = normalizeProposedRepoRelativePath(candidate.replace(/^[./]+/, ""));
+    if (!rel) continue;
+    const lower = rel.toLowerCase();
     if (
       !TS_EXTS.has(lower.slice(lower.lastIndexOf("."))) &&
       !JS_EXTS.has(lower.slice(lower.lastIndexOf("."))) &&
@@ -359,11 +366,21 @@ function parseTarget(proposal: ImprovementProposal, repoRoot: string): ParsedTar
     ) {
       continue;
     }
-    const relParts = candidate.replace(/^[./]+/, "").split("/").filter(Boolean);
-    if (relParts.length < 2) continue;
-    const absolute = resolve(repoRoot, relParts.join("/"));
-    const action: "create" | "edit" = existsSync(absolute) ? (editish ? "edit" : "edit") : "create";
-    return { absolutePath: absolute, relativePath: relParts.join("/"), action };
+    if (!isImprovementPathUnderSafeRoots(rel, safeRoots) || isImprovementRepoPathDenied(rel)) {
+      continue;
+    }
+    const absolutePath = resolve(repoRoot, ...rel.split("/"));
+    if (!existsSync(absolutePath)) {
+      continue;
+    }
+    try {
+      if (!statSync(absolutePath).isFile()) {
+        continue;
+      }
+    } catch {
+      continue;
+    }
+    return { absolutePath, relativePath: rel, action: "edit" };
   }
   return undefined;
 }

@@ -186,6 +186,30 @@ export class ImprovementProposalRepository {
     return this.getById(id);
   }
 
+  /**
+   * Updates only `details` (e.g. canonicalised or auto-repaired `Target file` lines).
+   * Does not append proposal events, so batch repairs do not flood the activity log.
+   */
+  patchDetails(id: string, details: string | null): ImprovementProposal | undefined {
+    const before = this.getById(id);
+    if (!before) return undefined;
+    const next = details === null || details.trim().length === 0 ? null : details.trim();
+    const norm = (s: string | null | undefined) => (s ?? "").replace(/\r\n/g, "\n").trimEnd();
+    if (norm(next) === norm(before.details ?? null)) {
+      return before;
+    }
+    getDatabase()
+      .prepare(
+        `
+        UPDATE improvement_proposals
+        SET details = ?
+        WHERE id = ?
+        `
+      )
+      .run(next, id);
+    return this.getById(id);
+  }
+
   hasSimilarRecent(title: string, withinHours = 24): boolean {
     const row = getDatabase()
       .prepare(
