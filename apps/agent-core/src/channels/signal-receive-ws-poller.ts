@@ -91,6 +91,18 @@ function parseWsPayload(raw: WebSocket.RawData): unknown[] {
 let lastReceiveWsNonDmLogAt = 0;
 const RECEIVE_WS_DEBUG_THROTTLE_MS = 12_000;
 
+/**
+ * bbernhard/signal-cli-rest-api closes the receive WebSocket every ~35 s on idle. Logging every
+ * routine reconnect drowns out real signal traffic in the channel debug trace, so we only log a
+ * connect when (a) it is the very first connect after agent-core boot, (b) the previous close was
+ * preceded by an explicit error, or (c) we have not logged a reconnect in the last 10 minutes
+ * (so the user can still see the WS is alive on a quiet day).
+ */
+let firstReceiveWsConnectLogged = false;
+let lastReceiveWsConnectLogAt = 0;
+let receiveWsHadErrorSinceLastConnect = false;
+const RECEIVE_WS_CONNECT_LOG_INTERVAL_MS = 10 * 60 * 1000;
+
 function maybeLogReceiveWsNonTextDm(preview: string): void {
   const now = Date.now();
   if (now - lastReceiveWsNonDmLogAt < RECEIVE_WS_DEBUG_THROTTLE_MS) {
@@ -156,6 +168,18 @@ export function startSignalReceiveWsPoller(deps: {
     }
 
     ws.on("open", () => {
+      const now = Date.now();
+      const sinceLastLog = now - lastReceiveWsConnectLogAt;
+      const shouldLog =
+        !firstReceiveWsConnectLogged ||
+        receiveWsHadErrorSinceLastConnect ||
+        sinceLastLog >= RECEIVE_WS_CONNECT_LOG_INTERVAL_MS;
+      firstReceiveWsConnectLogged = true;
+      receiveWsHadErrorSinceLastConnect = false;
+      if (!shouldLog) {
+        return;
+      }
+      lastReceiveWsConnectLogAt = now;
       pushChannelDebug({
         channel: "signal",
         direction: "in",
@@ -197,6 +221,7 @@ export function startSignalReceiveWsPoller(deps: {
     });
 
     ws.on("error", (err) => {
+      receiveWsHadErrorSinceLastConnect = true;
       pushChannelDebug({
         channel: "signal",
         direction: "in",

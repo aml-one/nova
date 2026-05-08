@@ -521,6 +521,11 @@ export default function SettingsPage() {
   const [channelDebugAutoRefresh, setChannelDebugAutoRefresh] = useState(true);
   const [signalDockerLogs, setSignalDockerLogs] = useState("");
   const [signalDockerNote, setSignalDockerNote] = useState<string | null>(null);
+  const signalDockerLogsRef = useRef<HTMLPreElement | null>(null);
+  // Tracks consecutive failed channel-debug refreshes so a one-off blip (Next.js dev hot-reload, brief
+  // 503 from agent-core) does not flash the red "Temporary connection problem" banner. Only persistent
+  // (≥3 polls = ~12 s) outages are surfaced to the user.
+  const channelDebugFailureCountRef = useRef(0);
   const [sshTestResult, setSshTestResult] = useState<SshTestResult>(null);
   const lastSavedChatStyleRef = useRef<string>("");
   const lastSavedVoiceSilenceSecRef = useRef<number>(DEFAULT_SETTINGS.web.voiceDictationSilenceSec);
@@ -1224,7 +1229,6 @@ export default function SettingsPage() {
 
   const refreshChannelDebug = useCallback(async (): Promise<void> => {
     setChannelDebugLoading(true);
-    setChannelDebugError(null);
     setSignalDockerNote(null);
     const msgPromise = (async () => {
       const response = await apiFetch("/api/setup/channels/message-debug?limit=200");
@@ -1236,15 +1240,16 @@ export default function SettingsPage() {
       const data = (await response.json().catch(() => ({}))) as { ok?: boolean; logs?: string; detail?: string; error?: string };
       return { response, data };
     })();
+    let pollFailed = false;
+    let pendingErrorMessage: string | null = null;
     try {
       const [{ response: msgRes, data: msgData }, { response: dockerRes, data: dockerData }] = await Promise.all([
         msgPromise,
         dockerPromise
       ]);
       if (!msgRes.ok) {
-        // Transient errors (agent-core restart, brief 401 during session refresh, 5xx) must not wipe
-        // the visible trace — the entries are still in the backend buffer once the connection recovers.
-        setChannelDebugError(msgData.error ?? `HTTP ${msgRes.status}`);
+        pollFailed = true;
+        pendingErrorMessage = msgData.error ?? `HTTP ${msgRes.status}`;
       } else {
         setChannelDebugEntries(Array.isArray(msgData.items) ? msgData.items : []);
       }
@@ -1257,13 +1262,32 @@ export default function SettingsPage() {
         setSignalDockerNote(null);
       }
     } catch (e) {
-      // Network-level failure: surface the message but keep the previously rendered entries visible
-      // so a momentary outage doesn't blank the page.
-      setChannelDebugError(e instanceof Error ? e.message : String(e));
+      pollFailed = true;
+      pendingErrorMessage = e instanceof Error ? e.message : String(e);
     } finally {
       setChannelDebugLoading(false);
     }
+    if (pollFailed) {
+      channelDebugFailureCountRef.current += 1;
+      // Only show the red "Temporary connection problem" banner after ~12 s of sustained failure
+      // (3 × 4 s poll). One-shot blips during agent-core hot-reload or brief 503s stay invisible.
+      if (channelDebugFailureCountRef.current >= 3 && pendingErrorMessage) {
+        setChannelDebugError(pendingErrorMessage);
+      }
+    } else {
+      channelDebugFailureCountRef.current = 0;
+      setChannelDebugError(null);
+    }
   }, []);
+
+  // Auto-scroll the Signal bridge (Docker) log pane to the bottom whenever new content arrives so
+  // the user sees the freshest Gin lines without manually scrolling.
+  useEffect(() => {
+    if (!signalDockerLogsExpanded) return;
+    const el = signalDockerLogsRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [signalDockerLogs, signalDockerLogsExpanded]);
 
   useEffect(() => {
     if (tab !== "channels") return;
@@ -3166,10 +3190,12 @@ export default function SettingsPage() {
                 </span>
               </div>
               {channelDebugError ? <p className="text-xs text-red-600 dark:text-red-400">{channelDebugError}</p> : null}
-              <div className="grid gap-2 md:grid-cols-2">
-                <div>
+              {/* Two stacked rows (was a 2-column grid). The trace + Docker logs each get the full content
+                  width so long Signal payloads (sourceUuid, dataMessage JSON) don't wrap into a narrow column. */}
+              <div className="flex flex-col gap-2">
+                <div className="min-h-[400px]">
                   <div className="mb-1 text-[11px] font-medium text-muted">Agent + Next</div>
-                  <div className="h-[460px] space-y-1.5 overflow-y-auto overflow-x-hidden rounded border border-border/60 bg-surface2 p-2">
+                  <div className="h-[460px] min-h-[400px] space-y-1.5 overflow-y-auto overflow-x-hidden rounded border border-border/60 bg-surface2 p-2">
                     {channelDebugEntries.length === 0 && channelDebugLoading ? (
                       <p className="px-1 py-4 text-center text-xs text-muted">Loading…</p>
                     ) : null}
@@ -3236,17 +3262,21 @@ export default function SettingsPage() {
                     <FaChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${signalDockerLogsExpanded ? "rotate-180" : ""}`} aria-hidden />
                   </button>
                   {signalDockerLogsExpanded ? (
-                    <div className="flex h-[460px] flex-col rounded border border-border/60 bg-surface2">
+                    <div className="flex h-[460px] min-h-[400px] flex-col rounded border border-border/60 bg-surface2">
                       {signalDockerNote ? (
                         <p className="shrink-0 border-b border-border/50 p-2 text-[11px] text-amber-800 dark:text-amber-200">{signalDockerNote}</p>
                       ) : null}
-                      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[10px] leading-snug text-muted">
+                      {/* Auto-scroll to bottom on each refresh so the latest Gin lines stay in view. */}
+                      <pre
+                        ref={signalDockerLogsRef}
+                        className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-2 font-mono text-[10px] leading-snug text-muted"
+                      >
                         {signalDockerLogs || (channelDebugLoading ? "Loading…" : "(no log lines)")}
                       </pre>
                     </div>
                   ) : (
                     <p className="rounded-md border border-dashed border-border/60 px-2 py-2 text-[11px] text-muted">
-                      Collapsed by default. Expand to view <code className="text-[10px]">nova-signal-bridge</code> logs (same refresh as the trace on the left).
+                      Collapsed by default. Expand to view <code className="text-[10px]">nova-signal-bridge</code> logs — newest entries at the bottom (auto-scrolled).
                     </p>
                   )}
                 </div>

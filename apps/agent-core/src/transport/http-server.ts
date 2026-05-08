@@ -78,6 +78,31 @@ type HttpServerOptions = {
   port?: number;
 };
 
+// signal-cli-rest-api re-posts every typing indicator and read receipt, so the webhook handler
+// otherwise emits a parsed_zero_messages debug entry many times per minute. This module-level
+// throttle keeps the warning visible (≥1 per 2 minutes) without flooding the trace.
+let lastWebhookZeroMessagesAt = 0;
+const WEBHOOK_ZERO_MESSAGES_THROTTLE_MS = 2 * 60 * 1000;
+function maybeLogWebhookZeroMessages(): void {
+  const now = Date.now();
+  if (now - lastWebhookZeroMessagesAt < WEBHOOK_ZERO_MESSAGES_THROTTLE_MS) {
+    return;
+  }
+  lastWebhookZeroMessagesAt = now;
+  pushChannelDebug({
+    channel: "signal",
+    direction: "in",
+    transport: "webhook",
+    correlationId: "signal-webhook-noise",
+    peer: "",
+    textPreview: "",
+    trace: ["webhook_received", "parsed_zero_messages_throttled"],
+    reachedNova: false,
+    error:
+      "Throttled: signal-cli-rest-api delivered typing/receipt envelopes (no DM extracted). Verify only if real messages stop arriving."
+  });
+}
+
 type CopilotDeviceLoginSession = {
   id: string;
   state: "starting" | "waiting_for_user" | "authorized" | "failed" | "cancelled";
@@ -1518,18 +1543,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const messages = router.normalizeBatch(await signal.ingestSignalEvent(payload));
         const replies: Array<{ to: string; reply: string; delivered: boolean; error?: string }> = [];
         if (messages.length === 0) {
-          pushChannelDebug({
-            channel: "signal",
-            direction: "in",
-            transport: "webhook",
-            correlationId,
-            peer: "",
-            textPreview: "",
-            trace: ["webhook_received", "parsed_zero_messages"],
-            reachedNova: false,
-            error:
-              "No message extracted from webhook payload — configure signal-cli-rest-api to POST inbound messages here, or verify payload shape."
-          });
+          // signal-cli-rest-api re-posts every typing indicator and read receipt to this webhook,
+          // so logging "parsed_zero_messages" once per envelope drowns out real signal traffic.
+          // We rely on receive_ws / message-debug retention for the rare case where a payload shape
+          // really is missing — only log the unparsed-webhook condition once every two minutes.
+          maybeLogWebhookZeroMessages();
         }
         const dispatched = await dispatchSignalInboundMessages(messages, {
           orchestrator: options.orchestrator,
