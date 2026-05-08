@@ -13,6 +13,8 @@ export class OutboundDispatcher {
   private readonly signal: SignalChannelAdapter;
   private readonly voice: VoiceService;
   private readonly logger = new Logger();
+  private ticking = false;
+  private readonly recentSignalSends = new Map<string, number>();
 
   constructor(private readonly getSettings: () => AppSettings) {
     this.wa = new WhatsAppChannelAdapter(getSettings);
@@ -75,13 +77,33 @@ export class OutboundDispatcher {
   }
 
   private async tick(): Promise<void> {
+    if (this.ticking) {
+      return;
+    }
+    this.ticking = true;
+    try {
     const jobs = this.queue.listReady(20);
     for (const job of jobs) {
       try {
         if (job.channel === "whatsapp") {
           await this.wa.sendMessage(job.recipient, job.payload);
         } else {
+          if (this.wasRecentlySent(job.recipient, job.payload)) {
+            this.queue.markSuccess(job.id);
+            pushChannelDebug({
+              channel: job.channel,
+              direction: "out",
+              transport: "dispatcher",
+              correlationId: job.correlationId ?? randomUUID(),
+              peer: job.recipient,
+              textPreview: previewChannelText(job.payload),
+              trace: ["outbound_send_deduped_recent"],
+              reachedNova: undefined
+            });
+            continue;
+          }
           await this.sendSignalWithOptionalVoice(job.recipient, job.payload);
+          this.markRecentlySent(job.recipient, job.payload);
         }
         this.queue.markSuccess(job.id);
         pushChannelDebug({
@@ -116,6 +138,25 @@ export class OutboundDispatcher {
         });
       }
     }
+    } finally {
+      this.ticking = false;
+    }
+  }
+
+  private signalSendKey(recipient: string, text: string): string {
+    return `${recipient.trim().toLowerCase()}::${text.trim().slice(0, 500)}`;
+  }
+
+  private wasRecentlySent(recipient: string, text: string): boolean {
+    const now = Date.now();
+    for (const [key, expiresAt] of this.recentSignalSends) {
+      if (expiresAt <= now) this.recentSignalSends.delete(key);
+    }
+    return this.recentSignalSends.has(this.signalSendKey(recipient, text));
+  }
+
+  private markRecentlySent(recipient: string, text: string): void {
+    this.recentSignalSends.set(this.signalSendKey(recipient, text), Date.now() + 5 * 60 * 1000);
   }
 
   private async sendSignalWithOptionalVoice(recipient: string, text: string): Promise<void> {

@@ -3204,27 +3204,37 @@ export default function SettingsPage() {
                         No webhook hits yet — only Signal/WhatsApp POSTs to the agent show here.
                       </p>
                     ) : null}
-                    {channelDebugEntries.map((entry) => (
+                    {channelDebugEntries.map((entry) => {
+                      const handledElsewhere = entry.trace?.includes("deduped_other_transport") ?? false;
+                      const novaStatus =
+                        entry.direction === "in" && typeof entry.reachedNova === "boolean"
+                          ? handledElsewhere
+                            ? { label: "handled elsewhere", tone: "text-sky-700 dark:text-sky-300" }
+                            : entry.reachedNova
+                              ? { label: "Nova handled", tone: "text-emerald-700 dark:text-emerald-400" }
+                              : { label: "Nova did not handle", tone: "text-amber-700 dark:text-amber-400" }
+                          : null;
+                      return (
                       <div
                         key={entry.id}
                         className={`rounded-md border border-border/40 px-2 py-1.5 text-[12px] leading-snug ${channelDebugRowAccent(entry)}`}
                       >
-                        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                          <span className="font-mono text-[11px] text-muted">{formatChannelDebugTime(entry.at)}</span>
-                          <strong className="capitalize">{entry.channel}</strong>
-                          <span className="text-muted">·</span>
-                          <span>{entry.direction === "in" ? "in" : "out"}</span>
-                          {entry.transport ? (
-                            <>
-                              <span className="text-muted">·</span>
-                              <span className="text-[11px]">{entry.transport}</span>
-                            </>
-                          ) : null}
-                          {entry.direction === "in" && typeof entry.reachedNova === "boolean" ? (
-                            <span
-                              className={`text-[11px] font-medium ${entry.reachedNova ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}`}
-                            >
-                              · Nova {entry.reachedNova ? "handled" : "did not handle"}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                            <span className="font-mono text-[11px] text-muted">{formatChannelDebugTime(entry.at)}</span>
+                            <strong className="capitalize">{entry.channel}</strong>
+                            <span className="text-muted">·</span>
+                            <span>{entry.direction === "in" ? "in" : "out"}</span>
+                            {entry.transport ? (
+                              <>
+                                <span className="text-muted">·</span>
+                                <span className="text-[11px]">{entry.transport}</span>
+                              </>
+                            ) : null}
+                          </div>
+                          {novaStatus ? (
+                            <span className={`shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-[11px] font-medium dark:bg-white/10 ${novaStatus.tone}`}>
+                              {novaStatus.label}
                             </span>
                           ) : null}
                         </div>
@@ -3248,7 +3258,8 @@ export default function SettingsPage() {
                         </div>
                         {entry.error ? <div className="mt-1 text-[11px] text-red-600 dark:text-red-400">{entry.error}</div> : null}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
                 <div className="min-h-0">
