@@ -22,9 +22,11 @@ describe("WhatsAppChannelAdapter send integration", () => {
     process.env.WHATSAPP_API_BASE_URL = `http://127.0.0.1:${address.port}`;
     process.env.WHATSAPP_PHONE_NUMBER_ID = "111";
     process.env.WHATSAPP_TOKEN = "token";
+    process.env.WHATSAPP_TRANSPORT = "";
     const adapter = new WhatsAppChannelAdapter();
     await adapter.sendMessage("+1555000111", "hello");
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    expect(received.includes("+1555000111")).toBe(true);
+    // Cloud API body uses digits-only `to` (see cloudWhatsAppRecipientDigits).
+    expect(received).toContain("1555000111");
   });
 });

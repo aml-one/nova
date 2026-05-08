@@ -407,6 +407,8 @@ export class TaskOrchestrator {
     signalWalkieCall?: boolean;
     /** Signal: inbound turn came from a transcribed voice note. */
     signalInboundVoiceNote?: boolean;
+    /** Signal: `sourceName` / profile display from the bridge (used to seed People displayName). */
+    signalSourceProfileName?: string;
   }): Promise<string> {
     this.inFlightCount += 1;
     this.lastActivityAt = Date.now();
@@ -432,6 +434,17 @@ export class TaskOrchestrator {
         const localPart = email?.split("@")[0]?.trim();
         if (localPart) {
           this.people.upsert({ ...person, displayName: localPart });
+        }
+      }
+    }
+
+    // Best-effort: Signal profile display name when the person row has no displayName yet.
+    if (input.channel === "signal") {
+      const prof = input.signalSourceProfileName?.replace(/\s+/g, " ").trim();
+      if (prof && prof.length > 0 && prof.length <= 120) {
+        const p = this.people.getById(userId);
+        if (p && !p.displayName) {
+          this.people.upsert({ ...p, displayName: prof });
         }
       }
     }
@@ -486,9 +499,11 @@ export class TaskOrchestrator {
       }
     }
 
-    // Onboarding for new/unknown people (no name yet).
+    // Onboarding for new/unknown people (no name yet). Tier admins already passed access policy.
     const person = this.people.getById(userId);
-    if (input.channel !== "web" && person && !person.displayName) {
+    const privilegedByAccess =
+      input.accessProfile?.role === "admin" || input.accessProfile?.role === "co_admin";
+    if (input.channel !== "web" && person && !person.displayName && !privilegedByAccess) {
       return "Hi — who is this, and what do you want from me?";
     }
 

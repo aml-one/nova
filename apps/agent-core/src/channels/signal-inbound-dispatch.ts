@@ -144,6 +144,9 @@ export async function dispatchSignalInboundMessages(
           : `access_denied(role=${accessProfile.role})`
       );
       if (!accessProfile.allowed) {
+        if (deps.settings.get().messagingAccess.denyUnknownNumbers) {
+          trace.push("silent_deny_unknown");
+        }
         pushChannelDebug({
           channel: "signal",
           direction: "in",
@@ -215,7 +218,8 @@ export async function dispatchSignalInboundMessages(
                   correlationId: msgCorr,
                   accessProfile,
                   signalWalkieCall: true,
-                  signalInboundVoiceNote: voiceNote
+                  signalInboundVoiceNote: voiceNote,
+                  signalSourceProfileName: message.signalSourceProfileName
                 });
                 trace.push("walkie_call_with_message");
               } else {
@@ -238,7 +242,8 @@ export async function dispatchSignalInboundMessages(
                 correlationId: msgCorr,
                 accessProfile,
                 signalWalkieCall: walkie || voiceNote,
-                signalInboundVoiceNote: voiceNote
+                signalInboundVoiceNote: voiceNote,
+                signalSourceProfileName: message.signalSourceProfileName
               });
             }
           }
