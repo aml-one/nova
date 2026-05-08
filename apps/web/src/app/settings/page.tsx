@@ -555,13 +555,20 @@ export default function SettingsPage() {
   const [chatStyleSaveState, setChatStyleSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [voiceSilenceSaveState, setVoiceSilenceSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [channelTierAddFor, setChannelTierAddFor] = useState<"signal" | "whatsapp" | null>(null);
-  const [channelTierAddDraft, setChannelTierAddDraft] = useState({ phone: "", name: "", tier: "guest" as AccessTier });
+  const [channelTierAddDraft, setChannelTierAddDraft] = useState({
+    phone: "",
+    name: "",
+    signalUuid: "",
+    tier: "guest" as AccessTier
+  });
   const [channelTierEdit, setChannelTierEdit] = useState<{ channel: "signal" | "whatsapp"; index: number } | null>(null);
   const [channelTierEditTier, setChannelTierEditTier] = useState<AccessTier>("guest");
   const [channelTierNameEdit, setChannelTierNameEdit] = useState<{ channel: "signal" | "whatsapp"; index: number } | null>(
     null
   );
   const [channelTierNameDraft, setChannelTierNameDraft] = useState("");
+  /** Signal sealed-sender Service ID — edited with display name for Signal tier rows only. */
+  const [channelTierUuidDraft, setChannelTierUuidDraft] = useState("");
   const [channelTiersSaveState, setChannelTiersSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [signalChannelSetupExpanded, setSignalChannelSetupExpanded] = useState(true);
   const [whatsAppChannelSetupExpanded, setWhatsAppChannelSetupExpanded] = useState(true);
@@ -1041,10 +1048,19 @@ export default function SettingsPage() {
     }
     const nameRaw = channelTierAddDraft.name.trim().slice(0, 80);
     const ch = channelTierAddFor;
+    const uuidRaw = channelTierAddDraft.signalUuid.trim().toLowerCase();
+    if (ch === "signal" && uuidRaw) {
+      const uuidOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uuidRaw);
+      if (!uuidOk) {
+        setError("Signal UUID must be 8-4-4-4-12 hex (sealed-sender id from channel debug).");
+        return;
+      }
+    }
     const row = {
       phone,
       tier: channelTierAddDraft.tier,
-      ...(nameRaw ? { name: nameRaw } : {})
+      ...(nameRaw ? { name: nameRaw } : {}),
+      ...(ch === "signal" && uuidRaw ? { signalUuid: uuidRaw } : {})
     };
     const base = settings.messagingAccess.channelTiers;
     const next = { ...base, [ch]: [...base[ch], row] };
@@ -1053,7 +1069,7 @@ export default function SettingsPage() {
       messagingAccess: { ...prev.messagingAccess, channelTiers: next }
     }));
     setChannelTierAddFor(null);
-    setChannelTierAddDraft({ phone: "", name: "", tier: "guest" });
+    setChannelTierAddDraft({ phone: "", name: "", signalUuid: "", tier: "guest" });
     setError(null);
     await persistMessagingChannelTiers(next);
   }
@@ -1085,6 +1101,19 @@ export default function SettingsPage() {
     const nextRow = { ...row } as { phone: string; tier: AccessTier; name?: string; signalUuid?: string };
     if (nameRaw) nextRow.name = nameRaw;
     else delete nextRow.name;
+    if (channel === "signal") {
+      const uuidRaw = channelTierUuidDraft.trim().toLowerCase();
+      if (uuidRaw) {
+        const uuidOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uuidRaw);
+        if (!uuidOk) {
+          setError("Signal UUID must be 8-4-4-4-12 hex (sealed-sender id from channel debug).");
+          return;
+        }
+        nextRow.signalUuid = uuidRaw;
+      } else {
+        delete nextRow.signalUuid;
+      }
+    }
     rows[index] = nextRow as (typeof rows)[number];
     const next = { ...settings.messagingAccess.channelTiers, [channel]: rows };
     setSettings((prev) => ({
@@ -1093,6 +1122,7 @@ export default function SettingsPage() {
     }));
     setChannelTierNameEdit(null);
     setChannelTierNameDraft("");
+    setChannelTierUuidDraft("");
     setError(null);
     await persistMessagingChannelTiers(next);
   }
@@ -2855,7 +2885,7 @@ export default function SettingsPage() {
                         tone="blue"
                         className="h-8 px-2 text-xs"
                         onClick={() => {
-                          setChannelTierAddDraft({ phone: "", name: "", tier: "guest" });
+                          setChannelTierAddDraft({ phone: "", name: "", signalUuid: "", tier: "guest" });
                           setChannelTierAddFor(channel);
                           setError(null);
                         }}
@@ -2880,6 +2910,11 @@ export default function SettingsPage() {
                             className="min-w-0 text-left text-sm font-medium leading-tight sm:order-none rounded-ui border border-transparent px-0.5 py-0.5 transition hover:border-border/60 hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
                             onClick={() => {
                               setChannelTierNameDraft(row.name?.trim() ?? "");
+                              setChannelTierUuidDraft(
+                                channel === "signal" && "signalUuid" in row && row.signalUuid
+                                  ? String(row.signalUuid).trim()
+                                  : ""
+                              );
                               setChannelTierNameEdit({ channel, index: idx });
                               setError(null);
                             }}
@@ -2888,6 +2923,14 @@ export default function SettingsPage() {
                             <div className="truncate" title={row.name ?? "Click to set name"}>
                               {row.name?.trim() ? row.name : "—"}
                             </div>
+                            {channel === "signal" && "signalUuid" in row && row.signalUuid ? (
+                              <div
+                                className="mt-0.5 truncate font-mono text-[10px] text-muted"
+                                title={String(row.signalUuid)}
+                              >
+                                {String(row.signalUuid)}
+                              </div>
+                            ) : null}
                           </button>
                           <div className="min-w-0 font-mono text-[13px] text-foreground sm:order-none">
                             <span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Phone</span>
@@ -3312,6 +3355,22 @@ export default function SettingsPage() {
                         placeholder="Alex"
                       />
                     </label>
+                    {channelTierAddFor === "signal" ? (
+                      <label className="grid gap-1 text-xs">
+                        Signal sealed-sender UUID (optional)
+                        <Input
+                          value={channelTierAddDraft.signalUuid}
+                          onChange={(e) =>
+                            setChannelTierAddDraft((d) => ({ ...d, signalUuid: e.target.value }))
+                          }
+                          placeholder="8-4-4-4-12 hex from channel debug"
+                          className="font-mono text-[13px]"
+                        />
+                        <span className="text-[10px] leading-snug text-muted">
+                          Use when inbound has no E.164; paste the Service ID UUID from channel debug logs.
+                        </span>
+                      </label>
+                    ) : null}
                     <label className="grid gap-1 text-xs">
                       Tier
                       <Select
@@ -3386,14 +3445,25 @@ export default function SettingsPage() {
                   <Card className="flex flex-col gap-3 p-4 shadow-xl">
                     <div className="flex items-center justify-between gap-2">
                       <h3 id="channel-tier-name-edit-title" className="text-base font-semibold">
-                        Edit display name
+                        {channelTierNameEdit.channel === "signal" ? "Edit Signal contact" : "Edit display name"}
                       </h3>
                       <Button type="button" tone="neutral" className="h-8 px-2 text-xs" onClick={() => setChannelTierNameEdit(null)}>
                         Cancel
                       </Button>
                     </div>
                     <p className="text-[11px] leading-snug text-muted">
-                      Label for this contact in the list. The phone number cannot be changed here. Clear the field to remove the name.
+                      {channelTierNameEdit.channel === "signal" ? (
+                        <>
+                          Label for this contact in the list. The phone number cannot be changed here. Clear the name field to remove
+                          the label. For sealed-sender DMs without E.164, set the Signal Service ID UUID so Nova can match inbound
+                          messages to this row.
+                        </>
+                      ) : (
+                        <>
+                          Label for this contact in the list. The phone number cannot be changed here. Clear the field to remove the
+                          name.
+                        </>
+                      )}
                     </p>
                     <label className="grid gap-1 text-xs">
                       Phone (read-only)
@@ -3415,6 +3485,20 @@ export default function SettingsPage() {
                         maxLength={80}
                       />
                     </label>
+                    {channelTierNameEdit.channel === "signal" ? (
+                      <label className="grid gap-1 text-xs">
+                        Signal sealed-sender UUID (optional)
+                        <Input
+                          value={channelTierUuidDraft}
+                          onChange={(e) => setChannelTierUuidDraft(e.target.value)}
+                          placeholder="8-4-4-4-12 hex"
+                          className="font-mono text-[13px]"
+                        />
+                        <span className="text-[10px] leading-snug text-muted">
+                          Clear to remove. Must be a full UUID if set (from channel debug when phone is hidden).
+                        </span>
+                      </label>
+                    ) : null}
                     <div className="flex flex-wrap justify-end gap-2">
                       <Button type="button" tone="green" onClick={() => void confirmChannelNameEdit()}>
                         Save
