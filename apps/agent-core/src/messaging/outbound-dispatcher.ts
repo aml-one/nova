@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import { pushChannelDebug, previewChannelText } from "../channels/channel-debug-log.js";
 import { SignalChannelAdapter } from "../channels/signal.js";
 import { WhatsAppChannelAdapter } from "../channels/whatsapp.js";
@@ -197,6 +198,49 @@ export class OutboundDispatcher {
   }
 
   /**
+   * Orpheus (settings) when enabled; otherwise `NOVA_TTS_COMMAND` via {@link VoiceService.speak}
+   * so Signal/WhatsApp can send voice notes without a separate Orpheus server.
+   */
+  private async synthesizeOutboundVoiceBuffer(
+    ttsSource: string,
+    visibleText: string
+  ): Promise<{ bytes: Buffer; mimeType: string; filename: string } | null> {
+    const settings = this.getSettings();
+    const tts = settings?.orpheusTts;
+    if (tts?.enabled && tts.baseUrl.trim()) {
+      try {
+        const bytes = await this.voice.synthesizeOrpheusBuffer(ttsSource);
+        const fmt = (tts.responseFormat || "wav").replace(/[^a-z0-9]/gi, "") || "wav";
+        return {
+          bytes,
+          mimeType: this.voice.mimeTypeForCurrentFormat(),
+          filename: `nova-reply.${fmt}`
+        };
+      } catch {
+        // Orpheus unreachable — fall through to NOVA_TTS_COMMAND if set.
+      }
+    }
+    if (!process.env.NOVA_TTS_COMMAND?.trim()) return null;
+    try {
+      const plain = stripOrpheusSpeechCues(visibleText);
+      const outPath = await this.voice.speak(plain);
+      if (!existsSync(outPath)) return null;
+      const bytes = readFileSync(outPath);
+      if (!bytes.byteLength) return null;
+      const lower = outPath.toLowerCase();
+      if (lower.endsWith(".mp3")) {
+        return { bytes, mimeType: "audio/mpeg", filename: "nova-reply.mp3" };
+      }
+      if (lower.endsWith(".opus")) {
+        return { bytes, mimeType: "audio/opus", filename: "nova-reply.opus" };
+      }
+      return { bytes, mimeType: "audio/wav", filename: "nova-reply.wav" };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * `ttsSource` keeps cue tags so Orpheus produces the chuckle/sigh; `visibleText` is the cleaned
    * body that is shown to the recipient (and in the trace) so the cues never leak into the chat.
    * `correlationId` matches the queue job so the conversation view can merge the audio + text rows.
@@ -208,16 +252,12 @@ export class OutboundDispatcher {
     correlationId: string
   ): Promise<void> {
     try {
-      const settings = this.getSettings();
-      const tts = settings?.orpheusTts;
-      if (tts?.enabled && tts.baseUrl.trim()) {
-        const audio = await this.voice.synthesizeOrpheusBuffer(ttsSource);
-        const ext = (tts.responseFormat || "wav").replace(/[^a-z0-9]/gi, "") || "wav";
-        const mimeType = this.voice.mimeTypeForCurrentFormat();
+      const voice = await this.synthesizeOutboundVoiceBuffer(ttsSource, visibleText);
+      if (voice) {
         await this.signal.sendMessage(recipient, visibleText, {
-          bytes: audio,
-          mimeType,
-          filename: `nova-reply.${ext}`
+          bytes: voice.bytes,
+          mimeType: voice.mimeType,
+          filename: voice.filename
         });
         pushChannelDebug({
           channel: "signal",
@@ -225,7 +265,7 @@ export class OutboundDispatcher {
           transport: "dispatcher",
           correlationId,
           peer: recipient,
-          textPreview: previewChannelText(`voice+transcript (${audio.byteLength} bytes)`),
+          textPreview: previewChannelText(`voice+transcript (${voice.bytes.byteLength} bytes)`),
           trace: ["signal_voice_attachment_sent"]
         });
         return;
@@ -252,12 +292,9 @@ export class OutboundDispatcher {
     correlationId: string
   ): Promise<void> {
     try {
-      const settings = this.getSettings();
-      const tts = settings?.orpheusTts;
-      if (tts?.enabled && tts.baseUrl.trim()) {
-        const audio = await this.voice.synthesizeOrpheusBuffer(ttsSource);
-        const mimeType = this.voice.mimeTypeForCurrentFormat();
-        await this.wa.sendVoiceMessage(recipient, audio, mimeType);
+      const voice = await this.synthesizeOutboundVoiceBuffer(ttsSource, visibleText);
+      if (voice) {
+        await this.wa.sendVoiceMessage(recipient, voice.bytes, voice.mimeType);
         // Always send transcript as a separate message (matches Signal’s “voice+transcript” pattern).
         await this.wa.sendMessage(recipient, visibleText);
         pushChannelDebug({
@@ -266,7 +303,7 @@ export class OutboundDispatcher {
           transport: "dispatcher",
           correlationId,
           peer: recipient,
-          textPreview: previewChannelText(`voice+transcript (${audio.byteLength} bytes)`),
+          textPreview: previewChannelText(`voice+transcript (${voice.bytes.byteLength} bytes)`),
           trace: ["whatsapp_voice_attachment_sent"]
         });
         return;

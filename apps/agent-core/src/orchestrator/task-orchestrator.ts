@@ -472,7 +472,7 @@ export class TaskOrchestrator {
     // Onboarding for new/unknown people (no name yet).
     const person = this.people.getById(userId);
     if (input.channel !== "web" && person && !person.displayName) {
-      return "Hi — who is this, and what do you want from me?\n\nIf you also use the WebUI, you can link this chat to your profile with: `/link YourName`";
+      return "Hi — who is this, and what do you want from me?";
     }
 
     // Mutual connection handshake: `/connect Anita` → Nova asks Anita “Do you know Ambrus?”
