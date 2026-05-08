@@ -180,6 +180,54 @@ prune_stale_rollback_marker() {
   fi
 }
 
+# Self-heal a stuck HEAD before launching agent-core. The autonomous proposal worker creates
+# `agent/auto/<id>` branches as it experiments. If something kills the worker mid-run (or the
+# in-app update flow ran a bare `git pull` while HEAD was on one of those branches), Nova ends up
+# parked on a tracking-less local branch and `Apply latest` fails forever with:
+#   "There is no tracking information for the current branch."
+# Detect that exact situation on every supervisor boot and switch back to the configured update
+# branch (default `main`) so updates always have a known target. Only `agent/auto/*` branches are
+# touched automatically — any other branch is left alone so a developer poking around manually
+# never gets reset out from under them.
+self_heal_stuck_auto_branch() {
+  case "${NOVA_AUTO_BRANCH_SELF_HEAL:-1}" in
+    0|[Ff][Aa][Ll][Ss][Ee]|[Nn][Oo]) return 0 ;;
+  esac
+  if ! command -v git >/dev/null 2>&1; then
+    return 0
+  fi
+  local target_branch target_remote head
+  target_branch="${NOVA_UPDATE_BRANCH:-main}"
+  target_remote="${NOVA_UPDATE_REMOTE:-origin}"
+  head="$(git -C "${ROOT_DIR}" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")"
+  if [[ -z "${head}" ]]; then
+    return 0
+  fi
+  case "${head}" in
+    agent/auto/*) ;;
+    *) return 0 ;;
+  esac
+  echo "self-heal: HEAD is parked on '${head}' (an autonomous-work branch); switching back to '${target_branch}' so updates can run."
+  if ! git -C "${ROOT_DIR}" fetch "${target_remote}" "${target_branch}" >/dev/null 2>&1; then
+    echo "self-heal: 'git fetch ${target_remote} ${target_branch}' failed — leaving HEAD on '${head}'."
+    return 0
+  fi
+  if ! git -C "${ROOT_DIR}" checkout "${target_branch}" >/dev/null 2>&1; then
+    if ! git -C "${ROOT_DIR}" checkout -B "${target_branch}" "${target_remote}/${target_branch}" >/dev/null 2>&1; then
+      echo "self-heal: could not switch to '${target_branch}' — leaving HEAD on '${head}'."
+      return 0
+    fi
+  fi
+  if ! git -C "${ROOT_DIR}" merge --ff-only "${target_remote}/${target_branch}" >/dev/null 2>&1; then
+    echo "self-heal: '${target_branch}' has diverged from '${target_remote}/${target_branch}'; manual intervention required."
+    return 0
+  fi
+  if [[ -n "${NOVA_REPO_GIT_CHOWN:-}" ]]; then
+    chown -R "${NOVA_REPO_GIT_CHOWN}" "${ROOT_DIR}/.git" 2>/dev/null || true
+  fi
+  echo "self-heal: HEAD is now on '${target_branch}' fast-forwarded to '${target_remote}/${target_branch}'."
+}
+
 trap 'echo "Stopping Nova local stack..."; cleanup; exit 0' INT TERM
 
 echo "Starting Nova local stack supervisor..."
@@ -228,6 +276,7 @@ while true; do
   fi
 
   prune_stale_rollback_marker
+  self_heal_stuck_auto_branch
 
   POST_UPDATE_PROBE=0
   if [[ -f "${ROLLBACK_MARKER}" ]]; then
