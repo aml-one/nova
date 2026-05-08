@@ -48,6 +48,35 @@ export class PhoneIdentityResolver {
           if (normalizedPhone) this.identities.upsertIdentity(existingPersonId, "phone_e164", normalizedPhone);
           return existingPersonId;
         }
+        // Sealed sender / hidden E.164: first message may carry only UUID. Mint (or recover) a person and map
+        // identity_map.phone to the UUID string so later lookups stay stable until phone_e164 is known.
+        const legacyUserId = this.repository.findByPhone(normalizedUuid);
+        if (legacyUserId) {
+          this.identities.upsertIdentity(legacyUserId, "signal_uuid", normalizedUuid);
+          if (normalizedPhone) {
+            this.identities.upsertIdentity(legacyUserId, "phone_e164", normalizedPhone);
+            this.repository.upsertChannelMapping("signal", normalizedPhone, legacyUserId);
+          }
+          this.repository.upsertChannelMapping("signal", normalizedUuid, legacyUserId);
+          return legacyUserId;
+        }
+        const personId = `person-${randomUUID()}`;
+        this.people.upsert({
+          id: personId,
+          rating: 50,
+          interestScore: 0.5,
+          rudenessScore: 0,
+          topics: [],
+          optedOut: false,
+          blocked: false
+        });
+        this.identities.upsertIdentity(personId, "signal_uuid", normalizedUuid);
+        if (normalizedPhone) {
+          this.identities.upsertIdentity(personId, "phone_e164", normalizedPhone);
+          this.repository.upsertChannelMapping("signal", normalizedPhone, personId);
+        }
+        this.repository.upsertChannelMapping("signal", normalizedUuid, personId);
+        return personId;
       }
     }
     if (!normalizedPhone) {

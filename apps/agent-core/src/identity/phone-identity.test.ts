@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { PhoneIdentityResolver } from "./phone-identity.js";
 
@@ -21,5 +22,14 @@ describe("PhoneIdentityResolver", () => {
     const first = resolver.resolve({ channel: "web", webUserId: "web-user-1" });
     const second = resolver.resolve({ channel: "web", webUserId: "web-user-1" });
     expect(first).toBe(second);
+  });
+
+  it("creates and reuses a person for Signal when only sealed-sender UUID is present (no E.164)", () => {
+    const resolver = new PhoneIdentityResolver();
+    const uuid = randomUUID();
+    const first = resolver.resolve({ channel: "signal", signalUuid: uuid });
+    const second = resolver.resolve({ channel: "signal", signalUuid: uuid });
+    expect(first).toBe(second);
+    expect(first.startsWith("person-")).toBe(true);
   });
 });
