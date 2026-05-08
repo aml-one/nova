@@ -79,6 +79,14 @@ export class AuthRepository {
       }));
   }
 
+  getFirstUserId(): string | undefined {
+    const db = getDatabase();
+    const row = db
+      .prepare("SELECT id FROM app_users ORDER BY datetime(created_at) ASC LIMIT 1")
+      .get() as { id?: string } | undefined;
+    return row?.id;
+  }
+
   createSession(session: AppSessionRecord): void {
     const db = getDatabase();
     db.prepare("INSERT INTO app_sessions (token, user_id, expires_at) VALUES (?, ?, ?)").run(

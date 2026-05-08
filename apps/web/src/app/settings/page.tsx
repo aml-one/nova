@@ -2793,7 +2793,13 @@ export default function SettingsPage() {
                           alt="WhatsApp Web pairing QR code"
                         />
                       ) : (
-                        <p className="text-[11px] text-muted">Rendering QR…</p>
+                        <div className="space-y-1">
+                          <p className="text-[11px] text-muted">Rendering QR…</p>
+                          <p className="text-[11px] text-muted">
+                            If this never renders, click Refresh status. As a fallback, here is the raw QR payload (for debugging):
+                          </p>
+                          <Textarea readOnly value={whatsAppWebStatus.qr} rows={3} />
+                        </div>
                       )}
                       {whatsAppQrRenderError ? <p className="text-[11px] text-rose-600 dark:text-rose-400">{whatsAppQrRenderError}</p> : null}
                     </div>

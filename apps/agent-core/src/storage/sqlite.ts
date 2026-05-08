@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 
 let database: DatabaseSync | undefined;
-const LATEST_SCHEMA_VERSION = 21;
+const LATEST_SCHEMA_VERSION = 23;
 
 export function getDatabase(): DatabaseSync {
   if (database) {
@@ -552,6 +552,87 @@ function runMigrations(db: DatabaseSync): void {
       expires_at_ms INTEGER NOT NULL,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+  `);
+    },
+    () => {
+      db.exec(`
+    CREATE TABLE IF NOT EXISTS people (
+      id TEXT PRIMARY KEY,
+      display_name TEXT,
+      about_notes TEXT,
+      rating INTEGER NOT NULL DEFAULT 50,
+      interest_score REAL NOT NULL DEFAULT 0.5,
+      rudeness_score REAL NOT NULL DEFAULT 0.0,
+      preferred_channel TEXT,
+      topics_json TEXT NOT NULL DEFAULT '[]',
+      opted_out INTEGER NOT NULL DEFAULT 0,
+      blocked INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_people_rating ON people(rating DESC);
+    CREATE INDEX IF NOT EXISTS idx_people_updated_at ON people(updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS person_identities (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      value TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(kind, value)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_person_identities_person_id ON person_identities(person_id);
+
+    CREATE TABLE IF NOT EXISTS person_channel_state (
+      person_id TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      last_inbound_at_ms INTEGER,
+      last_outbound_at_ms INTEGER,
+      unreplied_outbound_count INTEGER NOT NULL DEFAULT 0,
+      cooldown_until_ms INTEGER,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (person_id, channel)
+    );
+
+    CREATE TABLE IF NOT EXISTS person_field_locks (
+      person_id TEXT NOT NULL,
+      field TEXT NOT NULL,
+      locked INTEGER NOT NULL DEFAULT 1,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (person_id, field)
+    );
+
+    CREATE TABLE IF NOT EXISTS person_profile_events (
+      id TEXT PRIMARY KEY,
+      person_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_person_profile_events_person_id
+      ON person_profile_events(person_id, created_at DESC);
+  `);
+    },
+    () => {
+      db.exec(`
+    CREATE TABLE IF NOT EXISTS person_relationships (
+      a_person_id TEXT NOT NULL,
+      b_person_id TEXT NOT NULL,
+      relation TEXT NOT NULL,
+      status TEXT NOT NULL,
+      notes TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (a_person_id, b_person_id, relation)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_person_relationships_a
+      ON person_relationships(a_person_id, status);
+    CREATE INDEX IF NOT EXISTS idx_person_relationships_b
+      ON person_relationships(b_person_id, status);
   `);
     }
   ];

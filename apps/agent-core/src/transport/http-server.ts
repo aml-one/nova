@@ -25,6 +25,7 @@ import {
   verifyWhatsAppSignature
 } from "../security/webhook-verifier.js";
 import { OutboundDispatcher } from "../messaging/outbound-dispatcher.js";
+import { ProactiveOutreachDaemon } from "../messaging/proactive-outreach-daemon.js";
 import { Logger } from "../observability/logger.js";
 import { VoiceService, isVoiceSttConfigured } from "../voice/voice-service.js";
 import { getRecentTtsEntries, recordTtsSpeakResult } from "../voice/tts-recent-log.js";
@@ -56,6 +57,11 @@ import { registerOllamaSettingsSource } from "../providers/ollama.js";
 import { ProviderCatalogService } from "../providers/provider-catalog.js";
 import { UpdateManager } from "../update/update-manager.js";
 import { ThoughtRepository } from "../storage/repositories/thought-repository.js";
+import { PeopleRepository } from "../storage/repositories/people-repository.js";
+import { PersonIdentitiesRepository } from "../storage/repositories/person-identities-repository.js";
+import { PersonFieldLocksRepository } from "../storage/repositories/person-field-locks-repository.js";
+import { PersonChannelStateRepository } from "../storage/repositories/person-channel-state-repository.js";
+import { PersonProfileEventsRepository } from "../storage/repositories/person-profile-events-repository.js";
 import { WebSocketServer, WebSocket } from "ws";
 import { MobilePushService } from "../mobile/push-service.js";
 import { LearningDaemon } from "../improvement/learning-daemon.js";
@@ -140,6 +146,8 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   const copilotDeviceLoginSessions = new Map<string, CopilotDeviceLoginSession>();
   const thoughtWs = new WebSocketServer({ noServer: true });
   dispatcher.start();
+  const outreach = new ProactiveOutreachDaemon({ settings: options.settings, orchestrator: options.orchestrator, dispatcher });
+  outreach.start();
   const runScheduledTask = async (taskPayload: string): Promise<void> => {
     await options.orchestrator.handleChannelMessage({
       channel: "web",
@@ -432,6 +440,194 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
             correlationId
           });
         }
+      }
+      if (parsedUrl.pathname === "/v1/admin/people" || parsedUrl.pathname.startsWith("/v1/admin/people/")) {
+        if (!sessionUser && !hasInternalAuth && loginEnabled) {
+          return sendJson(response, 401, { error: "unauthorized", correlationId });
+        }
+        if (!hasInternalAuth && !options.auth.isAdminUser(sessionUser?.id)) {
+          return sendJson(response, 403, { error: "forbidden", correlationId });
+        }
+
+        const people = new PeopleRepository();
+        const identities = new PersonIdentitiesRepository();
+        const locks = new PersonFieldLocksRepository();
+        const channelState = new PersonChannelStateRepository();
+        const events = new PersonProfileEventsRepository();
+
+        if (request.method === "GET" && parsedUrl.pathname === "/v1/admin/people") {
+          const id = (parsedUrl.searchParams.get("id") ?? "").trim();
+          if (id) {
+            const person = people.getById(id);
+            if (!person) return sendJson(response, 404, { error: "not found", correlationId });
+            const personIdentities = identities.listIdentitiesForPerson(id);
+            const lockedFields = locks.listLockedFields(id);
+            const stateSignal = channelState.get(id, "signal");
+            const stateWhatsApp = channelState.get(id, "whatsapp");
+            const stateWeb = channelState.get(id, "web");
+            const recentEvents = events.list(id, 50);
+            return sendJson(response, 200, {
+              item: person,
+              identities: personIdentities,
+              lockedFields,
+              channelState: { web: stateWeb, signal: stateSignal, whatsapp: stateWhatsApp },
+              events: recentEvents,
+              correlationId
+            });
+          }
+          const limit = Math.max(1, Math.min(1000, Number(parsedUrl.searchParams.get("limit") ?? "200")));
+          const offset = Math.max(0, Number(parsedUrl.searchParams.get("offset") ?? "0"));
+          const items = people.list(limit, offset);
+          return sendJson(response, 200, { items, correlationId });
+        }
+
+        if (request.method === "PATCH" && parsedUrl.pathname === "/v1/admin/people") {
+          const payload = (await readJson(request)) as {
+            id?: string;
+            patch?: Partial<{
+              displayName: string | null;
+              aboutNotes: string | null;
+              rating: number;
+              interestScore: number;
+              rudenessScore: number;
+              preferredChannel: "web" | "signal" | "whatsapp" | null;
+              topics: string[];
+              optedOut: boolean;
+              blocked: boolean;
+            }>;
+            locks?: Array<{ field: string; locked: boolean }>;
+          };
+          const id = payload.id?.trim() ?? "";
+          if (!id) return sendJson(response, 400, { error: "id is required", correlationId });
+          const current = people.getById(id);
+          if (!current) return sendJson(response, 404, { error: "not found", correlationId });
+          const patch = payload.patch ?? {};
+          const next = {
+            ...current,
+            displayName: patch.displayName === null ? undefined : typeof patch.displayName === "string" ? patch.displayName : current.displayName,
+            aboutNotes: patch.aboutNotes === null ? undefined : typeof patch.aboutNotes === "string" ? patch.aboutNotes : current.aboutNotes,
+            rating: typeof patch.rating === "number" ? patch.rating : current.rating,
+            interestScore: typeof patch.interestScore === "number" ? patch.interestScore : current.interestScore,
+            rudenessScore: typeof patch.rudenessScore === "number" ? patch.rudenessScore : current.rudenessScore,
+            preferredChannel:
+              patch.preferredChannel === null
+                ? undefined
+                : patch.preferredChannel === "web" || patch.preferredChannel === "signal" || patch.preferredChannel === "whatsapp"
+                  ? patch.preferredChannel
+                  : current.preferredChannel,
+            topics: Array.isArray(patch.topics) ? patch.topics.filter((t) => typeof t === "string") : current.topics,
+            optedOut: typeof patch.optedOut === "boolean" ? patch.optedOut : current.optedOut,
+            blocked: typeof patch.blocked === "boolean" ? patch.blocked : current.blocked
+          };
+          people.upsert(next);
+          for (const item of payload.locks ?? []) {
+            if (!item || typeof item.field !== "string" || typeof item.locked !== "boolean") continue;
+            locks.setLocked(id, item.field, item.locked);
+          }
+          events.append(id, "admin_patch", { patch: payload.patch ?? {}, locks: payload.locks ?? [] });
+          const updated = people.getById(id);
+          return sendJson(response, 200, { item: updated, correlationId });
+        }
+
+        if (request.method === "POST" && parsedUrl.pathname === "/v1/admin/people/merge") {
+          const payload = (await readJson(request)) as { sourceId?: string; targetId?: string };
+          const sourceId = payload.sourceId?.trim() ?? "";
+          const targetId = payload.targetId?.trim() ?? "";
+          if (!sourceId || !targetId) return sendJson(response, 400, { error: "sourceId and targetId are required", correlationId });
+          if (sourceId === targetId) return sendJson(response, 400, { error: "sourceId and targetId must differ", correlationId });
+
+          const source = people.getById(sourceId);
+          const target = people.getById(targetId);
+          if (!source) return sendJson(response, 404, { error: "source not found", correlationId });
+          if (!target) return sendJson(response, 404, { error: "target not found", correlationId });
+
+          const db = getDatabase();
+          db.exec("BEGIN IMMEDIATE TRANSACTION;");
+          try {
+            // Move identities where possible.
+            const sourceIds = identities.listIdentitiesForPerson(sourceId);
+            const conflicts: Array<{ kind: string; value: string }> = [];
+            for (const id of sourceIds) {
+              const res = identities.upsertIdentity(targetId, id.kind as any, id.value);
+              if (!res.ok) conflicts.push({ kind: id.kind, value: id.value });
+            }
+            db.prepare("DELETE FROM person_identities WHERE person_id = ?").run(sourceId);
+
+            // Merge channel state (max timestamps, sum unreplied capped).
+            for (const ch of ["web", "signal", "whatsapp"] as const) {
+              const s = channelState.get(sourceId, ch);
+              const t = channelState.get(targetId, ch);
+              if (!s && !t) continue;
+              channelState.upsert({
+                personId: targetId,
+                channel: ch,
+                lastInboundAtMs: Math.max(t?.lastInboundAtMs ?? 0, s?.lastInboundAtMs ?? 0) || undefined,
+                lastOutboundAtMs: Math.max(t?.lastOutboundAtMs ?? 0, s?.lastOutboundAtMs ?? 0) || undefined,
+                unrepliedOutboundCount: Math.min(1000000, (t?.unrepliedOutboundCount ?? 0) + (s?.unrepliedOutboundCount ?? 0)),
+                cooldownUntilMs: Math.max(t?.cooldownUntilMs ?? 0, s?.cooldownUntilMs ?? 0) || undefined
+              });
+              db.prepare("DELETE FROM person_channel_state WHERE person_id = ? AND channel = ?").run(sourceId, ch);
+            }
+
+            // Merge locks (union).
+            const locked = new Set<string>([...locks.listLockedFields(targetId), ...locks.listLockedFields(sourceId)]);
+            for (const f of locked) locks.setLocked(targetId, f, true);
+            db.prepare("DELETE FROM person_field_locks WHERE person_id = ?").run(sourceId);
+
+            // Move events to target for continuity.
+            db.prepare("UPDATE person_profile_events SET person_id = ? WHERE person_id = ?").run(targetId, sourceId);
+
+            // Merge basic profile fields (fill missing on target).
+            const merged = {
+              ...target,
+              displayName: target.displayName ?? source.displayName,
+              aboutNotes: target.aboutNotes ?? source.aboutNotes,
+              topics: Array.from(new Set([...(target.topics ?? []), ...(source.topics ?? [])])).slice(0, 30),
+              optedOut: target.optedOut || source.optedOut,
+              blocked: target.blocked || source.blocked,
+              rudenessScore: Math.max(target.rudenessScore ?? 0, source.rudenessScore ?? 0),
+              interestScore: Math.max(target.interestScore ?? 0.5, source.interestScore ?? 0.5),
+              rating: Math.max(target.rating ?? 50, source.rating ?? 50)
+            };
+            people.upsert(merged);
+
+            // Drop source person row.
+            db.prepare("DELETE FROM people WHERE id = ?").run(sourceId);
+
+            events.append(targetId, "admin_merge_people", { sourceId, targetId, conflicts });
+            db.exec("COMMIT;");
+            return sendJson(response, 200, { ok: true, conflicts, correlationId });
+          } catch (e) {
+            db.exec("ROLLBACK;");
+            return sendJson(response, 500, { error: e instanceof Error ? e.message : "merge failed", correlationId });
+          }
+        }
+
+        if (request.method === "POST" && parsedUrl.pathname === "/v1/admin/people/identities") {
+          const payload = (await readJson(request)) as {
+            action?: "add" | "delete";
+            personId?: string;
+            kind?: "web_user_id" | "phone_e164" | "signal_uuid" | "whatsapp_phone_e164";
+            value?: string;
+          };
+          const personId = payload.personId?.trim() ?? "";
+          const kind = payload.kind?.trim() ?? "";
+          const value = payload.value?.trim() ?? "";
+          if (!personId || !kind || !value) {
+            return sendJson(response, 400, { error: "personId, kind, value are required", correlationId });
+          }
+          if (payload.action === "delete") {
+            identities.deleteIdentity(kind as any, value);
+            events.append(personId, "admin_identity_delete", { kind, value });
+            return sendJson(response, 200, { ok: true, correlationId });
+          }
+          const res = identities.upsertIdentity(personId, kind as any, value);
+          if (!res.ok) return sendJson(response, 409, { error: "identity already linked to a different person", correlationId });
+          events.append(personId, "admin_identity_add", { kind, value });
+          return sendJson(response, 200, { ok: true, correlationId });
+        }
+
+        return sendJson(response, 404, { error: "not found", correlationId });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/settings") {
         return sendJson(response, 200, { settings: options.settings.get(), correlationId });
@@ -838,9 +1034,18 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/start") {
         const payload = (await readJson(request)) as { forceNewPairing?: boolean };
-        const status = await startWhatsAppWebBridge(baileysInboundHandler, {
+        let status = await startWhatsAppWebBridge(baileysInboundHandler, {
           resetAuth: payload.forceNewPairing === true
         });
+        // Give Baileys a brief window to emit the QR update so the UI can render immediately.
+        const deadline = Date.now() + 6000;
+        while (!status.qr && status.state === "starting" && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 300));
+          status = getWhatsAppWebBridgeStatus();
+          if (status.state === "qr" || status.state === "connected" || status.state === "error" || status.state === "logged_out") {
+            break;
+          }
+        }
         return sendJson(response, 200, { status, correlationId });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/stop") {
@@ -1277,6 +1482,8 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const reply = await options.orchestrator.handleChannelMessage({
           channel: "web",
           phoneNumber: payload.phoneNumber,
+          webUserId: sessionUser?.id,
+          webUserEmail: sessionUser?.email,
           text: message,
           correlationId,
           imageUrl: payload.imageUrl,
@@ -1322,6 +1529,8 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           const reply = await options.orchestrator.handleChannelMessage({
             channel: "web",
             phoneNumber: payload.phoneNumber,
+            webUserId: sessionUser?.id,
+            webUserEmail: sessionUser?.email,
             text: message,
             correlationId,
             imageUrl: payload.imageUrl,

@@ -145,6 +145,15 @@ class WhatsAppWebBridge {
     await sock.sendMessage(jid, { text: text.slice(0, 4096) });
   }
 
+  async sendVoice(to: string, audio: Buffer, mimeType: string): Promise<void> {
+    const sock = this.socket;
+    if (!sock || this.state !== "connected") {
+      throw new Error("WhatsApp Web bridge is not connected");
+    }
+    const jid = to.includes("@") ? to : `${to.replace(/\D/g, "")}@s.whatsapp.net`;
+    await sock.sendMessage(jid, { audio, mimetype: mimeType, ptt: true });
+  }
+
   getStatus(): Status {
     return {
       state: this.state,
@@ -180,4 +189,8 @@ export function getWhatsAppWebBridgeStatus(): Status {
 
 export async function sendWhatsAppWebMessage(to: string, text: string): Promise<void> {
   return globalBridge.sendText(to, text);
+}
+
+export async function sendWhatsAppWebVoice(to: string, audio: Buffer, mimeType: string): Promise<void> {
+  return globalBridge.sendVoice(to, audio, mimeType);
 }

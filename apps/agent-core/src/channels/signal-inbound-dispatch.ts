@@ -143,6 +143,7 @@ export async function dispatchSignalInboundMessages(
         reply = await deps.orchestrator.handleChannelMessage({
           channel: "signal",
           phoneNumber: message.phoneNumber,
+          signalUuid: message.signalUuid,
           text: message.text,
           correlationId: msgCorr,
           accessProfile

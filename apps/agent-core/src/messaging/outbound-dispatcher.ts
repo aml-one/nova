@@ -113,7 +113,7 @@ export class OutboundDispatcher {
           continue;
         }
         if (job.channel === "whatsapp") {
-          await this.wa.sendMessage(job.recipient, visiblePayload);
+          await this.sendWhatsAppWithOptionalVoice(job.recipient, job.payload, visiblePayload, job.correlationId ?? randomUUID());
         } else {
           await this.sendSignalWithOptionalVoice(
             job.recipient,
@@ -243,5 +243,46 @@ export class OutboundDispatcher {
       });
     }
     await this.signal.sendMessage(recipient, visibleText);
+  }
+
+  private async sendWhatsAppWithOptionalVoice(
+    recipient: string,
+    ttsSource: string,
+    visibleText: string,
+    correlationId: string
+  ): Promise<void> {
+    try {
+      const settings = this.getSettings();
+      const tts = settings?.orpheusTts;
+      if (tts?.enabled && tts.baseUrl.trim()) {
+        const audio = await this.voice.synthesizeOrpheusBuffer(ttsSource);
+        const mimeType = this.voice.mimeTypeForCurrentFormat();
+        await this.wa.sendVoiceMessage(recipient, audio, mimeType);
+        // Always send transcript as a separate message (matches Signal’s “voice+transcript” pattern).
+        await this.wa.sendMessage(recipient, visibleText);
+        pushChannelDebug({
+          channel: "whatsapp",
+          direction: "out",
+          transport: "dispatcher",
+          correlationId,
+          peer: recipient,
+          textPreview: previewChannelText(`voice+transcript (${audio.byteLength} bytes)`),
+          trace: ["whatsapp_voice_attachment_sent"]
+        });
+        return;
+      }
+    } catch (error) {
+      pushChannelDebug({
+        channel: "whatsapp",
+        direction: "out",
+        transport: "dispatcher",
+        correlationId,
+        peer: recipient,
+        textPreview: previewChannelText(visibleText),
+        trace: ["whatsapp_voice_attachment_failed", "falling_back_to_text"],
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+    await this.wa.sendMessage(recipient, visibleText);
   }
 }

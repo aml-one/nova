@@ -54,8 +54,184 @@ import { ThoughtRepository } from "../storage/repositories/thought-repository.js
 import { getDatabase } from "../storage/sqlite.js";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
+import { PeopleRepository } from "../storage/repositories/people-repository.js";
+import { PersonIdentitiesRepository, type PersonIdentityKind } from "../storage/repositories/person-identities-repository.js";
+import { IdentityRepository } from "../storage/repositories/identity-repository.js";
+import { PersonFieldLocksRepository } from "../storage/repositories/person-field-locks-repository.js";
+import { PersonChannelStateRepository, type PersonChannel } from "../storage/repositories/person-channel-state-repository.js";
+import { PersonProfileEventsRepository } from "../storage/repositories/person-profile-events-repository.js";
+import { PersonRelationshipsRepository } from "../storage/repositories/person-relationships-repository.js";
 
 const MAX_HOST_DIAG_APPENDIX_CHARS = 12_000;
+
+type PendingLink = {
+  token: string;
+  expiresAtMs: number;
+  identityKind: PersonIdentityKind;
+  identityValue: string;
+  requestedName: string;
+};
+
+const pendingLinksByToken = new Map<string, PendingLink>();
+type PendingConnection = {
+  token: string;
+  expiresAtMs: number;
+  fromPersonId: string;
+  toPersonId: string;
+  relation: string;
+};
+const pendingConnectionsByToken = new Map<string, PendingConnection>();
+
+function sweepPendingLinks(nowMs = Date.now()): void {
+  for (const [token, v] of pendingLinksByToken) {
+    if (v.expiresAtMs <= nowMs) pendingLinksByToken.delete(token);
+  }
+}
+
+function sweepPendingConnections(nowMs = Date.now()): void {
+  for (const [token, v] of pendingConnectionsByToken) {
+    if (v.expiresAtMs <= nowMs) pendingConnectionsByToken.delete(token);
+  }
+}
+
+function parseLinkCommand(text: string): { kind: "link"; requestedName: string } | { kind: "confirm"; token: string } | undefined {
+  const raw = text.trim();
+  const m1 = raw.match(/^\/link\s+(.+)$/i) ?? raw.match(/^link:\s*(.+)$/i);
+  if (m1?.[1]) {
+    const requestedName = m1[1].trim();
+    if (requestedName) return { kind: "link", requestedName };
+  }
+  const m2 = raw.match(/^\/confirm(?:-link)?\s+([a-z0-9]{4,16})$/i) ?? raw.match(/^confirm\s+([a-z0-9]{4,16})$/i);
+  if (m2?.[1]) {
+    return { kind: "confirm", token: m2[1].trim().toLowerCase() };
+  }
+  return undefined;
+}
+
+function normalizePhone(value: string | undefined): string | undefined {
+  const v = value?.trim();
+  if (!v) return undefined;
+  const digits = v.replace(/[^\d+]/g, "");
+  if (!digits) return undefined;
+  return digits.startsWith("+") ? digits : `+${digits}`;
+}
+
+function inferIdentityForLink(input: { channel: "web" | "whatsapp" | "signal"; phoneNumber?: string; signalUuid?: string }): {
+  kind: PersonIdentityKind;
+  value: string;
+} | undefined {
+  if (input.channel === "signal") {
+    const uuid = input.signalUuid?.trim().toLowerCase();
+    if (uuid && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uuid)) {
+      return { kind: "signal_uuid", value: uuid };
+    }
+    const phone = normalizePhone(input.phoneNumber);
+    if (phone) return { kind: "phone_e164", value: phone };
+    return undefined;
+  }
+  if (input.channel === "whatsapp") {
+    const phone = normalizePhone(input.phoneNumber);
+    if (!phone) return undefined;
+    return { kind: "whatsapp_phone_e164", value: phone };
+  }
+  return undefined;
+}
+
+function harvestTopics(text: string): string[] {
+  const t = text.toLowerCase();
+  const words = t
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[^a-z0-9\s+#-]/g, " ")
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter((w) => w.length >= 4 && w.length <= 24);
+  const stop = new Set([
+    "this",
+    "that",
+    "with",
+    "what",
+    "when",
+    "where",
+    "which",
+    "their",
+    "there",
+    "about",
+    "could",
+    "would",
+    "should",
+    "please",
+    "hello",
+    "thanks",
+    "thank",
+    "again",
+    "just",
+    "like",
+    "have",
+    "your",
+    "yours",
+    "from",
+    "into",
+    "then",
+    "them",
+    "also",
+    "want",
+    "need",
+    "help",
+    "okay",
+    "okey"
+  ]);
+  const counts = new Map<string, number>();
+  for (const w of words) {
+    if (stop.has(w)) continue;
+    counts.set(w, (counts.get(w) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([w]) => w);
+}
+
+function parseTellCommand(text: string): { name: string; message: string } | undefined {
+  const raw = text.trim();
+  const m = raw.match(/^\/(tell|text|message)\s+(.+?)\s*:\s*([\s\S]+)$/i) ?? raw.match(/^\/(tell|text|message)\s+(\S+)\s+([\s\S]+)$/i);
+  if (!m?.[2] || !m?.[3]) return undefined;
+  const name = m[2].trim();
+  const message = m[3].trim();
+  if (!name || !message) return undefined;
+  return { name, message };
+}
+
+function parseConnectCommand(text: string): { name: string; relation: string } | undefined {
+  const raw = text.trim();
+  const m = raw.match(/^\/connect\s+(.+?)(?:\s+as\s+(\w+))?$/i) ?? raw.match(/^\/introduce\s+(.+?)(?:\s+as\s+(\w+))?$/i);
+  if (!m?.[1]) return undefined;
+  const name = m[1].trim();
+  const rel = (m[2] ?? "friend").trim().toLowerCase();
+  if (!name) return undefined;
+  const relation = rel === "family" || rel === "coworker" || rel === "partner" || rel === "friend" ? rel : "friend";
+  return { name, relation };
+}
+
+function parseConfirmKnow(text: string): { token: string; answer: "yes" | "no" } | undefined {
+  const raw = text.trim().toLowerCase();
+  const m = raw.match(/^\/confirm-know\s+([a-z0-9]{4,16})\s+(yes|no)$/i) ?? raw.match(/^confirm-know\s+([a-z0-9]{4,16})\s+(yes|no)$/i);
+  if (!m?.[1] || !m?.[2]) return undefined;
+  return { token: m[1].trim().toLowerCase(), answer: m[2] === "yes" ? "yes" : "no" };
+}
+
+function looksLikeSecret(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  const lower = t.toLowerCase();
+  if (lower.includes("-----begin private key-----")) return true;
+  if (/\b(password|passcode|api key|apikey|secret key|private key|token|access token|refresh token)\b/i.test(lower)) return true;
+  if (/\b(ssh-rsa|ssh-ed25519)\b/.test(t)) return true;
+  // Long high-entropy blobs (JWTs, base64, etc.)
+  if (/\beyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\b/.test(t)) return true; // JWT-like
+  if (/[A-Za-z0-9+\/]{80,}={0,2}/.test(t)) return true; // base64-ish
+  if (/[0-9a-f]{32,}/i.test(t) && /\b(key|token|secret|password)\b/i.test(lower)) return true;
+  return false;
+}
 
 /** Injected after persona on every channel—hard guard against fabricated “tool” output. */
 const INTEGRITY_SYSTEM_GUARD =
@@ -171,6 +347,13 @@ export class TaskOrchestrator {
   private readonly runHistory = new RunHistoryRepository();
   private readonly approvals = new ApprovalService();
   private readonly thoughtLog = new ThoughtRepository();
+  private readonly people = new PeopleRepository();
+  private readonly personIdentities = new PersonIdentitiesRepository();
+  private readonly legacyIdentityMap = new IdentityRepository();
+  private readonly personLocks = new PersonFieldLocksRepository();
+  private readonly personChannelState = new PersonChannelStateRepository();
+  private readonly personProfileEvents = new PersonProfileEventsRepository();
+  private readonly personRelationships = new PersonRelationshipsRepository();
   private inFlightCount = 0;
   private lastActivityAt = Date.now();
 
@@ -193,6 +376,12 @@ export class TaskOrchestrator {
   async handleChannelMessage(input: {
     channel: "web" | "whatsapp" | "signal";
     phoneNumber?: string;
+    /** WebUI logged-in user id (UUID from auth). */
+    webUserId?: string;
+    /** WebUI logged-in email (used only for initial person naming). */
+    webUserEmail?: string;
+    /** Signal sealed-sender UUID (when available). */
+    signalUuid?: string;
     text: string;
     correlationId?: string;
     imageUrl?: string;
@@ -213,8 +402,205 @@ export class TaskOrchestrator {
     });
     const userId = this.deps.identityResolver.resolve({
       channel: input.channel,
-      phoneNumber: input.phoneNumber
+      phoneNumber: input.phoneNumber,
+      webUserId: input.webUserId,
+      signalUuid: input.signalUuid
     });
+
+    // Best-effort: assign an initial display name for web users based on email, if missing.
+    if (input.channel === "web") {
+      const person = this.people.getById(userId);
+      if (person && !person.displayName) {
+        const email = input.webUserEmail?.trim();
+        const localPart = email?.split("@")[0]?.trim();
+        if (localPart) {
+          this.people.upsert({ ...person, displayName: localPart });
+        }
+      }
+    }
+
+    // Identity linking (Signal/WhatsApp): `/link <Name>` then `confirm <token>`.
+    sweepPendingLinks();
+    const linkCmd = input.channel === "web" ? undefined : parseLinkCommand(input.text);
+    if (linkCmd && input.channel !== "web") {
+      const identity = inferIdentityForLink({ channel: input.channel, phoneNumber: input.phoneNumber, signalUuid: input.signalUuid });
+      if (!identity) {
+        return "I couldn't determine your identity on this channel (missing phone/UUID).";
+      }
+      if (linkCmd.kind === "link") {
+        const token = Math.random().toString(36).slice(2, 8).toLowerCase();
+        pendingLinksByToken.set(token, {
+          token,
+          expiresAtMs: Date.now() + 10 * 60_000,
+          identityKind: identity.kind,
+          identityValue: identity.value,
+          requestedName: linkCmd.requestedName
+        });
+        return `To link this chat identity to "${linkCmd.requestedName}", reply with: confirm ${token}`;
+      }
+      if (linkCmd.kind === "confirm") {
+        const pending = pendingLinksByToken.get(linkCmd.token);
+        if (!pending) {
+          return "That link token is not valid (or expired). Please send `/link <YourName>` again.";
+        }
+        if (pending.identityKind !== identity.kind || pending.identityValue !== identity.value) {
+          return "That link token was created for a different chat identity. Please send `/link <YourName>` again from this same chat.";
+        }
+        const requested = pending.requestedName.trim();
+        const target = this.findOrCreatePersonByDisplayName(requested);
+
+        const ok = this.personIdentities.upsertIdentity(target.id, pending.identityKind, pending.identityValue);
+        if (!ok.ok) {
+          return "That identity is already linked to someone else. An admin can fix it in the People admin page.";
+        }
+        const phone = normalizePhone(input.phoneNumber);
+        if (phone) {
+          this.legacyIdentityMap.upsertChannelMapping(input.channel, phone, target.id);
+          this.personIdentities.upsertIdentity(target.id, "phone_e164", phone);
+        }
+        if (input.channel === "signal" && input.signalUuid) {
+          const uuid = input.signalUuid.trim().toLowerCase();
+          if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uuid)) {
+            this.personIdentities.upsertIdentity(target.id, "signal_uuid", uuid);
+          }
+        }
+        pendingLinksByToken.delete(linkCmd.token);
+        return `Linked. I’ll remember this is "${target.displayName ?? requested}".`;
+      }
+    }
+
+    // Onboarding for new/unknown people (no name yet).
+    const person = this.people.getById(userId);
+    if (input.channel !== "web" && person && !person.displayName) {
+      return "Hi — who is this, and what do you want from me?\n\nIf you also use the WebUI, you can link this chat to your profile with: `/link YourName`";
+    }
+
+    // Mutual connection handshake: `/connect Anita` → Nova asks Anita “Do you know Ambrus?”
+    sweepPendingConnections();
+    const confirmKnow = parseConfirmKnow(input.text);
+    if (confirmKnow) {
+      const pending = pendingConnectionsByToken.get(confirmKnow.token);
+      if (!pending) {
+        return "That connection token is not valid (or expired).";
+      }
+      if (pending.toPersonId !== userId) {
+        return "That token was created for a different person.";
+      }
+      const from = this.people.getById(pending.fromPersonId);
+      const to = this.people.getById(pending.toPersonId);
+      if (!from || !to) {
+        pendingConnectionsByToken.delete(confirmKnow.token);
+        return "I couldn’t complete that connection (missing profile).";
+      }
+      if (confirmKnow.answer === "yes") {
+        const notes = pending.relation === "friend" ? "friends" : pending.relation;
+        this.personRelationships.setMutual(from.id, to.id, pending.relation, "confirmed", notes);
+        this.personProfileEvents.append(from.id, "connection_confirmed", { with: to.id, relation: pending.relation });
+        this.personProfileEvents.append(to.id, "connection_confirmed", { with: from.id, relation: pending.relation });
+        pendingConnectionsByToken.delete(confirmKnow.token);
+        // Tell the requester (best-effort).
+        const dest = this.pickBestOutboundIdentity(from.id);
+        if (dest) {
+          getDatabase()
+            .prepare(
+              `
+              INSERT INTO outbound_queue (channel, recipient, payload, attempts, next_attempt_at, status, correlation_id)
+              VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP, 'pending', ?)
+              `
+            )
+            .run(dest.channel, dest.recipient, `Confirmed: ${to.displayName ?? "They"} says they know you. (${notes})`, randomUUID());
+        }
+        return `Got it — I’ll remember you and ${from.displayName ?? "them"} know each other.`;
+      }
+      this.personRelationships.setMutual(pending.fromPersonId, pending.toPersonId, pending.relation, "rejected", "rejected");
+      this.personProfileEvents.append(pending.fromPersonId, "connection_rejected", { with: pending.toPersonId, relation: pending.relation });
+      this.personProfileEvents.append(pending.toPersonId, "connection_rejected", { with: pending.fromPersonId, relation: pending.relation });
+      pendingConnectionsByToken.delete(confirmKnow.token);
+      return "Okay — I won’t connect you two.";
+    }
+
+    const connect = parseConnectCommand(input.text);
+    if (connect) {
+      const isAdmin = Boolean(input.accessProfile?.role === "admin" || input.accessProfile?.role === "co_admin");
+      if (!isAdmin) {
+        return "You do not have permission to connect two people.";
+      }
+      const target = this.findPersonByDisplayName(connect.name);
+      if (!target) {
+        return `I can’t find a person named "${connect.name}". (Set their display name in People admin first.)`;
+      }
+      const dest = this.pickBestOutboundIdentity(target.id);
+      if (!dest) {
+        return `I can’t reach "${target.displayName ?? connect.name}" yet (no Signal/WhatsApp identity linked).`;
+      }
+      const token = Math.random().toString(36).slice(2, 8).toLowerCase();
+      pendingConnectionsByToken.set(token, {
+        token,
+        expiresAtMs: Date.now() + 30 * 60_000,
+        fromPersonId: userId,
+        toPersonId: target.id,
+        relation: connect.relation
+      });
+      const fromName = person?.displayName ?? "Someone";
+      const ask = `${fromName} says they know you. Do you know ${fromName}?\n\nReply with: /confirm-know ${token} yes\nor: /confirm-know ${token} no`;
+      getDatabase()
+        .prepare(
+          `
+          INSERT INTO outbound_queue (channel, recipient, payload, attempts, next_attempt_at, status, correlation_id)
+          VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP, 'pending', ?)
+          `
+        )
+        .run(dest.channel, dest.recipient, ask, randomUUID());
+      this.personRelationships.setMutual(userId, target.id, connect.relation, "pending", "pending_confirmation");
+      this.personProfileEvents.append(userId, "connection_requested", { to: target.id, relation: connect.relation });
+      this.personProfileEvents.append(target.id, "connection_requested", { from: userId, relation: connect.relation });
+      return `Okay — I asked ${target.displayName ?? connect.name} if they know you.`;
+    }
+
+    // Admin-only cross-user messaging by name: `/tell Anita: hi ...`
+    const tell = parseTellCommand(input.text);
+    if (tell) {
+      const isAdmin = Boolean(input.accessProfile?.role === "admin" || input.accessProfile?.role === "co_admin");
+      if (!isAdmin) {
+        return "You do not have permission to message other people.";
+      }
+      if (looksLikeSecret(tell.message)) {
+        return "I can’t forward that message because it looks like it contains a secret (password/token/key). Please rewrite it without secrets.";
+      }
+      const target = this.findPersonByDisplayName(tell.name);
+      if (!target) {
+        return `I can’t find a person named "${tell.name}". (Check People admin, or set their display name.)`;
+      }
+      if (target.blocked || target.optedOut) {
+        return `I won’t message "${target.displayName ?? tell.name}" because they are blocked/opted-out.`;
+      }
+      const dest = this.pickBestOutboundIdentity(target.id);
+      if (!dest) {
+        return `I can’t message "${target.displayName ?? tell.name}" because they have no Signal/WhatsApp identity linked.`;
+      }
+      const senderName = person?.displayName ?? "Someone";
+      const rel = this.personRelationships.get(userId, target.id, "friend");
+      const prefix =
+        rel?.status === "confirmed"
+          ? `Hey — ${senderName} asked me to remind you:\n\n`
+          : `${senderName} asked me to tell you:\n\n`;
+      const outbound = `${prefix}${tell.message}`;
+      // Use existing dispatcher via outbound queue by re-entering as a synthetic reply job:
+      // We can’t reach dispatcher directly here, so we schedule via a normal channel message path:
+      // Instead, write into outbound_queue by using a tiny direct DB insert through the dispatcher is not available.
+      // Therefore, we enqueue via the run history / orchestrator return path in http-server for now is not possible.
+      // (Implemented below by directly inserting into outbound_queue.)
+      getDatabase()
+        .prepare(
+          `
+          INSERT INTO outbound_queue (channel, recipient, payload, attempts, next_attempt_at, status, correlation_id)
+          VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP, 'pending', ?)
+          `
+        )
+        .run(dest.channel, dest.recipient, outbound, randomUUID());
+      this.personProfileEvents.append(target.id, "admin_tell_sent", { fromPersonId: userId, via: dest.channel, message: tell.message.slice(0, 500) });
+      return `Sent to ${target.displayName ?? tell.name} via ${dest.channel}.`;
+    }
     const runtimeSettings = applyRolloutCohortSettings(userId, this.deps.settingsService.get());
     if (this.deps.modelRouter.getActiveProvider() !== runtimeSettings.activeProvider) {
       this.deps.modelRouter.setActiveProvider(runtimeSettings.activeProvider);
@@ -254,7 +640,7 @@ export class TaskOrchestrator {
         title: "Enable skill",
         content: enableSkillId
       });
-      this.rememberAssistantTurn(userId, input.text, reply, runtimeSettings.emotions);
+      this.rememberAssistantTurn(userId, input.channel, input.text, reply, runtimeSettings.emotions);
       this.recordRunHistory({
         runId,
         userId,
@@ -308,7 +694,7 @@ export class TaskOrchestrator {
         memoryContext,
         cognitiveCoreBlock
       });
-      this.rememberAssistantTurn(userId, input.text, multi, runtimeSettings.emotions);
+      this.rememberAssistantTurn(userId, input.channel, input.text, multi, runtimeSettings.emotions);
       return multi;
     }
 
@@ -356,7 +742,7 @@ export class TaskOrchestrator {
         title: "Auto media generation",
         content: generation
       });
-      this.rememberAssistantTurn(userId, input.text, generation, runtimeSettings.emotions);
+      this.rememberAssistantTurn(userId, input.channel, input.text, generation, runtimeSettings.emotions);
       this.recordRunHistory({
         runId,
         userId,
@@ -401,7 +787,7 @@ export class TaskOrchestrator {
             String(result.formatted ?? "").trim() ||
             buildPerplexicaFallbackResult(String(result.answer ?? ""), result.sources ?? []);
           if (reply.trim()) {
-            this.rememberAssistantTurn(userId, input.text, reply, runtimeSettings.emotions);
+            this.rememberAssistantTurn(userId, input.channel, input.text, reply, runtimeSettings.emotions);
             this.recordRunHistory({
               runId,
               userId,
@@ -443,7 +829,7 @@ export class TaskOrchestrator {
       const cleaned = timeRaw.trim();
       if (cleaned && cleaned !== "(timed out)" && cleaned !== "(empty)") {
         const timeReply = formatNovaLocalTimeSentence(cleaned);
-        this.rememberAssistantTurn(userId, input.text, timeReply, runtimeSettings.emotions);
+        this.rememberAssistantTurn(userId, input.channel, input.text, timeReply, runtimeSettings.emotions);
         this.recordRunHistory({
           runId,
           userId,
@@ -491,7 +877,7 @@ export class TaskOrchestrator {
         (looksLikeDf || looksLikeWinDisk);
       if (looksUsable) {
         const diskReply = formatHostDiskSpaceReply(cleaned);
-        this.rememberAssistantTurn(userId, input.text, diskReply, runtimeSettings.emotions);
+        this.rememberAssistantTurn(userId, input.channel, input.text, diskReply, runtimeSettings.emotions);
         this.recordRunHistory({
           runId,
           userId,
@@ -553,7 +939,7 @@ export class TaskOrchestrator {
     // For straightforward host resource checks, prefer direct tool output over model prose.
     if (diagnosticsIntent && hostDiagnosticsAppendix.trim()) {
       const diagnosticsReply = formatHostDiagnosticsReply(diagnosticsIntent, hostDiagnosticsAppendix);
-      this.rememberAssistantTurn(userId, input.text, diagnosticsReply, runtimeSettings.emotions);
+      this.rememberAssistantTurn(userId, input.channel, input.text, diagnosticsReply, runtimeSettings.emotions);
       this.recordRunHistory({
         runId,
         userId,
@@ -581,7 +967,7 @@ export class TaskOrchestrator {
       if (runtimeSettings.ollama.disabled === true) {
         const blocked =
           "Ollama is disabled in Nova Settings (Models → Ollama default model → **Disabled**). Enable Ollama and pick a default model before I can list tags from the API.";
-        this.rememberAssistantTurn(userId, input.text, blocked, runtimeSettings.emotions);
+        this.rememberAssistantTurn(userId, input.channel, input.text, blocked, runtimeSettings.emotions);
         this.recordRunHistory({
           runId,
           userId,
@@ -604,7 +990,7 @@ export class TaskOrchestrator {
           defaultChatModel: runtimeSettings.models.defaultByProvider.ollama,
           activeProvider: runtimeSettings.activeProvider
         });
-        this.rememberAssistantTurn(userId, input.text, routingReply, runtimeSettings.emotions);
+        this.rememberAssistantTurn(userId, input.channel, input.text, routingReply, runtimeSettings.emotions);
         this.recordRunHistory({
           runId,
           userId,
@@ -627,7 +1013,7 @@ export class TaskOrchestrator {
       if (!markdown.trim()) {
         const fail =
           `I could not read **GET ${baseUrl}/api/tags** from Ollama. Check that Ollama is running and that **Settings → Vision → Ollama vision base URL** (or **OLLAMA_BASE_URL**) points at the same host your terminal uses. I will not invent a model list.`;
-        this.rememberAssistantTurn(userId, input.text, fail, runtimeSettings.emotions);
+        this.rememberAssistantTurn(userId, input.channel, input.text, fail, runtimeSettings.emotions);
         this.recordRunHistory({
           runId,
           userId,
@@ -651,7 +1037,7 @@ export class TaskOrchestrator {
         defaultChatModel: runtimeSettings.models.defaultByProvider.ollama,
         activeProvider: runtimeSettings.activeProvider
       });
-      this.rememberAssistantTurn(userId, input.text, invReply, runtimeSettings.emotions);
+      this.rememberAssistantTurn(userId, input.channel, input.text, invReply, runtimeSettings.emotions);
       this.recordRunHistory({
         runId,
         userId,
@@ -723,7 +1109,7 @@ export class TaskOrchestrator {
       truncatedDiag.length > 0 || implicitShellAppendix.trim() ? composedUser + timeVoiceHint : `${input.text}${timeVoiceHint}`;
     const unresolvedVisionRef = this.resolveUnresolvedVisionReference(input.text, input.imageUrl, runtimeSettings);
     if (unresolvedVisionRef) {
-      this.rememberAssistantTurn(userId, input.text, unresolvedVisionRef, runtimeSettings.emotions);
+      this.rememberAssistantTurn(userId, input.channel, input.text, unresolvedVisionRef, runtimeSettings.emotions);
       this.recordRunHistory({
         runId,
         userId,
@@ -753,7 +1139,7 @@ export class TaskOrchestrator {
       runtimeSettings
     );
     if (visionResult.blockedReply) {
-      this.rememberAssistantTurn(userId, input.text, visionResult.blockedReply, runtimeSettings.emotions);
+      this.rememberAssistantTurn(userId, input.channel, input.text, visionResult.blockedReply, runtimeSettings.emotions);
       this.recordRunHistory({
         runId,
         userId,
@@ -915,7 +1301,7 @@ export class TaskOrchestrator {
         "I can still help without Copilot, but right now I cannot reach a working local model for this task. " +
         "Please configure Copilot in Settings -> Models -> Copilot quick setup, or enable Ollama/LM Studio and try again." +
         (errText.trim() ? ` (last error: ${errText.slice(0, 180)})` : "");
-      this.rememberAssistantTurn(userId, input.text, fallback, runtimeSettings.emotions);
+      this.rememberAssistantTurn(userId, input.channel, input.text, fallback, runtimeSettings.emotions);
       const failedAfterMs = Date.now() - startedAt;
       this.recordRunHistory({
         runId,
@@ -966,7 +1352,7 @@ export class TaskOrchestrator {
       }
     }
 
-    this.rememberAssistantTurn(userId, input.text, result.content, runtimeSettings.emotions);
+    this.rememberAssistantTurn(userId, input.channel, input.text, result.content, runtimeSettings.emotions);
     this.recordRunHistory({
       runId,
       userId,
@@ -1032,6 +1418,55 @@ export class TaskOrchestrator {
     createdAt: string;
   }> {
     return this.deps.emotionService.getHistory(NOVA_PRIMARY_EMOTION_USER_ID);
+  }
+
+  private findOrCreatePersonByDisplayName(displayName: string): { id: string; displayName?: string } {
+    const name = displayName.trim();
+    const db = getDatabase();
+    const row = db
+      .prepare("SELECT id, display_name FROM people WHERE lower(display_name) = lower(?) LIMIT 1")
+      .get(name) as { id?: string; display_name?: string | null } | undefined;
+    if (row?.id) {
+      return { id: row.id, displayName: row.display_name ?? undefined };
+    }
+    const id = `person-${randomUUID()}`;
+    this.people.upsert({
+      id,
+      displayName: name,
+      rating: 50,
+      interestScore: 0.5,
+      rudenessScore: 0,
+      topics: [],
+      optedOut: false,
+      blocked: false
+    });
+    return { id, displayName: name };
+  }
+
+  private findPersonByDisplayName(displayName: string): { id: string; displayName?: string; optedOut: boolean; blocked: boolean } | undefined {
+    const name = displayName.trim();
+    if (!name) return undefined;
+    const db = getDatabase();
+    const row = db
+      .prepare("SELECT id, display_name, opted_out, blocked FROM people WHERE lower(display_name) = lower(?) LIMIT 1")
+      .get(name) as { id?: string; display_name?: string | null; opted_out?: number | null; blocked?: number | null } | undefined;
+    if (!row?.id) return undefined;
+    return {
+      id: row.id,
+      displayName: row.display_name ?? undefined,
+      optedOut: Boolean(row.opted_out),
+      blocked: Boolean(row.blocked)
+    };
+  }
+
+  private pickBestOutboundIdentity(personId: string): { channel: "signal" | "whatsapp"; recipient: string } | undefined {
+    const ids = this.personIdentities.listIdentitiesForPerson(personId);
+    // Prefer explicit WhatsApp identity for WhatsApp sends, Signal uses phone_e164.
+    const wa = ids.find((i) => i.kind === "whatsapp_phone_e164")?.value;
+    const sig = ids.find((i) => i.kind === "phone_e164")?.value;
+    if (sig) return { channel: "signal", recipient: sig };
+    if (wa) return { channel: "whatsapp", recipient: wa };
+    return undefined;
   }
 
   private async executeShellTask(
@@ -1213,7 +1648,7 @@ export class TaskOrchestrator {
       onToken: input.onToken,
       emotionSnapshot: formatEmotionSnapshot(this.deps.emotionService.getState(NOVA_PRIMARY_EMOTION_USER_ID))
     });
-    this.rememberAssistantTurn(userId, input.text, result.reply, runtimeSettings.emotions);
+    this.rememberAssistantTurn(userId, input.channel, input.text, result.reply, runtimeSettings.emotions);
     this.deps.auditLog.append({
       runId,
       actor: userId,
@@ -1249,12 +1684,78 @@ export class TaskOrchestrator {
 
   private rememberAssistantTurn(
     userId: string,
+    channel: "web" | "whatsapp" | "signal",
     userText: string,
     assistantText: string,
     emotions: AppSettings["emotions"]
   ): void {
     this.deps.memoryService.appendTurn(userId, userText, assistantText);
     this.deps.emotionService.updateFromAssistantReply(NOVA_PRIMARY_EMOTION_USER_ID, assistantText, emotions);
+    this.updatePersonProfileFromTurn(userId, channel, userText, assistantText);
+  }
+
+  private updatePersonProfileFromTurn(
+    personId: string,
+    channel: "web" | "whatsapp" | "signal",
+    userText: string,
+    assistantText: string
+  ): void {
+    const current = this.people.getById(personId);
+    if (!current) return;
+
+    // Channel usage state.
+    this.personChannelState.recordInbound(personId, channel as PersonChannel, Date.now());
+
+    // Opt-out / stop texting safety (apply immediately).
+    const userSlice = userText.trim().toLowerCase().slice(0, 500);
+    const optedOutSignal =
+      /\b(stop|unsubscribe|do not text|don't text|dont text|leave me alone|never text|no more messages)\b/i.test(userSlice) ||
+      /\b(block me|delete my number)\b/i.test(userSlice);
+
+    const rudeSignal =
+      /\b(fuck you|f\*+k you|bitch|whore|slut|idiot|moron|stupid)\b/i.test(userSlice) ||
+      /\b(go to hell|kill yourself)\b/i.test(userSlice);
+
+    const thanksSignal = /\b(thank you|thanks|appreciate it|love this|that helps)\b/i.test(userSlice);
+
+    const locks = (field: string) => this.personLocks.isLocked(personId, field);
+
+    let next = { ...current };
+
+    if (optedOutSignal) {
+      next.optedOut = true;
+    }
+
+    if (rudeSignal) {
+      if (!locks("rudenessScore")) next.rudenessScore = Math.min(1, (next.rudenessScore ?? 0) + 0.15);
+      if (!locks("rating")) next.rating = Math.max(0, (next.rating ?? 50) - 8);
+    } else if (thanksSignal) {
+      if (!locks("interestScore")) next.interestScore = Math.min(1, (next.interestScore ?? 0.5) + 0.03);
+      if (!locks("rating")) next.rating = Math.min(100, (next.rating ?? 50) + 2);
+      if (!locks("rudenessScore")) next.rudenessScore = Math.max(0, (next.rudenessScore ?? 0) - 0.02);
+    }
+
+    // Topics: simple keyword harvest from user text (bounded).
+    if (!locks("topics")) {
+      const harvested = harvestTopics(userText);
+      if (harvested.length > 0) {
+        const set = new Set([...(next.topics ?? []), ...harvested].map((t) => t.trim()).filter(Boolean));
+        next.topics = Array.from(set).slice(0, 30);
+      }
+    }
+
+    // Preferred channel: softly follow observed channel unless locked.
+    if (!locks("preferredChannel")) {
+      next.preferredChannel = channel;
+    }
+
+    // If they’re opted out, treat that as a strong relationship event.
+    this.people.upsert(next);
+    if (optedOutSignal) {
+      this.personProfileEvents.append(personId, "opt_out_detected", { channel, userText: userText.slice(0, 500) });
+    } else if (rudeSignal) {
+      this.personProfileEvents.append(personId, "rudeness_detected", { channel, userText: userText.slice(0, 500) });
+    }
   }
 
   private recordRunHistory(input: {

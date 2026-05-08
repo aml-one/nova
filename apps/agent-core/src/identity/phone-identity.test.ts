@@ -15,4 +15,11 @@ describe("PhoneIdentityResolver", () => {
     const signalUser = resolver.resolve({ channel: "signal", phoneNumber: "1 (555) 765-4321" });
     expect(waUser).toBe(signalUser);
   });
+
+  it("maps a stable person id for the same web user id", () => {
+    const resolver = new PhoneIdentityResolver();
+    const first = resolver.resolve({ channel: "web", webUserId: "web-user-1" });
+    const second = resolver.resolve({ channel: "web", webUserId: "web-user-1" });
+    expect(first).toBe(second);
+  });
 });

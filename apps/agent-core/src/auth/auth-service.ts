@@ -43,6 +43,13 @@ export class AuthService {
     return this.repo.listUsers();
   }
 
+  isAdminUser(userId: string | undefined): boolean {
+    const id = userId?.trim();
+    if (!id) return false;
+    const first = this.repo.getFirstUserId();
+    return Boolean(first && first === id);
+  }
+
   login(email: string, password: string): { token: string; user: AuthUser; expiresAt: string } {
     const normalizedEmail = normalizeEmail(email);
     const user = this.repo.getUserByEmail(normalizedEmail);
