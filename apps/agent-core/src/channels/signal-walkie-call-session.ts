@@ -67,11 +67,11 @@ export function isSignalHangupCommand(text: string): boolean {
 export function parseSignalWalkieCallCommand(text: string): { remainder: string } | null {
   const raw = text.trim();
   const lower = raw.toLowerCase();
-  const solo = new Set(["/call", "/voice", "/walkie"]);
+  const solo = new Set(["/call", "/voice", "/walkie", "/phone"]);
   if (solo.has(lower)) {
     return { remainder: "" };
   }
-  const prefixes = ["/call ", "/voice ", "/walkie "];
+  const prefixes = ["/call ", "/voice ", "/walkie ", "/phone "];
   for (const p of prefixes) {
     if (lower.startsWith(p)) {
       return { remainder: raw.slice(p.length).trim() };
@@ -104,12 +104,45 @@ function clockTo24h(hour12or24: number, minute: number, mer?: string): { h: numb
   } else if (merNorm.startsWith("a")) {
     if (h === 12) h = 0;
   } else {
-    if (h >= 1 && h <= 11) {
-      h += 12;
-    }
+    // No am/pm: treat as 24-hour clock (9 → 09:00, 15 → 15:00). Say "3pm" for afternoon.
+    h = Math.min(23, Math.max(0, Math.floor(h)));
   }
-  if (h < 0 || h > 23) h = Math.min(23, Math.max(0, h));
   return { h, m };
+}
+
+const WEEKDAY_TO_DOW: Record<string, number> = {
+  sunday: 0,
+  sun: 0,
+  monday: 1,
+  mon: 1,
+  tuesday: 2,
+  tue: 2,
+  tues: 2,
+  wednesday: 3,
+  wed: 3,
+  thursday: 4,
+  thu: 4,
+  thurs: 4,
+  friday: 5,
+  fri: 5,
+  saturday: 6,
+  sat: 6
+};
+
+/** Next calendar occurrence of `dayToken` at local wall time; if `nextOnly`, skip today. */
+function atNextNamedWeekday(dayToken: string, hour: number, minute: number, mer: string | undefined, nextOnly: boolean): number {
+  const dow = WEEKDAY_TO_DOW[dayToken.toLowerCase()];
+  if (dow === undefined) return NaN;
+  const { h, m } = clockTo24h(hour, minute, mer);
+  const start = nextOnly ? 1 : 0;
+  for (let i = start; i <= 14; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i);
+    if (d.getDay() !== dow) continue;
+    d.setHours(h, m, 0, 0);
+    if (d.getTime() > Date.now()) return d.getTime();
+  }
+  return NaN;
 }
 
 function atLocalNextDay(hour: number, minute: number, mer?: string): number {
@@ -139,6 +172,16 @@ export function parseNaturalLanguageCallMe(text: string): NaturalCallMeIntent | 
   if (!raw) return null;
   const s = stripLeadingNovaCallPrefix(raw.toLowerCase());
 
+  if (/^call\s+me\s+in\s+an\s+hour\b/i.test(s) || /^call\s+me\s+in\s+1\s+hour\b/i.test(s)) {
+    return { kind: "in_ms", delayMs: 3600_000, label: "in 1 hour" };
+  }
+  if (/^call\s+me\s+in\s+half\s+(an\s+)?hour\b/i.test(s)) {
+    return { kind: "in_ms", delayMs: 30 * 60_000, label: "in half an hour" };
+  }
+  if (/^call\s+me\s+in\s+a\s+minute\b/i.test(s) || /^call\s+me\s+in\s+one\s+minute\b/i.test(s)) {
+    return { kind: "in_ms", delayMs: 60_000, label: "in 1 minute" };
+  }
+
   const inMatch = s.match(
     /^call\s+me\s+in\s+(\d+)\s*(minute|minutes|min|mins|hour|hours|hr|hrs|second|seconds|sec|secs)s?\s*\.?\s*$/i
   );
@@ -155,6 +198,25 @@ export function parseNaturalLanguageCallMe(text: string): NaturalCallMeIntent | 
           ? `in ${n} second${n === 1 ? "" : "s"}`
           : `in ${n} minute${n === 1 ? "" : "s"}`;
     return { kind: "in_ms", delayMs, label };
+  }
+
+  const weekMatch = s.match(
+    /^call\s+me\s+(next\s+)?(monday|mon|tuesday|tue|tues|wednesday|wed|thursday|thu|thurs|friday|fri|saturday|sat|sunday|sun)\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?\s*\.?\s*$/i
+  );
+  if (weekMatch) {
+    const nextOnly = Boolean(weekMatch[1]?.trim());
+    const dayTok = weekMatch[2]!;
+    const hour = parseInt(weekMatch[3]!, 10);
+    const minute = weekMatch[4] ? parseInt(weekMatch[4], 10) : 0;
+    const mer = weekMatch[5];
+    const whenMs = atNextNamedWeekday(dayTok, hour, minute, mer, nextOnly);
+    if (Number.isFinite(whenMs)) {
+      return {
+        kind: "at",
+        whenMs,
+        label: `${nextOnly ? "next " : ""}${dayTok} ${hour}:${String(minute).padStart(2, "0")}${mer ? ` ${mer}` : ""}`
+      };
+    }
   }
 
   const tomMatch = s.match(
@@ -183,7 +245,12 @@ export function parseNaturalLanguageCallMe(text: string): NaturalCallMeIntent | 
     return { kind: "at", whenMs, label: `today at ${hour}:${String(minute).padStart(2, "0")}${mer ? ` ${mer}` : ""}` };
   }
 
-  if (/^call\s+me(\s+now)?\s*[.!]?$/i.test(s) || /^ring\s+me(\s+now)?\s*[.!]?$/i.test(s)) {
+  if (
+    /^call\s+me(\s+now)?\s*[.!]?$/i.test(s) ||
+    /^ring\s+me(\s+now)?\s*[.!]?$/i.test(s) ||
+    /^phone\s+me(\s+now)?\s*[.!]?$/i.test(s) ||
+    /^give\s+me\s+a\s+call(\s+now)?\s*[.!]?$/i.test(s)
+  ) {
     return { kind: "immediate" };
   }
 

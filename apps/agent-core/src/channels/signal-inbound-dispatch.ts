@@ -180,7 +180,7 @@ export async function dispatchSignalInboundMessages(
         if (isSignalHangupCommand(message.text)) {
           signalWalkieCallEnd(message.from);
           reply =
-            "Call ended. Message me anytime—or send /call for another walkie-style voice session. (Signal still uses voice notes here, not a live phone line.)";
+            "Call ended. Message me anytime—or send /call or /phone for another walkie-style voice session. (Signal still uses voice notes here, not a live phone line.)";
           trace.push("walkie_hangup");
         } else {
           const nlCall = parseNaturalLanguageCallMe(message.text);
