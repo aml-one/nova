@@ -122,6 +122,13 @@ type CopilotDeviceLoginSession = {
   process?: ChildProcessWithoutNullStreams;
 };
 
+/** Admin merge: trim BOM/whitespace; lowercase UUID-shaped ids (DB match is case-sensitive). */
+function normalizePersonIdForMerge(id: string): string {
+  const t = id.trim().replace(/^\uFEFF/, "");
+  const m = t.match(/^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/);
+  return m ? m[1].toLowerCase() : t;
+}
+
 export async function startHttpServer(options: HttpServerOptions): Promise<void> {
   registerCopilotSettingsSource(() => options.settings.get());
   registerOllamaSettingsSource(() => options.settings.get());
@@ -536,27 +543,35 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
 
         if (request.method === "POST" && parsedUrl.pathname === "/v1/admin/people/merge") {
           const payload = (await readJson(request)) as { sourceId?: string; targetId?: string };
-          const sourceId = payload.sourceId?.trim() ?? "";
-          const targetId = payload.targetId?.trim() ?? "";
+          const sourceId = normalizePersonIdForMerge(payload.sourceId ?? "");
+          const targetId = normalizePersonIdForMerge(payload.targetId ?? "");
           if (!sourceId || !targetId) return sendJson(response, 400, { error: "sourceId and targetId are required", correlationId });
           if (sourceId === targetId) return sendJson(response, 400, { error: "sourceId and targetId must differ", correlationId });
 
           const source = people.getById(sourceId);
           const target = people.getById(targetId);
-          if (!source) return sendJson(response, 404, { error: "source not found", correlationId });
-          if (!target) return sendJson(response, 404, { error: "target not found", correlationId });
+          if (!source) {
+            return sendJson(response, 404, {
+              error: "source not found — use the full person id from the People list (the UUID under the name).",
+              correlationId
+            });
+          }
+          if (!target) {
+            return sendJson(response, 404, {
+              error: "target not found — refresh the page; the current profile id may be stale.",
+              correlationId
+            });
+          }
 
           const db = getDatabase();
           db.exec("BEGIN IMMEDIATE TRANSACTION;");
           try {
-            // Move identities where possible.
-            const sourceIds = identities.listIdentitiesForPerson(sourceId);
+            // Reassign all identities from source → target. Do NOT use upsertIdentity here: rows still
+            // belong to sourceId until updated, so upsertIdentity(target, kind, value) would see
+            // existing.person_id === sourceId !== target and report a false conflict (e.g. target has
+            // phone_e164:+1… and source has whatsapp_phone_e164:+1… for the same number).
+            db.prepare("UPDATE person_identities SET person_id = ? WHERE person_id = ?").run(targetId, sourceId);
             const conflicts: Array<{ kind: string; value: string }> = [];
-            for (const id of sourceIds) {
-              const res = identities.upsertIdentity(targetId, id.kind as any, id.value);
-              if (!res.ok) conflicts.push({ kind: id.kind, value: id.value });
-            }
-            db.prepare("DELETE FROM person_identities WHERE person_id = ?").run(sourceId);
 
             // Merge channel state (max timestamps, sum unreplied capped).
             for (const ch of ["web", "signal", "whatsapp"] as const) {

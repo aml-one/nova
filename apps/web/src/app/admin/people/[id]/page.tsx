@@ -168,13 +168,21 @@ export default function PersonAdminDetailPage() {
   const [newValue, setNewValue] = useState("");
   const [mergeSourceId, setMergeSourceId] = useState("");
 
+  function normalizeMergePersonId(raw: string): string {
+    const t = raw.trim().replace(/^\uFEFF/, "");
+    const m = t.match(/^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/);
+    return m ? m[1].toLowerCase() : t;
+  }
+
   async function mergeFrom(sourceId: string) {
     if (!item) return;
     setError("");
+    const sid = normalizeMergePersonId(sourceId);
+    const tid = normalizeMergePersonId(item.id);
     const res = await apiFetch("/api/admin/people/merge", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ sourceId: sourceId.trim(), targetId: item.id })
+      body: JSON.stringify({ sourceId: sid, targetId: tid })
     });
     const data = (await res.json()) as { ok?: boolean; error?: string; conflicts?: Array<{ kind: string; value: string }> };
     if (!res.ok) {
@@ -410,7 +418,11 @@ export default function PersonAdminDetailPage() {
               Move identities/state/events from another person into this one, then delete the source person.
             </div>
             <div className="flex gap-2 flex-col md:flex-row">
-              <Input value={mergeSourceId} onChange={(e) => setMergeSourceId(e.target.value)} placeholder="Source person id" />
+              <Input
+                value={mergeSourceId}
+                onChange={(e) => setMergeSourceId(e.target.value)}
+                placeholder="Other person’s UUID (from People list, under the name)"
+              />
               <Button
                 type="button"
                 tone="neutral"
