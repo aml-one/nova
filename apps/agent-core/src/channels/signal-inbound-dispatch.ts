@@ -3,6 +3,10 @@ import type { TaskOrchestrator } from "../orchestrator/task-orchestrator.js";
 import type { OutboundDispatcher } from "../messaging/outbound-dispatcher.js";
 import type { SettingsService } from "../settings/settings-service.js";
 import type { ChannelMessage } from "./channel-router.js";
+import type { SignalChannelAdapter } from "./signal.js";
+
+/** Re-issue typing before signal-cli’s ~15 s expiry; >10 s avoids excessive debug noise. */
+const SIGNAL_TYPING_HEARTBEAT_MS = 14_000;
 import { resolveChannelAccess } from "../security/phone-access.js";
 import { previewChannelText, pushChannelDebug } from "./channel-debug-log.js";
 import { getDatabase } from "../storage/sqlite.js";
@@ -57,6 +61,7 @@ export async function dispatchSignalInboundMessages(
     orchestrator: TaskOrchestrator;
     settings: SettingsService;
     dispatcher: OutboundDispatcher;
+    signal: SignalChannelAdapter;
     transport: SignalInboundTransport;
   }
 ): Promise<Array<{ to: string; reply: string; delivered: boolean; error?: string }>> {
@@ -141,15 +146,19 @@ export async function dispatchSignalInboundMessages(
         signalInboundReleaseEnvelope(dedupeKey);
         continue;
       }
-      // signal-cli-rest-api typing indicators auto-expire after ~15 s. Re-issue them every 10 s while the
-      // orchestrator is working so the recipient sees continuous "Nova is typing…" instead of a flicker
-      // when a slow chat (e.g. cold-loading a 18 GB Ollama model) takes ≥15 s.
+      if (typeof message.envelopeTimestamp === "number" && Number.isFinite(message.envelopeTimestamp)) {
+        await deps.signal.sendReadReceipt(message.from, message.envelopeTimestamp).catch(() => {
+          /* optional; older signal-cli-rest-api builds may not support receipts */
+        });
+      }
+      // signal-cli-rest-api typing indicators auto-expire after ~15 s. Re-issue on a quiet interval
+      // (no per-tick channel-debug rows) so slow chats still show continuous typing without log spam.
       await deps.dispatcher.signalTyping(message.from, true);
       const typingHeartbeat = setInterval(() => {
-        void deps.dispatcher.signalTyping(message.from, true).catch(() => {
-          /* tracing already handled inside signalTyping; never let it kill the chat */
+        void deps.dispatcher.signalTyping(message.from, true, { quiet: true }).catch(() => {
+          /* never let typing kill the chat */
         });
-      }, 10_000);
+      }, SIGNAL_TYPING_HEARTBEAT_MS);
       if (typeof typingHeartbeat.unref === "function") typingHeartbeat.unref();
       let reply: string;
       try {

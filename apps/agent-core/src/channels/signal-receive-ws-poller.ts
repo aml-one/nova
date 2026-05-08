@@ -215,6 +215,7 @@ export function startSignalReceiveWsPoller(deps: {
           orchestrator: deps.orchestrator,
           settings: deps.settings,
           dispatcher: deps.dispatcher,
+          signal: deps.signal,
           transport: "receive_ws"
         });
       }

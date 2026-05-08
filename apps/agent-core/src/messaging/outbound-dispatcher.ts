@@ -57,9 +57,12 @@ export class OutboundDispatcher {
     this.queue.enqueue(channel, recipient, payload, correlationId);
   }
 
-  async signalTyping(recipient: string, typing: boolean): Promise<void> {
+  async signalTyping(recipient: string, typing: boolean, opts?: { quiet?: boolean }): Promise<void> {
     try {
       await this.signal.sendTypingIndicator(recipient, typing);
+      if (opts?.quiet) {
+        return;
+      }
       pushChannelDebug({
         channel: "signal",
         direction: "out",
@@ -70,16 +73,18 @@ export class OutboundDispatcher {
         trace: [typing ? "typing_indicator_on" : "typing_indicator_off"]
       });
     } catch (error) {
-      pushChannelDebug({
-        channel: "signal",
-        direction: "out",
-        transport: "dispatcher",
-        correlationId: randomUUID(),
-        peer: recipient,
-        textPreview: typing ? "(typing on failed)" : "(typing off failed)",
-        trace: [typing ? "typing_indicator_on_failed" : "typing_indicator_off_failed"],
-        error: error instanceof Error ? error.message : String(error)
-      });
+      if (!opts?.quiet) {
+        pushChannelDebug({
+          channel: "signal",
+          direction: "out",
+          transport: "dispatcher",
+          correlationId: randomUUID(),
+          peer: recipient,
+          textPreview: typing ? "(typing on failed)" : "(typing off failed)",
+          trace: [typing ? "typing_indicator_on_failed" : "typing_indicator_off_failed"],
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
     }
   }
 

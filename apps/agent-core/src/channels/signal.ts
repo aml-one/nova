@@ -2,10 +2,18 @@ import type { AppSettings } from "../storage/repositories/settings-repository.js
 import type { ChannelMessage } from "./channel-router.js";
 import { effectiveSignalAccountNumber, effectiveSignalApiUrl } from "./channel-runtime-config.js";
 
+type DataMessageAttachmentLike = {
+  id?: string;
+  contentType?: string;
+  /** signal-cli voice note flag when present */
+  voiceNote?: boolean;
+};
+
 type DataMessageLike = {
   message?: string;
   /** Some signal-cli / REST builds use `body` for plain text. */
   body?: string;
+  attachments?: DataMessageAttachmentLike[];
 };
 
 type SignalEnvelopeLike = {
@@ -38,10 +46,29 @@ export type SignalVoiceAttachment = {
   filename: string;
 };
 
+export type SignalInboundStt = (bytes: Buffer, mimeType?: string) => Promise<string>;
+
+export type SignalChannelAdapterOpts = {
+  transcribeInboundVoice?: SignalInboundStt;
+};
+
 function textFromDataMessage(dm: DataMessageLike | undefined): string {
   if (!dm) return "";
   const raw = dm.message ?? dm.body ?? "";
   return typeof raw === "string" ? raw.trim() : "";
+}
+
+function firstVoiceLikeAttachmentId(dm: DataMessageLike | undefined): string | undefined {
+  if (!dm?.attachments?.length) return undefined;
+  for (const a of dm.attachments) {
+    const id = typeof a.id === "string" ? a.id.trim() : "";
+    if (!id) continue;
+    const ct = (a.contentType ?? "").toLowerCase();
+    if (a.voiceNote || ct.startsWith("audio/") || ct === "application/ogg") {
+      return id;
+    }
+  }
+  return undefined;
 }
 
 function pickEnvelope(parsed: SignalWebhookPayload): SignalEnvelopeLike | undefined {
@@ -68,7 +95,10 @@ function asPhoneNumber(value: unknown): string {
 }
 
 export class SignalChannelAdapter {
-  constructor(private readonly getSettings?: () => AppSettings) {}
+  constructor(
+    private readonly getSettings?: () => AppSettings,
+    private readonly adapterOpts?: SignalChannelAdapterOpts
+  ) {}
 
   async ingestSignalEvent(payload: unknown): Promise<ChannelMessage[]> {
     if (!payload || typeof payload !== "object") return [];
@@ -84,7 +114,31 @@ export class SignalChannelAdapter {
     // Only real inbound DMs — do not use `syncMessage.sentMessage` (linked-device echo of *your*
     // own sends); treating it as inbound mis-attributes the peer and can look like "you" messaged yourself.
     const dm = envelope?.dataMessage ?? envelope?.editMessage?.dataMessage;
-    const text = textFromDataMessage(dm) || trimOrEmpty(parsed.message);
+    let text = textFromDataMessage(dm) || trimOrEmpty(parsed.message);
+    if (!text) {
+      const attachId = firstVoiceLikeAttachmentId(dm);
+      if (attachId) {
+        const transcribe = this.adapterOpts?.transcribeInboundVoice;
+        if (!transcribe) {
+          text =
+            "[Voice note — speech-to-text is not configured on agent-core (OPENAI_API_KEY or NOVA_STT_COMMAND).]";
+        } else {
+          try {
+            const bytes = await this.fetchAttachmentBytes(attachId);
+            const sniff = bytes.subarray(0, Math.min(24, bytes.length)).toString("utf8");
+            const mime =
+              sniff.includes("ftyp") || sniff.includes("mp4")
+                ? "audio/mp4"
+                : sniff.startsWith("OggS")
+                  ? "audio/ogg"
+                  : "audio/*";
+            text = (await transcribe(bytes, mime)).trim();
+          } catch (e) {
+            text = `[Voice note — could not fetch or transcribe: ${e instanceof Error ? e.message : String(e)}]`;
+          }
+        }
+      }
+    }
     if (!text) return [];
     const envelopeTimestamp =
       typeof envelope?.timestamp === "number" && Number.isFinite(envelope.timestamp) ? envelope.timestamp : undefined;
@@ -99,6 +153,51 @@ export class SignalChannelAdapter {
     const profileName = trimOrEmpty(envelope?.sourceName);
     if (profileName) message.signalSourceProfileName = profileName;
     return [message];
+  }
+
+  /**
+   * Tell the peer we read their message (best-effort). Uses signal-cli-rest-api
+   * `POST /v1/receipts/{number}` with the inbound envelope timestamp.
+   */
+  async sendReadReceipt(recipient: string, timestampMs: number): Promise<void> {
+    const settings = this.getSettings?.();
+    const baseUrl = settings ? effectiveSignalApiUrl(settings) : (process.env.SIGNAL_API_URL ?? "").trim();
+    const account = settings ? effectiveSignalAccountNumber(settings) : (process.env.SIGNAL_ACCOUNT_NUMBER ?? "").trim();
+    if (!baseUrl || !account || !recipient.trim() || !Number.isFinite(timestampMs) || timestampMs <= 0) {
+      return;
+    }
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/v1/receipts/${encodeURIComponent(account)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        recipient: recipient.trim(),
+        receipt_type: "read",
+        timestamp: Math.floor(timestampMs)
+      })
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`signal read receipt failed (${response.status}): ${body.slice(0, 300)}`);
+    }
+  }
+
+  private async fetchAttachmentBytes(attachmentId: string): Promise<Buffer> {
+    const settings = this.getSettings?.();
+    const baseUrl = settings ? effectiveSignalApiUrl(settings) : (process.env.SIGNAL_API_URL ?? "").trim();
+    if (!baseUrl) {
+      throw new Error("missing SIGNAL_API_URL");
+    }
+    const url = `${baseUrl.replace(/\/$/, "")}/v1/attachments/${encodeURIComponent(attachmentId)}`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`attachment fetch ${response.status}: ${body.slice(0, 200)}`);
+    }
+    const buf = Buffer.from(await response.arrayBuffer());
+    if (!buf.length) {
+      throw new Error("empty attachment body");
+    }
+    return buf;
   }
 
   async sendTypingIndicator(to: string, typing: boolean): Promise<void> {

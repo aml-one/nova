@@ -15,6 +15,8 @@ export type ChannelMessage = {
    */
   signalSourceProfileName?: string;
   text: string;
+  /** WhatsApp Cloud `wamid` — used to send read receipts back to Meta. */
+  whatsappMessageId?: string;
 };
 
 export class ChannelRouter {

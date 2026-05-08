@@ -16,6 +16,7 @@ type WhatsAppWebhookPayload = {
     changes?: Array<{
       value?: {
         messages?: Array<{
+          id?: string;
           from?: string;
           text?: { body?: string };
           type?: string;
@@ -87,11 +88,13 @@ export class WhatsAppChannelAdapter {
           if (!text) {
             continue;
           }
+          const wamid = message.id?.trim();
           outbound.push({
             channel: "whatsapp",
             from,
             phoneNumber: from,
-            text
+            text,
+            ...(wamid ? { whatsappMessageId: wamid } : {})
           });
           continue;
         }
@@ -122,16 +125,53 @@ export class WhatsAppChannelAdapter {
           if (!trimmed) {
             continue;
           }
+          const wamid = message.id?.trim();
           outbound.push({
             channel: "whatsapp",
             from,
             phoneNumber: from,
-            text: trimmed
+            text: trimmed,
+            ...(wamid ? { whatsappMessageId: wamid } : {})
           });
         }
       }
     }
     return outbound;
+  }
+
+  /**
+   * WhatsApp Cloud API: mark an inbound user message as read (blue ticks), best-effort.
+   * No-op for Baileys transport.
+   */
+  async markInboundMessageRead(messageId: string): Promise<void> {
+    if ((process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase() === "baileys") {
+      return;
+    }
+    const mid = messageId.trim();
+    if (!mid) return;
+    const settings = this.getSettings?.();
+    const phoneNumberId = settings ? effectiveWhatsAppPhoneNumberId(settings) : process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const token = settings ? effectiveWhatsAppToken(settings) : process.env.WHATSAPP_TOKEN;
+    const baseUrl = process.env.WHATSAPP_API_BASE_URL ?? "https://graph.facebook.com";
+    if (!phoneNumberId || !token) {
+      return;
+    }
+    const response = await fetch(`${baseUrl}/v22.0/${phoneNumberId}/messages`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        status: "read",
+        message_id: mid
+      })
+    });
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`whatsapp mark read failed (${response.status}): ${body.slice(0, 300)}`);
+    }
   }
 
   async sendMessage(to: string, text: string): Promise<void> {

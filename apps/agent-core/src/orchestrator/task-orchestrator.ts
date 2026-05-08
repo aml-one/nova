@@ -1488,7 +1488,9 @@ export class TaskOrchestrator {
     // Prefer explicit WhatsApp identity for WhatsApp sends, Signal uses phone_e164.
     const wa = ids.find((i) => i.kind === "whatsapp_phone_e164")?.value;
     const sig = ids.find((i) => i.kind === "phone_e164")?.value;
+    const sigUuid = ids.find((i) => i.kind === "signal_uuid")?.value;
     if (sig) return { channel: "signal", recipient: sig };
+    if (sigUuid) return { channel: "signal", recipient: sigUuid };
     if (wa) return { channel: "whatsapp", recipient: wa };
     return undefined;
   }

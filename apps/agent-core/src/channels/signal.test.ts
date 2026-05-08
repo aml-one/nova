@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SignalChannelAdapter } from "./signal.js";
 
 describe("SignalChannelAdapter", () => {
@@ -62,5 +62,38 @@ describe("SignalChannelAdapter", () => {
     expect(messages[0]?.signalUuid).toBe(uuid);
     expect(messages[0]?.signalSourceProfileName).toBe("nit");
     expect(messages[0]?.text).toBe("Hello");
+  });
+
+  it("ingests inbound Signal voice note via attachment fetch + STT", async () => {
+    const prevUrl = process.env.SIGNAL_API_URL;
+    process.env.SIGNAL_API_URL = "http://127.0.0.1:9";
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const u = String(input);
+      if (u.includes("/v1/attachments/voice-attach-1")) {
+        return new Response(new Uint8Array([0x4f, 0x67, 0x67, 0x53]), { status: 200 });
+      }
+      return new Response("not found", { status: 404 });
+    }) as unknown as typeof fetch;
+    try {
+      const adapter = new SignalChannelAdapter(undefined, {
+        transcribeInboundVoice: async () => "transcribed voice hello"
+      });
+      const messages = await adapter.ingestSignalEvent({
+        envelope: {
+          sourceNumber: "+15550001111",
+          timestamp: 1_700_000_004,
+          dataMessage: {
+            attachments: [{ id: "voice-attach-1", contentType: "audio/ogg", voiceNote: true }]
+          }
+        }
+      });
+      expect(messages).toHaveLength(1);
+      expect(messages[0]?.text).toBe("transcribed voice hello");
+    } finally {
+      globalThis.fetch = origFetch;
+      if (prevUrl === undefined) delete process.env.SIGNAL_API_URL;
+      else process.env.SIGNAL_API_URL = prevUrl;
+    }
   });
 });

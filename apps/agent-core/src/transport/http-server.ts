@@ -147,7 +147,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   const wa = new WhatsAppChannelAdapter(() => options.settings.get(), {
     transcribeInboundVoice: whatsappInboundTranscribe
   });
-  const signal = new SignalChannelAdapter(() => options.settings.get());
+  const signal = new SignalChannelAdapter(() => options.settings.get(), {
+    transcribeInboundVoice: whatsappInboundTranscribe
+  });
   const router = new ChannelRouter();
   const dispatcher = new OutboundDispatcher(() => options.settings.get());
   const logger = new Logger();
@@ -1727,6 +1729,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
               });
               continue;
             }
+            if (message.whatsappMessageId) {
+              await wa.markInboundMessageRead(message.whatsappMessageId).catch(() => {
+                /* Cloud API read receipts are best-effort */
+              });
+            }
             const reply = await options.orchestrator.handleChannelMessage({
               channel: "whatsapp",
               phoneNumber: message.phoneNumber,
@@ -1804,6 +1811,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           orchestrator: options.orchestrator,
           settings: options.settings,
           dispatcher,
+          signal,
           transport: "webhook"
         });
         replies.push(...dispatched);

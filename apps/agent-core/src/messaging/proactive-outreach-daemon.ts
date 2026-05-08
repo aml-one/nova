@@ -106,9 +106,11 @@ export class ProactiveOutreachDaemon {
     const ids = this.identities.listIdentitiesForPerson(personId);
     const wa = ids.find((i) => i.kind === "whatsapp_phone_e164")?.value;
     const sig = ids.find((i) => i.kind === "phone_e164")?.value;
+    const sigUuid = ids.find((i) => i.kind === "signal_uuid")?.value;
 
     const available: Array<{ channel: OutreachChannel; recipient: string; weight: number }> = [];
     if (sig) available.push({ channel: "signal", recipient: sig, weight: preferred === "signal" ? 1.6 : 1.0 });
+    else if (sigUuid) available.push({ channel: "signal", recipient: sigUuid, weight: preferred === "signal" ? 1.6 : 1.0 });
     if (wa) available.push({ channel: "whatsapp", recipient: wa, weight: preferred === "whatsapp" ? 1.6 : 1.0 });
     if (available.length === 0) return undefined;
 
