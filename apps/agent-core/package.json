@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@nova/sdk": "workspace:*",
-    "@whiskeysockets/baileys": "7.0.0-rc.9",
+    "@whiskeysockets/baileys": "7.0.0-rc10",
     "dotenv": "^17.4.2",
     "firebase-admin": "^13.5.0",
     "pino": "^10.3.1",

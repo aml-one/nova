@@ -1,7 +1,23 @@
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
-import makeWASocket, { DisconnectReason, useMultiFileAuthState, type WASocket } from "@whiskeysockets/baileys";
+import makeWASocket, {
+  Browsers,
+  DisconnectReason,
+  useMultiFileAuthState,
+  type WASocket
+} from "@whiskeysockets/baileys";
 import pino from "pino";
+
+/** Optional override for bundled WA Web client version `[major, minor, build]`, e.g. `2,3000,1030100000` */
+function waWebVersionFromEnv(): [number, number, number] | undefined {
+  const raw = process.env.NOVA_WA_WEB_VERSION?.trim();
+  if (!raw) return undefined;
+  const parts = raw.split(/[\s,]+/).map((p) => Number.parseInt(p.trim(), 10));
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
+    return undefined;
+  }
+  return [parts[0], parts[1], parts[2]];
+}
 
 type BridgeState = "idle" | "starting" | "qr" | "connected" | "reconnecting" | "logged_out" | "error";
 
@@ -73,27 +89,56 @@ class WhatsAppWebBridge {
     mkdirSync(authDir, { recursive: true });
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
-    // If Baileys never emits a QR update (or any terminal state), fail fast with diagnostics.
-    // This is the #1 cause of "stuck at starting" where the UI has nothing actionable to show.
+    // If Baileys stays in "connecting" (no QR, not open), fail after 90s — WhatsApp often needs fresh client version / network.
     if (this.startTimeoutId) clearTimeout(this.startTimeoutId);
+    const hangMs = Number.parseInt(process.env.NOVA_WA_PAIRING_TIMEOUT_MS?.trim() ?? "90000", 10);
+    const safeHang = Number.isFinite(hangMs) ? Math.min(Math.max(hangMs, 15_000), 300_000) : 90_000;
     this.startTimeoutId = setTimeout(() => {
-      if (this.state === "starting" && !this.qr) {
-        this.state = "error";
-        this.detail =
-          "No QR received after 20s. Ensure outbound internet access from this host, correct system time, and that WhatsApp is reachable. Try Link WhatsApp again (force new pairing) or check logs.";
-        this.touch();
+      if (this.state === "connected" || (this.state === "qr" && this.qr)) {
+        return;
       }
-    }, 20_000);
+      const stuckPairing = !this.qr && (this.state === "starting" || this.state === "reconnecting");
+      if (stuckPairing) {
+        this.state = "error";
+        this.detail = [
+          "WhatsApp Web did not finish pairing (no QR / no connection) within the timeout.",
+          "Check outbound HTTPS to web.whatsapp.com, system time, firewall/VPN, then set NOVA_WA_DEBUG=1 on agent-core and retry.",
+          "If WhatsApp updated: set NOVA_WA_WEB_VERSION from the current web client script tag or upgrade @whiskeysockets/baileys.",
+          "Alternatively use Meta Cloud API (WHATSAPP_TRANSPORT=cloud) in Settings."
+        ].join(" ");
+        this.touch();
+        const s = this.socket;
+        this.socket = null;
+        if (s) {
+          try {
+            s.ws.close();
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }, safeHang);
 
     const logger = pino({ level: process.env.NOVA_WA_DEBUG ? "info" : "silent" });
+    const version = waWebVersionFromEnv();
     let sock: WASocket;
     try {
       sock = makeWASocket({
         auth: state,
         printQRInTerminal: false,
-        logger
+        logger,
+        browser: Browsers.appropriate("Chrome"),
+        syncFullHistory: false,
+        connectTimeoutMs: 60_000,
+        ...(version ? { version } : {}),
+        markOnlineOnConnect: true,
+        fireInitQueries: true
       });
     } catch (error) {
+      if (this.startTimeoutId) {
+        clearTimeout(this.startTimeoutId);
+        this.startTimeoutId = null;
+      }
       this.state = "error";
       this.detail = error instanceof Error ? error.message : "Failed to start WhatsApp Web bridge";
       this.touch();
@@ -116,6 +161,10 @@ class WhatsAppWebBridge {
         this.qr = update.qr;
         this.state = "qr";
         this.detail = "Scan QR with WhatsApp on your phone (Linked devices).";
+        if (this.startTimeoutId) {
+          clearTimeout(this.startTimeoutId);
+          this.startTimeoutId = null;
+        }
       }
       if (update.connection === "open") {
         this.state = "connected";
@@ -127,6 +176,10 @@ class WhatsAppWebBridge {
         }
       }
       if (update.connection === "close") {
+        if (this.startTimeoutId) {
+          clearTimeout(this.startTimeoutId);
+          this.startTimeoutId = null;
+        }
         const stillActive = this.socket === sock;
         const loggedOut = statusCode === DisconnectReason.loggedOut;
         this.state = loggedOut ? "logged_out" : "reconnecting";
