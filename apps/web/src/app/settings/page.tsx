@@ -276,6 +276,12 @@ const SIGNAL_UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 const SIGNAL_UUID_INVALID_MSG =
   "Signal UUID must be a full standard UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx, 32 hex digits). Check you did not drop a leading character when pasting.";
 
+function signalUuidFormatHint(raw: string): string | null {
+  const t = raw.trim().toLowerCase();
+  if (!t || SIGNAL_UUID_RX.test(t)) return null;
+  return SIGNAL_UUID_INVALID_MSG;
+}
+
 const DEFAULT_SETTINGS: SettingsState = {
   delegatedFolders: [],
   requireApprovals: false,
@@ -3379,23 +3385,37 @@ export default function SettingsPage() {
                         placeholder="Alex"
                       />
                     </label>
-                    {channelTierAddFor === "signal" ? (
-                      <label className="grid gap-1 text-xs">
-                        Signal sealed-sender UUID (optional)
-                        <Input
-                          value={channelTierAddDraft.signalUuid}
-                          onChange={(e) => {
-                            setError(null);
-                            setChannelTierAddDraft((d) => ({ ...d, signalUuid: e.target.value }));
-                          }}
-                          placeholder="8-4-4-4-12 hex from channel debug"
-                          className="font-mono text-[13px]"
-                        />
-                        <span className="text-[10px] leading-snug text-muted">
-                          Use when inbound has no E.164; paste the Service ID UUID from channel debug logs.
-                        </span>
-                      </label>
-                    ) : null}
+                    {channelTierAddFor === "signal"
+                      ? (() => {
+                          const uuidHint = signalUuidFormatHint(channelTierAddDraft.signalUuid);
+                          return (
+                            <label className="grid gap-1 text-xs">
+                              Signal sealed-sender UUID (optional)
+                              <Input
+                                value={channelTierAddDraft.signalUuid}
+                                onChange={(e) => {
+                                  setError((prev) => (prev === SIGNAL_UUID_INVALID_MSG ? null : prev));
+                                  setChannelTierAddDraft((d) => ({ ...d, signalUuid: e.target.value }));
+                                }}
+                                placeholder="8-4-4-4-12 hex from channel debug"
+                                className="font-mono text-[13px]"
+                                aria-invalid={uuidHint ? true : undefined}
+                              />
+                              {uuidHint ? (
+                                <p
+                                  role="alert"
+                                  className="text-[11px] font-medium leading-snug text-rose-700 dark:text-rose-300"
+                                >
+                                  {uuidHint}
+                                </p>
+                              ) : null}
+                              <span className="text-[10px] leading-snug text-muted">
+                                Use when inbound has no E.164; paste the Service ID UUID from channel debug logs.
+                              </span>
+                            </label>
+                          );
+                        })()
+                      : null}
                     <label className="grid gap-1 text-xs">
                       Tier
                       <Select
@@ -3412,7 +3432,14 @@ export default function SettingsPage() {
                       </Select>
                     </label>
                     <div className="flex flex-wrap justify-end gap-2">
-                      <Button type="button" tone="green" onClick={() => void confirmAddChannelTier()}>
+                      <Button
+                        type="button"
+                        tone="green"
+                        disabled={
+                          channelTierAddFor === "signal" && !!signalUuidFormatHint(channelTierAddDraft.signalUuid)
+                        }
+                        onClick={() => void confirmAddChannelTier()}
+                      >
                         Add and save
                       </Button>
                     </div>
@@ -3525,33 +3552,51 @@ export default function SettingsPage() {
                       Name
                       <Input
                         value={channelTierNameDraft}
-                        onChange={(e) => {
-                          setError(null);
-                          setChannelTierNameDraft(e.target.value);
-                        }}
+                        onChange={(e) => setChannelTierNameDraft(e.target.value)}
                         placeholder="Display name"
                         maxLength={80}
                       />
                     </label>
-                    {channelTierNameEdit.channel === "signal" ? (
-                      <label className="grid gap-1 text-xs">
-                        Signal sealed-sender UUID (optional)
-                        <Input
-                          value={channelTierUuidDraft}
-                          onChange={(e) => {
-                            setError(null);
-                            setChannelTierUuidDraft(e.target.value);
-                          }}
-                          placeholder="8-4-4-4-12 hex"
-                          className="font-mono text-[13px]"
-                        />
-                        <span className="text-[10px] leading-snug text-muted">
-                          Clear to remove. Must be a full UUID if set (from channel debug when phone is hidden).
-                        </span>
-                      </label>
-                    ) : null}
+                    {channelTierNameEdit.channel === "signal"
+                      ? (() => {
+                          const uuidHint = signalUuidFormatHint(channelTierUuidDraft);
+                          return (
+                            <label className="grid gap-1 text-xs">
+                              Signal sealed-sender UUID (optional)
+                              <Input
+                                value={channelTierUuidDraft}
+                                onChange={(e) => {
+                                  setError((prev) => (prev === SIGNAL_UUID_INVALID_MSG ? null : prev));
+                                  setChannelTierUuidDraft(e.target.value);
+                                }}
+                                placeholder="8-4-4-4-12 hex"
+                                className="font-mono text-[13px]"
+                                aria-invalid={uuidHint ? true : undefined}
+                              />
+                              {uuidHint ? (
+                                <p
+                                  role="alert"
+                                  className="text-[11px] font-medium leading-snug text-rose-700 dark:text-rose-300"
+                                >
+                                  {uuidHint}
+                                </p>
+                              ) : null}
+                              <span className="text-[10px] leading-snug text-muted">
+                                Clear to remove. Must be a full UUID if set (from channel debug when phone is hidden).
+                              </span>
+                            </label>
+                          );
+                        })()
+                      : null}
                     <div className="flex flex-wrap justify-end gap-2">
-                      <Button type="button" tone="green" onClick={() => void confirmChannelNameEdit()}>
+                      <Button
+                        type="button"
+                        tone="green"
+                        disabled={
+                          channelTierNameEdit.channel === "signal" && !!signalUuidFormatHint(channelTierUuidDraft)
+                        }
+                        onClick={() => void confirmChannelNameEdit()}
+                      >
                         Save
                       </Button>
                     </div>
