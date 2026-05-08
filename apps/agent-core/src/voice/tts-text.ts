@@ -97,6 +97,67 @@ export function stripOrpheusSpeechCues(text: string): string {
 /**
  * Normalize assistant/chat markdown for speech synthesis (same rules as web chat read-aloud).
  */
+/**
+ * Some models put chain-of-thought in the assistant `content` (e.g. "User says:", "* Context:", drafts).
+ * Strip that for SMS-like channels so WhatsApp/Signal only get the bubble text.
+ */
+export function stripChannelAssistantScratchpad(raw: string): string {
+  if (!raw?.trim()) return raw;
+  let t = raw.replace(/\r\n/g, "\n").trim();
+  for (const pattern of [
+    /<thinking>([\s\S]*?)<\/thinking>/gi,
+    /<reasoning>([\s\S]*?)<\/reasoning>/gi,
+    /<think>([\s\S]*?)<\/redacted_thinking>/gi
+  ]) {
+    t = t.replace(pattern, "");
+  }
+  t = t.replace(/\r\n/g, "\n").trim();
+
+  const inlinePlanMarkers = (t.match(/\*\s*(?:Context|Goal|Identity|Tone|Constraint|Response|Final)\s*:/gi) ?? []).length;
+  const looksLikeDeliberation =
+    /^[\s\S]{0,700}User\s+says\s*:/i.test(t) ||
+    inlinePlanMarkers >= 3 ||
+    ((t.match(/^\s*\*/gm) ?? []).length >= 5 && /\*\s*(Context|Goal)\s*:/i.test(t));
+
+  if (t.length < 500 && !looksLikeDeliberation) {
+    return t.replace(/\s+/g, " ").trim();
+  }
+
+  if (!looksLikeDeliberation) {
+    return t.replace(/\s+/g, " ").trim();
+  }
+
+  // Prefer text after the last "Final …" style label (models often put the real reply there).
+  const finalRe = /\*\s*Final(?:\s+Polish|\s+reply|\s+answer|\s+text)?\s*:\s*/gi;
+  let cut = -1;
+  for (const m of t.matchAll(finalRe)) {
+    cut = (m.index ?? 0) + m[0].length;
+  }
+  if (cut >= 0 && cut < t.length - 8) {
+    let tail = t.slice(cut).trim();
+    tail = tail.replace(/^\*+\s*/gm, "");
+    tail = tail.replace(/\n\s*(?:Wait,|Let's|Actually)\b[^\n]*/gi, "");
+    const oneLine = tail.replace(/\s+/g, " ").trim();
+    if (oneLine.length >= 6 && oneLine.length < t.length) {
+      return oneLine;
+    }
+  }
+
+  // Last few non-bullet lines (short reply tacked after a long plan).
+  const lines = t.split("\n").map((l) => l.trim());
+  const nonempty = lines.filter(Boolean);
+  for (let n = Math.min(4, Math.floor(nonempty.length / 2)); n >= 1; n--) {
+    const chunk = nonempty.slice(-n);
+    const joined = chunk.join(" ").trim();
+    const bulletLines = chunk.filter((line) => /^\*+|^->|^\*?\s*Wait,|^\*?\s*Let's|^\*?\s*Actually/i.test(line)).length;
+    if (bulletLines === 0 && joined.length >= 10 && joined.length <= Math.min(900, t.length)) {
+      return joined.replace(/\s+/g, " ").trim();
+    }
+  }
+
+  return t.replace(/\s+/g, " ").trim();
+}
+
 export function prepareChatTextForSpeech(raw: string, maxChars = 8000): string {
   let visible = raw;
   for (const pattern of [

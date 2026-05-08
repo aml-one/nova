@@ -87,13 +87,9 @@ type OllamaChatResponse = {
   };
 };
 
+/** User-visible assistant text only — never fall back to `thinking`/`reasoning` (leaks into SMS/WhatsApp). */
 function ollamaAssistantText(message: OllamaChatResponse["message"]): string {
-  const raw =
-    message?.content?.trim() ||
-    message?.thinking?.trim() ||
-    message?.reasoning?.trim() ||
-    "";
-  return raw;
+  return (message?.content ?? "").trim();
 }
 
 /** `think` field for Ollama `/api/chat`. Env `NOVA_OLLAMA_THINK` wins when set; otherwise uses Settings → Models. */
@@ -163,8 +159,9 @@ function appendOllamaSseJsonLine(
       message?: { content?: string; thinking?: string; reasoning?: string };
       done?: boolean;
     };
-    const token =
-      payload.message?.content ?? payload.message?.thinking ?? payload.message?.reasoning ?? "";
+    // Only stream `content` into the assistant reply — thinking/reasoning must not be concatenated
+    // into channel messages or web bubbles (Settings can surface thinking separately later).
+    const token = payload.message?.content ?? "";
     if (!token) return;
     if (state.firstTokenMs === undefined) {
       state.firstTokenMs = Date.now() - startedAt;

@@ -102,6 +102,13 @@ export async function dispatchSignalInboundMessages(
           // Settings link is best-effort; never let it block message dispatch.
         }
       }
+      if (message.signalUuid) {
+        try {
+          deps.settings.ensureSignalSealedSenderUuidOnTier(message.signalUuid);
+        } catch {
+          // Best-effort: copy UUID onto channel tier when person_identities already links UUID→phone.
+        }
+      }
       const accessProfile = resolveChannelAccess(
         "signal",
         message.phoneNumber,

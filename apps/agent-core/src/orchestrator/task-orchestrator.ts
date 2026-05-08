@@ -61,6 +61,7 @@ import { PersonFieldLocksRepository } from "../storage/repositories/person-field
 import { PersonChannelStateRepository, type PersonChannel } from "../storage/repositories/person-channel-state-repository.js";
 import { PersonProfileEventsRepository } from "../storage/repositories/person-profile-events-repository.js";
 import { PersonRelationshipsRepository } from "../storage/repositories/person-relationships-repository.js";
+import { stripChannelAssistantScratchpad, stripOrpheusSpeechCues } from "../voice/tts-text.js";
 
 const MAX_HOST_DIAG_APPENDIX_CHARS = 12_000;
 
@@ -277,6 +278,11 @@ const WEB_CHAT_TONE_MARKDOWN_HINT =
   "Do not put these markers inside fenced code blocks. Avoid lists or long multi-paragraph sections inside a marker—short phrases or a single line work best. " +
   "The UI derives readable shades from the user’s assistant text and bubble colors (same family, lighter/darker) in light and dark mode—no rainbow or arbitrary colors. " +
   "Use sparingly (a handful per message; plain markdown for structure).";
+
+const WHATSAPP_SIGNAL_REPLY_FORMAT =
+  "Signal/WhatsApp reply discipline: Output ONLY the short message the user will see in the chat bubble—plain text. " +
+  "No bullet lists of Context/Goal/Identity/Tone/Constraints, no 'User says:' lines, no rehearsal or alternate drafts, no 'Final polish' labels, no step-by-step planning visible to the user. " +
+  "Think silently if needed; the visible reply must read like a normal text.";
 
 function userMessageTargetsNovaIdentityBio(text: string): boolean {
   const slice = text.trim().slice(0, 400);
@@ -694,8 +700,13 @@ export class TaskOrchestrator {
         memoryContext,
         cognitiveCoreBlock
       });
-      this.rememberAssistantTurn(userId, input.channel, input.text, multi, runtimeSettings.emotions);
-      return multi;
+      let multiOut = multi.trim();
+      if (input.channel !== "web") {
+        const s = stripOrpheusSpeechCues(stripChannelAssistantScratchpad(multiOut)).trim();
+        if (s) multiOut = s;
+      }
+      this.rememberAssistantTurn(userId, input.channel, input.text, multiOut, runtimeSettings.emotions);
+      return multiOut;
     }
 
     if (detectSkillAuthoringIntent(input.text, { skillAuthoringDisabled: runtimeSettings.skills.skillAuthoringDisabled })) {
@@ -1168,6 +1179,9 @@ export class TaskOrchestrator {
       { role: "system", content: NOVA_IDENTITY_GUARD },
       { role: "system", content: INTEGRITY_SYSTEM_GUARD },
       ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
+      ...(input.channel === "whatsapp" || input.channel === "signal"
+        ? ([{ role: "system" as const, content: WHATSAPP_SIGNAL_REPLY_FORMAT }] as const)
+        : []),
       ...memoryContext,
       ...(cognitiveCoreBlock.trim()
         ? ([{ role: "system" as const, content: cognitiveCoreBlock.trim() }] as const)
@@ -1276,6 +1290,9 @@ export class TaskOrchestrator {
           { role: "system", content: NOVA_IDENTITY_GUARD },
           { role: "system", content: INTEGRITY_SYSTEM_GUARD },
           ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
+          ...(input.channel === "whatsapp" || input.channel === "signal"
+            ? ([{ role: "system" as const, content: WHATSAPP_SIGNAL_REPLY_FORMAT }] as const)
+            : []),
           ...(compactMem as ChatMessage[]),
           ...(cognitiveCoreBlock.trim()
             ? ([{ role: "system" as const, content: cognitiveCoreBlock.trim() }] as const)
@@ -1349,6 +1366,13 @@ export class TaskOrchestrator {
         }
       } catch {
         /* keep original reply */
+      }
+    }
+
+    if (input.channel !== "web") {
+      const cleaned = stripOrpheusSpeechCues(stripChannelAssistantScratchpad(result.content)).trim();
+      if (cleaned) {
+        result = { ...result, content: cleaned };
       }
     }
 
@@ -1791,6 +1815,9 @@ export class TaskOrchestrator {
       { role: "system", content: NOVA_IDENTITY_GUARD },
       { role: "system", content: INTEGRITY_SYSTEM_GUARD },
       ...(opts.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
+      ...(opts.channel === "whatsapp" || opts.channel === "signal"
+        ? ([{ role: "system" as const, content: WHATSAPP_SIGNAL_REPLY_FORMAT }] as const)
+        : []),
       ...opts.memoryContext,
       ...(opts.cognitiveCoreBlock.trim()
         ? ([{ role: "system" as const, content: opts.cognitiveCoreBlock.trim() }] as const)

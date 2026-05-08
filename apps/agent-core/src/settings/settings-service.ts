@@ -1,5 +1,6 @@
 import { resolve as resolvePath } from "node:path";
 import { SettingsRepository, type AppSettings } from "../storage/repositories/settings-repository.js";
+import { PersonIdentitiesRepository } from "../storage/repositories/person-identities-repository.js";
 
 const DEFAULT_SETTINGS: AppSettings = {
   delegatedFolders: [resolvePath(process.cwd())],
@@ -442,7 +443,9 @@ export class SettingsService {
     if (!normalizedPhone || !normalizedUuid) return false;
     const current = this.get();
     const rows = current.messagingAccess.channelTiers.signal;
-    const idx = rows.findIndex((row) => row.phone === normalizedPhone);
+    const idx = rows.findIndex(
+      (row) => row.phone === normalizedPhone || digitsOnlyPhone(row.phone) === digitsOnlyPhone(normalizedPhone)
+    );
     if (idx < 0) return false;
     if (rows[idx].signalUuid === normalizedUuid) return false;
     const nextRows = rows.map((row, i) => (i === idx ? { ...row, signalUuid: normalizedUuid } : row));
@@ -458,6 +461,45 @@ export class SettingsService {
     };
     this.repo.upsert(next);
     return true;
+  }
+
+  /**
+   * When Signal delivers sealed-sender (UUID only), channel tiers may list co-admin by phone but omit
+   * `signalUuid`. If `person_identities` already links this UUID to a phone_e164 that matches a tier
+   * row, copy the UUID onto that row so `resolveChannelAccess` can match on the next line of this handler.
+   */
+  ensureSignalSealedSenderUuidOnTier(signalUuid: string): void {
+    const normalizedUuid = normalizeSignalUuid(signalUuid);
+    if (!normalizedUuid) return;
+    const current = this.get();
+    const rows = [...current.messagingAccess.channelTiers.signal];
+    if (rows.some((r) => r.signalUuid === normalizedUuid)) {
+      return;
+    }
+    const identities = new PersonIdentitiesRepository();
+    const personId = identities.findPersonIdByIdentity("signal_uuid", normalizedUuid);
+    if (!personId) return;
+    const list = identities.listIdentitiesForPerson(personId);
+    const phoneRaw = list.find((i) => i.kind === "phone_e164")?.value;
+    const normalizedPhone = normalizePhone(phoneRaw);
+    if (!normalizedPhone) return;
+    const idx = rows.findIndex(
+      (row) => row.phone === normalizedPhone || digitsOnlyPhone(row.phone) === digitsOnlyPhone(normalizedPhone)
+    );
+    if (idx < 0) return;
+    if (rows[idx].signalUuid === normalizedUuid) return;
+    const nextRows = rows.map((row, i) => (i === idx ? { ...row, signalUuid: normalizedUuid } : row));
+    const next: AppSettings = {
+      ...current,
+      messagingAccess: {
+        ...current.messagingAccess,
+        channelTiers: {
+          ...current.messagingAccess.channelTiers,
+          signal: nextRows
+        }
+      }
+    };
+    this.repo.upsert(next);
   }
 
   private normalize(settings: AppSettings): AppSettings {
@@ -817,6 +859,10 @@ function normalizePhone(value: string | undefined): string {
   const raw = (value ?? "").replace(/[^\d+]/g, "");
   if (!raw) return "";
   return raw.startsWith("+") ? raw : `+${raw}`;
+}
+
+function digitsOnlyPhone(value: string | undefined): string {
+  return (value ?? "").replace(/\D/g, "");
 }
 
 function normalizePhoneList(values: string[] | undefined): string[] {

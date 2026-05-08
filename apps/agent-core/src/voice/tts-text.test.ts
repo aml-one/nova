@@ -4,6 +4,7 @@ import {
   ensureOrpheusCueTagsClosed,
   normalizeOrpheusSpeechCues,
   prepareChatTextForSpeech,
+  stripChannelAssistantScratchpad,
   stripOrpheusSpeechCues
 } from "./tts-text.js";
 
@@ -77,6 +78,25 @@ describe("stripOrpheusSpeechCues", () => {
     ).toBe(
       "You're really committed to this greeting marathon, aren't you? I'm still here, I promise. What's the actual plan?"
     );
+  });
+});
+
+describe("stripChannelAssistantScratchpad", () => {
+  it("keeps short replies unchanged", () => {
+    expect(stripChannelAssistantScratchpad("Hey! What's up?")).toBe("Hey! What's up?");
+  });
+
+  it("takes text after * Final Polish: when deliberation leaked into content", () => {
+    const raw = `User says: "one more hi xD" * Context: playful. * Goal: respond in character.
+* Constraint: be concise.
+* Final Polish: Triple hi! You're on a roll — what's the plan?`;
+    expect(stripChannelAssistantScratchpad(raw)).toBe(
+      "Triple hi! You're on a roll — what's the plan?"
+    );
+  });
+
+  it("strips tagged thinking blocks on channels", () => {
+    expect(stripChannelAssistantScratchpad("<thinking>plan</thinking>Hello there.")).toBe("Hello there.");
   });
 });
 

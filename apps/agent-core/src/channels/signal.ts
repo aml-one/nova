@@ -89,7 +89,7 @@ export class SignalChannelAdapter {
     const message: ChannelMessage = {
       channel: "signal",
       from: peer,
-      phoneNumber: phone || peer,
+      ...(phone ? { phoneNumber: phone } : {}),
       text
     };
     if (uuid) message.signalUuid = uuid;

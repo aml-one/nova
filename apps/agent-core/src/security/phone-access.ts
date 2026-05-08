@@ -1,4 +1,5 @@
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
+import { PersonIdentitiesRepository } from "../storage/repositories/person-identities-repository.js";
 
 export type RoleName = "admin" | "co_admin" | "restricted" | "important" | "guest" | "unknown";
 
@@ -76,6 +77,10 @@ export function resolveChannelAccess(
         matchedBySignalUuid: true,
         capabilities: tierCapabilities(uuidRow.tier)
       };
+    }
+    const fromPerson = resolveSignalTierByPersonIdentityUuid(signalUuid, access);
+    if (fromPerson) {
+      return fromPerson;
     }
   }
 
@@ -158,4 +163,39 @@ function normalizeSignalUuid(value: string | undefined): string {
   const t = value.trim().toLowerCase();
   if (!t || !UUID_REGEX.test(t)) return "";
   return t;
+}
+
+/**
+ * Sealed-sender UUID is stored on `person_identities` (often after an earlier non-sealed message);
+ * channel tiers may only list E.164. Map UUID → person → phone → tier.
+ */
+function resolveSignalTierByPersonIdentityUuid(
+  signalUuid: string,
+  access: AppSettings["messagingAccess"]
+): ChannelAccessProfile | undefined {
+  try {
+    const identities = new PersonIdentitiesRepository();
+    const personId = identities.findPersonIdByIdentity("signal_uuid", signalUuid);
+    if (!personId) return undefined;
+    const list = identities.listIdentitiesForPerson(personId);
+    const phoneRaw = list.find((r) => r.kind === "phone_e164")?.value;
+    const linkedPhone = normalizePhone(phoneRaw);
+    if (!linkedPhone) return undefined;
+    const channelRows = access.channelTiers?.signal ?? [];
+    const digitsOnly = (p: string) => p.replace(/\D/g, "");
+    const nd = digitsOnly(linkedPhone);
+    let channelTier = channelRows.find((entry) => entry.phone === linkedPhone)?.tier;
+    if (!channelTier && nd) {
+      channelTier = channelRows.find((entry) => digitsOnly(entry.phone) === nd)?.tier;
+    }
+    if (!channelTier) return undefined;
+    return {
+      role: tierToRole(channelTier),
+      allowed: true,
+      matchedBySignalUuid: true,
+      capabilities: tierCapabilities(channelTier)
+    };
+  } catch {
+    return undefined;
+  }
 }
