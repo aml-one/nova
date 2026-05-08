@@ -889,22 +889,26 @@ function normalizeChannelTiers(
   const signal = normalizeSignalRows(values?.signal);
   const whatsapp = normalizeWhatsAppRows(values?.whatsapp);
 
-  // Safety: exactly one admin maximum globally across channels.
-  let adminTaken = false;
-  const clampAdmin = <T extends { tier: "admin" | "co_admin" | "restricted" | "guest" }>(rows: T[]): T[] =>
-    rows.map((row) => {
-      if (row.tier !== "admin") return row;
-      if (!adminTaken) {
-        adminTaken = true;
-        return row;
-      }
-      return { ...row, tier: "co_admin" as const };
-    });
-
-  return {
-    signal: clampAdmin(signal),
-    whatsapp: clampAdmin(whatsapp)
-  };
+  // At most one *distinct phone number* may be Admin globally. Same E.164 on Signal + WhatsApp
+  // still counts as a single admin (one person); the old logic clamped the WhatsApp row because
+  // it ran second after Signal had already "taken" admin.
+  const adminPhones = new Set<string>();
+  for (const r of signal) {
+    if (r.tier === "admin") adminPhones.add(r.phone);
+  }
+  for (const r of whatsapp) {
+    if (r.tier === "admin") adminPhones.add(r.phone);
+  }
+  if (adminPhones.size <= 1) {
+    return { signal, whatsapp };
+  }
+  const sorted = [...adminPhones].sort();
+  const keepAdminPhone = sorted[0];
+  const clamp = <T extends { phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>(rows: T[]): T[] =>
+    rows.map((row) =>
+      row.tier === "admin" && row.phone !== keepAdminPhone ? { ...row, tier: "co_admin" as const } : row
+    );
+  return { signal: clamp(signal), whatsapp: clamp(whatsapp) };
 }
 
 /**

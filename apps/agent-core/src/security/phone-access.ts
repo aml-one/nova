@@ -87,7 +87,12 @@ export function resolveChannelAccess(
     };
   }
   const channelRows = channel === "signal" || channel === "whatsapp" ? access.channelTiers?.[channel] ?? [] : [];
-  const channelTier = channelRows.find((entry) => entry.phone === normalized)?.tier;
+  let channelTier = channelRows.find((entry) => entry.phone === normalized)?.tier;
+  // Same person often uses one number on Signal and WhatsApp; allow using Signal tier for WhatsApp
+  // when no WhatsApp-specific row exists (avoids silent deny / Co-Admin-only WhatsApp row confusion).
+  if (!channelTier && channel === "whatsapp" && normalized) {
+    channelTier = access.channelTiers?.signal?.find((entry) => entry.phone === normalized)?.tier;
+  }
   if (channelTier) {
     return {
       role: tierToRole(channelTier),

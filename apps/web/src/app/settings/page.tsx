@@ -3116,7 +3116,9 @@ export default function SettingsPage() {
                     <tr className="border-t border-border/60">
                       <td className="px-2 py-1 font-semibold">Admin</td>
                       <td className="px-2 py-1">All channel capabilities</td>
-                      <td className="px-2 py-1 text-muted">Only one Admin is allowed globally across Signal + WhatsApp.</td>
+                      <td className="px-2 py-1 text-muted">
+                        Only one phone number may be Admin globally (the same E.164 on Signal and WhatsApp counts once).
+                      </td>
                     </tr>
                     <tr className="border-t border-border/60">
                       <td className="px-2 py-1 font-semibold">Co-Admin</td>
