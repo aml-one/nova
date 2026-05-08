@@ -111,6 +111,25 @@ agent_http_healthy() {
   curl -fsS --max-time 5 "http://127.0.0.1:${AGENT_PORT}/health" >/dev/null 2>&1
 }
 
+# When /health is slow, it almost always means the Node event loop is busy serving a long chat
+# request (cold-loading an 18 GB Ollama model can stall fetch-keepalive responses for ~10–30 s).
+# Killing agent-core mid-chat aborts the model call, leaves typing indicators stuck, and never
+# delivers a reply. Before counting the fail, check the longer-timeout heartbeat for `busy=true`.
+agent_busy_with_chat() {
+  if ! command -v curl >/dev/null 2>&1; then
+    return 1
+  fi
+  local body
+  body="$(curl -fsS --max-time 12 "http://127.0.0.1:${AGENT_PORT}/v1/system/heartbeat" 2>/dev/null || true)"
+  if [[ -z "${body}" ]]; then
+    return 1
+  fi
+  case "${body}" in
+    *'"busy":true'*|*'"inFlight":1'*|*'"inFlight":2'*|*'"inFlight":3'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 # Rollback marker is written by the in-app update flow before `git pull`.
 # After an update we monitor health more aggressively; if it never comes back,
 # we reset to the previous commit so a bad release can never permanently break Nova.
@@ -295,6 +314,13 @@ while true; do
           rm -f "${ROLLBACK_MARKER}"
           POST_UPDATE_PROBE=0
         fi
+      elif agent_busy_with_chat; then
+        # Don't penalise a slow /health when agent-core is genuinely busy answering a chat. Keep the
+        # counter at most one below the threshold so a real hang still triggers within ~5 s.
+        if [[ "${AGENT_HEALTH_FAILS}" -gt 0 ]]; then
+          AGENT_HEALTH_FAILS=$((AGENT_HEALTH_FAILS - 1))
+        fi
+        echo "agent-core health probe missed but heartbeat reports busy=true; skipping restart on port ${AGENT_PORT}"
       else
         AGENT_HEALTH_FAILS=$((AGENT_HEALTH_FAILS + 1))
         echo "agent-core health check failed (${AGENT_HEALTH_FAILS}/${AGENT_HEALTH_FAIL_THRESHOLD}) on port ${AGENT_PORT}"

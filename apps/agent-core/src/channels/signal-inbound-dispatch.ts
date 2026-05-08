@@ -127,14 +127,28 @@ export async function dispatchSignalInboundMessages(
         });
         continue;
       }
+      // signal-cli-rest-api typing indicators auto-expire after ~15 s. Re-issue them every 10 s while the
+      // orchestrator is working so the recipient sees continuous "Nova is typing…" instead of a flicker
+      // when a slow chat (e.g. cold-loading a 18 GB Ollama model) takes ≥15 s.
       await deps.dispatcher.signalTyping(message.from, true);
-      const reply = await deps.orchestrator.handleChannelMessage({
-        channel: "signal",
-        phoneNumber: message.phoneNumber,
-        text: message.text,
-        correlationId: msgCorr,
-        accessProfile
-      });
+      const typingHeartbeat = setInterval(() => {
+        void deps.dispatcher.signalTyping(message.from, true).catch(() => {
+          /* tracing already handled inside signalTyping; never let it kill the chat */
+        });
+      }, 10_000);
+      if (typeof typingHeartbeat.unref === "function") typingHeartbeat.unref();
+      let reply: string;
+      try {
+        reply = await deps.orchestrator.handleChannelMessage({
+          channel: "signal",
+          phoneNumber: message.phoneNumber,
+          text: message.text,
+          correlationId: msgCorr,
+          accessProfile
+        });
+      } finally {
+        clearInterval(typingHeartbeat);
+      }
       trace.push("orchestrator_ok", "queued_outbound_reply");
       pushChannelDebug({
         channel: "signal",

@@ -226,6 +226,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         request.url.startsWith("/v1/webhooks/") ||
         parsedUrl.pathname.startsWith("/v1/media/files/") ||
         parsedUrl.pathname === "/health" ||
+        parsedUrl.pathname === "/v1/system/heartbeat" ||
         parsedUrl.pathname === "/v1/auth/state" ||
         parsedUrl.pathname === "/v1/auth/login" ||
         parsedUrl.pathname === "/v1/auth/setup" ||
@@ -242,7 +243,31 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         return sendJson(response, 401, { error: "unauthorized" });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/health") {
-        return sendJson(response, 200, { ok: true, correlationId });
+        // Enriched body: lets the supervisor (`scripts/start-local.sh`) tell apart "agent-core is alive
+        // but the event loop is busy answering a slow Ollama chat" from "agent-core is genuinely hung".
+        // Plain liveness consumers can keep treating this as `ok=true`.
+        const inFlight = options.orchestrator.isBusy() ? 1 : 0;
+        const lastActivityMs = Math.max(0, Date.now() - options.orchestrator.getLastActivityAt());
+        return sendJson(response, 200, {
+          ok: true,
+          inFlight,
+          busy: inFlight > 0,
+          lastActivityMs,
+          correlationId
+        });
+      }
+      // Same shape as /health, exposed under /v1/system/heartbeat so the supervisor can poll a stable
+      // path even after we move /health behind a proxy or change auth gating later.
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/system/heartbeat") {
+        const inFlight = options.orchestrator.isBusy() ? 1 : 0;
+        const lastActivityMs = Math.max(0, Date.now() - options.orchestrator.getLastActivityAt());
+        return sendJson(response, 200, {
+          ok: true,
+          inFlight,
+          busy: inFlight > 0,
+          lastActivityMs,
+          correlationId
+        });
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/system/version") {
         return sendJson(response, 200, {
