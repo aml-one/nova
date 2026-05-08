@@ -5,6 +5,7 @@ import {
   effectiveWhatsAppPhoneNumberId,
   effectiveWhatsAppToken
 } from "../channels/channel-runtime-config.js";
+import { getWhatsAppWebBridgeStatus } from "../channels/whatsapp-web-bridge.js";
 import {
   copilotLikelyConfigured,
   headersForCopilotModelsGet,
@@ -61,7 +62,12 @@ export class ProviderCatalogService {
     const lmstudioDisabled = s.lmstudio.disabled !== false;
     const copilotDisabled = s.copilot.disabled === true;
     const copilotConfigured = !copilotDisabled && copilotLikelyConfigured(this.getSettings);
-    const waConfigured = Boolean(effectiveWhatsAppPhoneNumberId(s) && effectiveWhatsAppToken(s));
+    const waTransport = (process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase();
+    const waBaileys = waTransport === "baileys";
+    const waBridge = getWhatsAppWebBridgeStatus();
+    const waConfigured = waBaileys
+      ? Boolean(waBridge.connected)
+      : Boolean(effectiveWhatsAppPhoneNumberId(s) && effectiveWhatsAppToken(s));
     const signalConfigured = Boolean(effectiveSignalApiUrl(s) && effectiveSignalAccountNumber(s));
     const ollamaEndpointConfigured =
       Boolean(process.env.OLLAMA_BASE_URL?.trim()) || Boolean(s.vision.ollamaBaseUrl?.trim());
@@ -124,14 +130,24 @@ export class ProviderCatalogService {
       },
       whatsAppBridge: {
         configured: waConfigured,
-        details: waConfigured
-          ? "WhatsApp bridge configured (env and/or Settings → Channels)"
-          : "Set WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_TOKEN (env or Settings → Channels)",
-        steps: [
-          "In Meta for Developers, create an app and add WhatsApp product.",
-          "Copy Phone Number ID and generate a permanent access token.",
-          "Set WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TOKEN, and optional WHATSAPP_APP_SECRET."
-        ]
+        details: waBaileys
+          ? waBridge.connected
+            ? "WhatsApp Web (Baileys) connected — inbound/outbound use the linked device session."
+            : `WhatsApp Web (Baileys): bridge not connected (state=${waBridge.state}). Open Settings → Channels → Link WhatsApp.`
+          : waConfigured
+            ? "WhatsApp Cloud API configured (env and/or Settings → Channels)"
+            : "Set WHATSAPP_PHONE_NUMBER_ID and WHATSAPP_TOKEN (env or Settings → Channels), or set WHATSAPP_TRANSPORT=baileys for WhatsApp Web.",
+        steps: waBaileys
+          ? [
+              "Set WHATSAPP_TRANSPORT=baileys in .env and restart agent-core.",
+              "In Settings → Channels, click Link WhatsApp — show QR and scan on your phone.",
+              "Confirm status shows connected."
+            ]
+          : [
+              "In Meta for Developers, create an app and add WhatsApp product.",
+              "Copy Phone Number ID and generate a permanent access token.",
+              "Set WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_TOKEN, and optional WHATSAPP_APP_SECRET."
+            ]
       }
     };
   }

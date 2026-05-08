@@ -46,7 +46,7 @@ import { SelfImprovementLoop } from "../improvement/self-improvement-loop.js";
 import { InMemorySkillRegistry } from "../skills/skill-registry.js";
 import { parseConfiguredCameras } from "../skills/camera-config.js";
 import { isSkillRuntimeEnabled } from "../skills/skill-enabled.js";
-import { resolveChannelAccess } from "../security/phone-access.js";
+import { normalizeE164Phone, resolveChannelAccess } from "../security/phone-access.js";
 import { ApprovalService } from "../execution/approval-service.js";
 import {
   headersForCopilotModelsGet,
@@ -165,6 +165,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         const accessProfile = resolveChannelAccess("whatsapp", identity, options.settings.get());
         trace.push(accessProfile.allowed ? "access_allowed" : `access_denied(role=${accessProfile.role})`);
         if (!accessProfile.allowed) {
+          const e164 = normalizeE164Phone(identity);
+          const shortHint =
+            e164.startsWith("+1") && e164.length > 0 && e164.length < 12
+              ? " (allow-list phone may be incomplete: NANP numbers are +1 + 10 digits)"
+              : "";
           pushChannelDebug({
             channel: "whatsapp",
             direction: "in",
@@ -174,7 +179,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
             textPreview: previewChannelText(text),
             trace,
             reachedNova: false,
-            error: "Number blocked by channel access policy"
+            error: `Number blocked by channel access policy (matched as ${e164 || identity}; role=${accessProfile.role})${shortHint}`
           });
           return;
         }
@@ -934,11 +939,18 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
               "Link your Signal number once.",
               "Paste SIGNAL_API_URL and SIGNAL_ACCOUNT_NUMBER, then click Test."
             ],
-            whatsApp: [
-              "Create a Meta app and add WhatsApp product.",
-              "Generate a permanent access token in Meta dashboard.",
-              "Copy Phone Number ID and token, then click Test."
-            ]
+            whatsApp:
+              whatsAppTransport === "baileys"
+                ? [
+                    "Set WHATSAPP_TRANSPORT=baileys and restart agent-core.",
+                    "Link WhatsApp Web in Settings → Channels (QR).",
+                    "Validate should show bridge connected — Cloud API not used."
+                  ]
+                : [
+                    "Create a Meta app and add WhatsApp product.",
+                    "Generate a permanent access token in Meta dashboard.",
+                    "Copy Phone Number ID and token, then click Test."
+                  ]
           },
           correlationId
         });
@@ -3325,20 +3337,33 @@ async function checkPerplexicaWebsearch(getSettings: () => AppSettings): Promise
 async function checkChannels(getSettings: () => AppSettings): Promise<HealthCheckResult[]> {
   const checks: HealthCheckResult[] = [];
   const settings = getSettings();
-  const waId = effectiveWhatsAppPhoneNumberId(settings);
-  const waTok = effectiveWhatsAppToken(settings);
-  const waConfigured = Boolean(waId && waTok);
-  const waTokenFingerprint = fingerprintSecret(waTok || process.env.WHATSAPP_TOKEN);
-  const waDetail = waConfigured ? await checkWhatsAppConnectionWithCredentials(waId, waTok) : { ok: false, detail: "credentials missing" };
-  checks.push({
-    id: "whatsapp-config",
-    name: "WhatsApp Configuration",
-    level: !waConfigured ? "orange" : waDetail.ok ? "green" : "orange",
-    detail: !waConfigured
-      ? "missing WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_TOKEN (env or Settings → Channels)"
-      : waDetail.detail,
-    fingerprint: waTokenFingerprint
-  });
+  const waTransport = (process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase();
+  if (waTransport === "baileys") {
+    const st = getWhatsAppWebBridgeStatus();
+    checks.push({
+      id: "whatsapp-config",
+      name: "WhatsApp Configuration",
+      level: st.connected ? "green" : "orange",
+      detail: st.connected
+        ? "WhatsApp Web (Baileys): bridge connected — Cloud API credentials not required"
+        : `WhatsApp Web (Baileys): bridge not connected — ${st.detail || st.state || "starting"}`
+    });
+  } else {
+    const waId = effectiveWhatsAppPhoneNumberId(settings);
+    const waTok = effectiveWhatsAppToken(settings);
+    const waConfigured = Boolean(waId && waTok);
+    const waTokenFingerprint = fingerprintSecret(waTok || process.env.WHATSAPP_TOKEN);
+    const waDetail = waConfigured ? await checkWhatsAppConnectionWithCredentials(waId, waTok) : { ok: false, detail: "credentials missing" };
+    checks.push({
+      id: "whatsapp-config",
+      name: "WhatsApp Configuration",
+      level: !waConfigured ? "orange" : waDetail.ok ? "green" : "orange",
+      detail: !waConfigured
+        ? "missing WHATSAPP_PHONE_NUMBER_ID or WHATSAPP_TOKEN (env or Settings → Channels)"
+        : waDetail.detail,
+      fingerprint: waTokenFingerprint
+    });
+  }
   const signalUrl = effectiveSignalApiUrl(settings);
   const signalAcc = effectiveSignalAccountNumber(settings);
   const signalConfigured = Boolean(signalUrl && signalAcc);
@@ -3355,6 +3380,7 @@ async function checkChannels(getSettings: () => AppSettings): Promise<HealthChec
 }
 
 function checkSecurityConfig(): HealthCheckResult[] {
+  const waBaileys = (process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase() === "baileys";
   return [
     {
       id: "webhook-whatsapp-secret",
@@ -3362,10 +3388,12 @@ function checkSecurityConfig(): HealthCheckResult[] {
       // WhatsApp Cloud API actually signs webhooks with the App Secret, so configuring it is a real
       // hardening win. Without it we accept all unsigned posts (still safe on loopback, but visibly
       // weaker), so flag it as a soft warning rather than a failure.
-      level: process.env.WHATSAPP_APP_SECRET ? "green" : "orange",
-      detail: process.env.WHATSAPP_APP_SECRET
-        ? "secret configured (HMAC enforced on inbound /v1/webhooks/whatsapp)"
-        : "optional: set WHATSAPP_APP_SECRET to enforce HMAC on inbound /v1/webhooks/whatsapp (only WhatsApp Cloud signs; not WhatsApp Web)",
+      level: waBaileys || process.env.WHATSAPP_APP_SECRET ? "green" : "orange",
+      detail: waBaileys
+        ? "not applicable — WhatsApp Web (Baileys) does not use Meta Cloud webhooks"
+        : process.env.WHATSAPP_APP_SECRET
+          ? "secret configured (HMAC enforced on inbound /v1/webhooks/whatsapp)"
+          : "optional: set WHATSAPP_APP_SECRET to enforce HMAC on inbound /v1/webhooks/whatsapp (only WhatsApp Cloud signs; not WhatsApp Web)",
       fingerprint: fingerprintSecret(process.env.WHATSAPP_APP_SECRET)
     },
     {

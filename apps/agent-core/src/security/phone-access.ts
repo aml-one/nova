@@ -87,11 +87,18 @@ export function resolveChannelAccess(
     };
   }
   const channelRows = channel === "signal" || channel === "whatsapp" ? access.channelTiers?.[channel] ?? [] : [];
+  const digitsOnly = (p: string) => p.replace(/\D/g, "");
+  const nd = normalized ? digitsOnly(normalized) : "";
   let channelTier = channelRows.find((entry) => entry.phone === normalized)?.tier;
-  // Same person often uses one number on Signal and WhatsApp; allow using Signal tier for WhatsApp
-  // when no WhatsApp-specific row exists (avoids silent deny / Co-Admin-only WhatsApp row confusion).
+  if (!channelTier && nd) {
+    channelTier = channelRows.find((entry) => digitsOnly(entry.phone) === nd)?.tier;
+  }
+  // Same person often uses one number on Signal and WhatsApp; inherit Signal tier when no WhatsApp row matches.
   if (!channelTier && channel === "whatsapp" && normalized) {
-    channelTier = access.channelTiers?.signal?.find((entry) => entry.phone === normalized)?.tier;
+    const sigRows = access.channelTiers?.signal ?? [];
+    channelTier =
+      sigRows.find((entry) => entry.phone === normalized)?.tier ??
+      sigRows.find((entry) => digitsOnly(entry.phone) === nd)?.tier;
   }
   if (channelTier) {
     return {
@@ -139,6 +146,11 @@ function normalizePhone(value: string | undefined): string {
   const cleaned = (value ?? "").replace(/[^\d+]/g, "");
   if (!cleaned) return "";
   return cleaned.startsWith("+") ? cleaned : `+${cleaned}`;
+}
+
+/** Normalize to E.164-ish `+digits…` for comparing allow lists to inbound identities. */
+export function normalizeE164Phone(value: string | undefined): string {
+  return normalizePhone(value);
 }
 
 function normalizeSignalUuid(value: string | undefined): string {
