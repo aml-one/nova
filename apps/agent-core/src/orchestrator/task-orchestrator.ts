@@ -31,6 +31,7 @@ import {
   runImplicitShellPlan
 } from "../execution/implicit-auto-shell.js";
 import { detectHostTimeIntent, formatNovaLocalTimeSentence, runHostTimeCollection } from "../execution/host-time.js";
+import { parseNaturalLanguageRelayToPerson } from "./natural-language-tell.js";
 import {
   detectSkillAuthoringIntent,
   enableAuthoredSkill,
@@ -563,8 +564,8 @@ export class TaskOrchestrator {
       return `Okay — I asked ${target.displayName ?? connect.name} if they know you.`;
     }
 
-    // Admin-only cross-user messaging by name: `/tell Anita: hi ...`
-    const tell = parseTellCommand(input.text);
+    // Admin-only cross-user messaging by name: `/tell Anita: hi ...` or natural "tell Anita to …"
+    const tell = parseTellCommand(input.text) ?? parseNaturalLanguageRelayToPerson(input.text);
     if (tell) {
       const isAdmin = Boolean(input.accessProfile?.role === "admin" || input.accessProfile?.role === "co_admin");
       if (!isAdmin) {
