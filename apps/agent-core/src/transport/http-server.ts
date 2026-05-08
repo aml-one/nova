@@ -172,6 +172,17 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   const signalWalkieDeferredTimer = setInterval(() => {
     try {
       for (const row of claimDueSignalDeferredRings(Date.now())) {
+        const r = row.recipient.trim();
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(r);
+        if (
+          options.orchestrator.isChannelPeerBlocked({
+            channel: "signal",
+            phoneNumber: isUuid ? undefined : r,
+            signalUuid: isUuid ? r.toLowerCase() : undefined
+          })
+        ) {
+          continue;
+        }
         signalWalkieCallStart(row.recipient);
         dispatcher.enqueue("signal", row.recipient, SIGNAL_WALKIE_GREETING, randomUUID());
       }
@@ -217,6 +228,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
             reachedNova: false,
             error: `Number blocked by channel access policy (matched as ${e164 || identity}; role=${accessProfile.role})${shortHint}`
           });
+          return;
+        }
+        if (options.orchestrator.isChannelPeerBlocked({ channel: "whatsapp", phoneNumber: identity })) {
           return;
         }
         const reply = await options.orchestrator.handleChannelMessage({
@@ -570,6 +584,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           events.append(id, "admin_patch", { patch: payload.patch ?? {}, locks: payload.locks ?? [] });
           const updated = people.getById(id);
           return sendJson(response, 200, { item: updated, correlationId });
+        }
+
+        if (request.method === "DELETE" && parsedUrl.pathname === "/v1/admin/people") {
+          const id = (parsedUrl.searchParams.get("id") ?? "").trim();
+          if (!id) return sendJson(response, 400, { error: "id query parameter is required", correlationId });
+          const ok = people.deleteCascadeById(id);
+          if (!ok) return sendJson(response, 404, { error: "not found or cannot delete", correlationId });
+          return sendJson(response, 200, { ok: true, correlationId });
         }
 
         if (request.method === "POST" && parsedUrl.pathname === "/v1/admin/people/merge") {
@@ -1742,6 +1764,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
                 reachedNova: false,
                 error: "Blocked by channel access policy"
               });
+              continue;
+            }
+            if (options.orchestrator.isChannelPeerBlocked({ channel: "whatsapp", phoneNumber: message.phoneNumber })) {
               continue;
             }
             if (message.whatsappMessageId) {

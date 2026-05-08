@@ -17,4 +17,9 @@ export class IdentityRepository {
       userId
     );
   }
+
+  deleteAllMappingsForUserId(userId: string): void {
+    const db = getDatabase();
+    db.prepare("DELETE FROM identity_map WHERE user_id = ?").run(userId);
+  }
 }

@@ -287,9 +287,9 @@ const WHATSAPP_SIGNAL_REPLY_FORMAT =
   "Think silently if needed; the visible reply must read like a normal text.";
 
 const SIGNAL_WALKIE_CALL_HINT =
-  "Signal walkie-talkie / scheduled callback: the user is in a short spoken-style exchange using voice notes (not a live PSTN call). " +
-  "Keep replies brief and natural for speech—usually one to three sentences unless they asked for detail. " +
-  "Do not mention phone carriers, SIP, or Signal native voice-call APIs.";
+  "Signal in-app voice session: the user is in a short back-and-forth using Signal **voice notes** in the chat (like a walkie call inside the app). " +
+  "This is not a cellular/PSTN call; native Signal VoIP ringing is not available through this bridge. " +
+  "Keep replies brief and natural for speech—usually one to three sentences unless they asked for detail.";
 
 function userMessageTargetsNovaIdentityBio(text: string): boolean {
   const slice = text.trim().slice(0, 400);
@@ -372,6 +372,25 @@ export class TaskOrchestrator {
 
   constructor(private readonly deps: TaskOrchestratorDeps) {}
 
+  /**
+   * People admin `blocked` flag: channel handlers should not reply or write channel-debug rows for this peer.
+   */
+  isChannelPeerBlocked(input: {
+    channel: "web" | "whatsapp" | "signal";
+    phoneNumber?: string;
+    signalUuid?: string;
+    webUserId?: string;
+  }): boolean {
+    const personId = this.deps.identityResolver.tryResolveExisting({
+      channel: input.channel,
+      phoneNumber: input.phoneNumber,
+      signalUuid: input.signalUuid,
+      webUserId: input.webUserId
+    });
+    if (!personId) return false;
+    return Boolean(this.people.getById(personId)?.blocked);
+  }
+
   async start(): Promise<void> {
     console.log("task orchestrator started");
     console.log(`registered skills: ${this.deps.skillRegistry.count()}`);
@@ -413,6 +432,16 @@ export class TaskOrchestrator {
     this.inFlightCount += 1;
     this.lastActivityAt = Date.now();
     try {
+    if (
+      this.isChannelPeerBlocked({
+        channel: input.channel,
+        phoneNumber: input.phoneNumber,
+        signalUuid: input.signalUuid,
+        webUserId: input.webUserId
+      })
+    ) {
+      return "";
+    }
     const startedAt = Date.now();
     this.thoughtLog.append({
       category: "chat",

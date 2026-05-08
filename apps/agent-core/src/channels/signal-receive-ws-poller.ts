@@ -91,6 +91,30 @@ function parseWsPayload(raw: WebSocket.RawData): unknown[] {
 let lastReceiveWsNonDmLogAt = 0;
 const RECEIVE_WS_DEBUG_THROTTLE_MS = 12_000;
 
+function extractSignalEnvelopePeers(chunk: unknown): { phoneNumber?: string; signalUuid?: string } {
+  if (!chunk || typeof chunk !== "object") return {};
+  const env = (chunk as { envelope?: Record<string, unknown> }).envelope;
+  if (!env || typeof env !== "object") return {};
+  const sourceNumber = typeof env.sourceNumber === "string" ? env.sourceNumber.trim() : "";
+  const source = typeof env.source === "string" ? env.source.trim() : "";
+  const sourceUuidRaw = typeof env.sourceUuid === "string" ? env.sourceUuid.trim() : "";
+  const uuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sourceUuidRaw)
+      ? sourceUuidRaw.toLowerCase()
+      : undefined;
+  let phoneNumber: string | undefined;
+  if (sourceNumber) {
+    phoneNumber = sourceNumber.replace(/[^\d+]/g, "");
+    if (phoneNumber && !phoneNumber.startsWith("+")) phoneNumber = `+${phoneNumber}`;
+  } else if (source) {
+    const digits = source.replace(/[^\d+]/g, "");
+    if (digits.length >= 8) {
+      phoneNumber = digits.startsWith("+") ? digits : `+${digits}`;
+    }
+  }
+  return { phoneNumber, signalUuid: uuid };
+}
+
 /**
  * bbernhard/signal-cli-rest-api closes the receive WebSocket every ~35 s on idle. Logging every
  * routine reconnect drowns out real signal traffic in the channel debug trace, so we only log a
@@ -103,7 +127,13 @@ let lastReceiveWsConnectLogAt = 0;
 let receiveWsHadErrorSinceLastConnect = false;
 const RECEIVE_WS_CONNECT_LOG_INTERVAL_MS = 10 * 60 * 1000;
 
-function maybeLogReceiveWsNonTextDm(preview: string): void {
+function maybeLogReceiveWsNonTextDm(orchestrator: TaskOrchestrator, preview: string, chunk?: unknown): void {
+  if (chunk !== undefined) {
+    const p = extractSignalEnvelopePeers(chunk);
+    if (orchestrator.isChannelPeerBlocked({ channel: "signal", phoneNumber: p.phoneNumber, signalUuid: p.signalUuid })) {
+      return;
+    }
+  }
   const now = Date.now();
   if (now - lastReceiveWsNonDmLogAt < RECEIVE_WS_DEBUG_THROTTLE_MS) {
     return;
@@ -133,6 +163,7 @@ export function startSignalReceiveWsPoller(deps: {
   router: ChannelRouter;
   signal: SignalChannelAdapter;
 }): void {
+  const { orchestrator } = deps;
   if ((process.env.SIGNAL_RECEIVE_WEBSOCKET ?? "1").trim() === "0") {
     return;
   }
@@ -195,7 +226,12 @@ export function startSignalReceiveWsPoller(deps: {
       const rawStr = typeof raw === "string" ? raw : raw.toString("utf8");
       const chunks = parseWsPayload(raw);
       if (chunks.length === 0 && rawStr.trim().length > 2) {
-        maybeLogReceiveWsNonTextDm(rawStr);
+        try {
+          const parsed = JSON.parse(rawStr.trim()) as unknown;
+          maybeLogReceiveWsNonTextDm(orchestrator, rawStr, parsed);
+        } catch {
+          maybeLogReceiveWsNonTextDm(orchestrator, rawStr);
+        }
         return;
       }
       for (const chunk of chunks) {
@@ -203,7 +239,7 @@ export function startSignalReceiveWsPoller(deps: {
         if (messages.length === 0) {
           const preview = typeof chunk === "object" && chunk !== null ? JSON.stringify(chunk) : String(chunk);
           if (preview.length > 20) {
-            maybeLogReceiveWsNonTextDm(preview);
+            maybeLogReceiveWsNonTextDm(orchestrator, preview, chunk);
           }
           continue;
         }

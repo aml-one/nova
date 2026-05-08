@@ -1,4 +1,6 @@
+import { NOVA_PRIMARY_EMOTION_USER_ID } from "../../identity/nova-emotion-user.js";
 import { getDatabase } from "../sqlite.js";
+import { IdentityRepository } from "./identity-repository.js";
 
 export type PersonRecord = {
   id: string;
@@ -200,6 +202,71 @@ export class PeopleRepository {
       blocked: flags.blocked ?? current.blocked
     };
     this.upsert(next);
+  }
+
+  /**
+   * Remove a person and related rows (identities, channel state, memory, queued outbound to their handles, etc.).
+   * Does not delete `local-web-user` / Nova primary emotion key.
+   */
+  deleteCascadeById(personId: string): boolean {
+    const id = personId.trim();
+    if (!id || id === NOVA_PRIMARY_EMOTION_USER_ID) return false;
+    if (!this.getById(id)) return false;
+
+    const db = getDatabase();
+    const idRows = db
+      .prepare("SELECT kind, value FROM person_identities WHERE person_id = ?")
+      .all(id) as Array<{ kind: string; value: string }>;
+    const recipients = new Set<string>();
+    for (const r of idRows) {
+      if (r.kind === "phone_e164" || r.kind === "whatsapp_phone_e164" || r.kind === "signal_uuid") {
+        const v = r.value.trim();
+        if (v) recipients.add(v);
+      }
+    }
+
+    const legacy = new IdentityRepository();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const r of recipients) {
+        for (const ch of ["signal", "whatsapp"] as const) {
+          db.prepare(`DELETE FROM outbound_queue WHERE channel = ? AND recipient = ?`).run(ch, r);
+          db.prepare(`DELETE FROM dead_letter_queue WHERE channel = ? AND recipient = ?`).run(ch, r);
+        }
+        db.prepare("DELETE FROM signal_deferred_rings WHERE recipient = ?").run(r);
+      }
+
+      db.prepare("DELETE FROM person_identities WHERE person_id = ?").run(id);
+      db.prepare("DELETE FROM person_channel_state WHERE person_id = ?").run(id);
+      db.prepare("DELETE FROM person_field_locks WHERE person_id = ?").run(id);
+      db.prepare("DELETE FROM person_profile_events WHERE person_id = ?").run(id);
+      db.prepare("DELETE FROM person_relationships WHERE a_person_id = ? OR b_person_id = ?").run(id, id);
+
+      legacy.deleteAllMappingsForUserId(id);
+
+      db.prepare("DELETE FROM short_term_turns WHERE user_id = ?").run(id);
+      db.prepare("DELETE FROM long_term_memory WHERE user_id = ?").run(id);
+      db.prepare("DELETE FROM run_history WHERE user_id = ?").run(id);
+      db.prepare("DELETE FROM memory_cards WHERE user_id = ?").run(id);
+      db.prepare("DELETE FROM persona_schedules WHERE user_id = ?").run(id);
+      db.prepare("DELETE FROM user_profiles WHERE user_id = ?").run(id);
+      db.prepare("DELETE FROM mobile_push_registrations WHERE user_id = ?").run(id);
+      db.prepare("DELETE FROM memorybear_user_link WHERE nova_user_id = ?").run(id);
+
+      db.prepare("DELETE FROM emotion_events WHERE user_id = ?").run(id);
+      db.prepare("DELETE FROM emotion_state WHERE user_id = ?").run(id);
+
+      db.prepare("DELETE FROM people WHERE id = ?").run(id);
+      db.exec("COMMIT");
+      return true;
+    } catch {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        /* ignore */
+      }
+      return false;
+    }
   }
 }
 

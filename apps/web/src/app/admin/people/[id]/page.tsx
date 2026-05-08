@@ -167,6 +167,8 @@ export default function PersonAdminDetailPage() {
   const [newKind, setNewKind] = useState("phone_e164");
   const [newValue, setNewValue] = useState("");
   const [mergeSourceId, setMergeSourceId] = useState("");
+  const [blocking, setBlocking] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   function normalizeMergePersonId(raw: string): string {
     const t = raw.trim().replace(/^\uFEFF/, "");
@@ -202,12 +204,67 @@ export default function PersonAdminDetailPage() {
     }
   }
 
+  async function blockPerson() {
+    if (!item) return;
+    setBlocking(true);
+    setError("");
+    try {
+      const res = await apiFetch("/api/admin/people", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: item.id,
+          patch: { blocked: true },
+          locks: []
+        })
+      });
+      const data = (await res.json()) as { item?: PersonRecord; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "block failed");
+      setItem(data.item ?? { ...item, blocked: true });
+      setForm((f) => ({ ...f, blocked: true }));
+      router.refresh();
+    } catch (e2) {
+      setError(e2 instanceof Error ? e2.message : "block failed");
+    } finally {
+      setBlocking(false);
+    }
+  }
+
+  async function deletePerson() {
+    if (!item) return;
+    const ok = window.confirm(
+      `Delete this person (${item.displayName || item.id})? This removes their profile, identities, memories, and queued messages to their numbers. This cannot be undone.`
+    );
+    if (!ok) return;
+    setDeleting(true);
+    setError("");
+    try {
+      const res = await apiFetch(`/api/admin/people?id=${encodeURIComponent(item.id)}`, { method: "DELETE" });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "delete failed");
+      router.push("/admin/people");
+      router.refresh();
+    } catch (e2) {
+      setError(e2 instanceof Error ? e2.message : "delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <Link href="/admin/people">
           <Button tone="neutral">Back</Button>
         </Link>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button type="button" tone="orange" disabled={!item || blocking || form.blocked} onClick={() => void blockPerson()}>
+            {blocking ? "Blocking…" : "Block"}
+          </Button>
+          <Button type="button" tone="red" disabled={!item || deleting} onClick={() => void deletePerson()}>
+            {deleting ? "Deleting…" : "Delete"}
+          </Button>
+        </div>
         <div className="text-xs opacity-70">{id}</div>
       </div>
 

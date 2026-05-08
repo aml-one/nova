@@ -1,6 +1,6 @@
 /**
- * In-memory "voice call" sessions for Signal: walkie-talkie style using voice notes + TTS replies
- * (Signal native ringing / WebRTC calls are not available through signal-cli-rest-api here).
+ * In-app Signal "call" feel: back-and-forth **voice notes** + optional TTS (same thread in Signal).
+ * Native Signal ringing / VoIP is not available through signal-cli-rest-api; this is the supported model.
  */
 
 const DEFAULT_SESSION_MS = 12 * 60 * 1000;
@@ -53,7 +53,7 @@ export function signalWalkieCallIsActive(peer: string): boolean {
 }
 
 /** Greeting sent when the user opens a walkie session with `/call` (voice TTS uses the same string). */
-export const SIGNAL_WALKIE_GREETING = "Hey, it's Nova! What's up?";
+export const SIGNAL_WALKIE_GREETING = "Hey — it's Nova on Signal (voice notes in the app). What's up?";
 
 export function isSignalHangupCommand(text: string): boolean {
   const t = text.trim().toLowerCase();

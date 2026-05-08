@@ -103,6 +103,17 @@ export async function dispatchSignalInboundMessages(
     }
 
     try {
+      if (
+        deps.orchestrator.isChannelPeerBlocked({
+          channel: "signal",
+          phoneNumber: message.phoneNumber,
+          signalUuid: message.signalUuid
+        })
+      ) {
+        signalInboundReleaseEnvelope(dedupeKey);
+        continue;
+      }
+
       // Auto-link sealed-sender UUID to an existing phone-keyed tier row (best-effort, before access check).
       if (message.phoneNumber && message.signalUuid) {
         try {
@@ -180,7 +191,7 @@ export async function dispatchSignalInboundMessages(
         if (isSignalHangupCommand(message.text)) {
           signalWalkieCallEnd(message.from);
           reply =
-            "Call ended. Message me anytime—or send /call or /phone for another walkie-style voice session. (Signal still uses voice notes here, not a live phone line.)";
+            "Call ended. Message me anytime—or send /call or /phone for another in-app Signal voice-note session (not a cellular call).";
           trace.push("walkie_hangup");
         } else {
           const nlCall = parseNaturalLanguageCallMe(message.text);

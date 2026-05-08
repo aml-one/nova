@@ -15,6 +15,33 @@ export class PhoneIdentityResolver {
   private readonly people = new PeopleRepository();
   private readonly identities = new PersonIdentitiesRepository();
 
+  /**
+   * Resolve an existing person id only — no new `people` rows or identity rows.
+   * Used to enforce blocklist before ingest side effects.
+   */
+  tryResolveExisting(input: IdentityInput): string | undefined {
+    if (input.channel === "web") {
+      const webUserId = input.webUserId?.trim();
+      if (!webUserId) return undefined;
+      return this.identities.findPersonIdByIdentity("web_user_id", webUserId);
+    }
+    const normalizedPhone = input.phoneNumber ? normalizePhone(input.phoneNumber) : undefined;
+    if (input.channel === "signal") {
+      const normalizedUuid = normalizeSignalUuid(input.signalUuid);
+      if (normalizedUuid) {
+        const byUuid = this.identities.findPersonIdByIdentity("signal_uuid", normalizedUuid);
+        if (byUuid) return byUuid;
+        return this.repository.findByPhone(normalizedUuid);
+      }
+    }
+    if (!normalizedPhone) return undefined;
+    const existingByPersonIdentity =
+      this.identities.findPersonIdByIdentity(input.channel === "whatsapp" ? "whatsapp_phone_e164" : "phone_e164", normalizedPhone) ??
+      this.identities.findPersonIdByIdentity("phone_e164", normalizedPhone);
+    if (existingByPersonIdentity) return existingByPersonIdentity;
+    return this.repository.findByPhone(normalizedPhone);
+  }
+
   resolve(input: IdentityInput): string {
     if (input.channel === "web") {
       const webUserId = input.webUserId?.trim();

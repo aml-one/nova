@@ -32,4 +32,12 @@ describe("PhoneIdentityResolver", () => {
     expect(first).toBe(second);
     expect(first.startsWith("person-")).toBe(true);
   });
+
+  it("tryResolveExisting returns undefined before resolve and matches after", () => {
+    const resolver = new PhoneIdentityResolver();
+    const phone = "+15559990001";
+    expect(resolver.tryResolveExisting({ channel: "signal", phoneNumber: phone })).toBeUndefined();
+    const id = resolver.resolve({ channel: "signal", phoneNumber: phone });
+    expect(resolver.tryResolveExisting({ channel: "signal", phoneNumber: phone })).toBe(id);
+  });
 });
