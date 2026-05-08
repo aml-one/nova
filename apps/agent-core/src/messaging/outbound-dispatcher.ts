@@ -14,7 +14,12 @@ export class OutboundDispatcher {
   private readonly voice: VoiceService;
   private readonly logger = new Logger();
   private ticking = false;
-  private readonly recentSignalSends = new Map<string, number>();
+  /**
+   * Anti-spam guard: same channel + recipient + text body sent within `OUTBOUND_DEDUPE_WINDOW_MS`
+   * is dropped. Different content (e.g. Nova breaking a long reply into multiple lines) flows
+   * normally — we key on the text itself, not on the recipient alone.
+   */
+  private readonly recentOutboundSends = new Map<string, number>();
 
   constructor(private readonly getSettings: () => AppSettings) {
     this.wa = new WhatsAppChannelAdapter(getSettings);
@@ -85,26 +90,30 @@ export class OutboundDispatcher {
     const jobs = this.queue.listReady(20);
     for (const job of jobs) {
       try {
+        // Anti-spam guard (same body to same number within ~2 s). Applies to BOTH transports so
+        // a runaway whatsapp loop is also stopped, and so accidental duplicates from a retry are
+        // dropped without penalising legit multi-line replies (different text passes immediately).
+        if (this.wasRecentlySent(job.channel, job.recipient, job.payload)) {
+          this.queue.markSuccess(job.id);
+          pushChannelDebug({
+            channel: job.channel,
+            direction: "out",
+            transport: "dispatcher",
+            correlationId: job.correlationId ?? randomUUID(),
+            peer: job.recipient,
+            textPreview: previewChannelText(job.payload),
+            trace: ["outbound_send_deduped_recent"],
+            reachedNova: undefined,
+            error: `Identical message already sent to ${job.recipient} within ${this.outboundDedupeWindowMs()}ms — dropped to prevent accidental spam.`
+          });
+          continue;
+        }
         if (job.channel === "whatsapp") {
           await this.wa.sendMessage(job.recipient, job.payload);
         } else {
-          if (this.wasRecentlySent(job.recipient, job.payload)) {
-            this.queue.markSuccess(job.id);
-            pushChannelDebug({
-              channel: job.channel,
-              direction: "out",
-              transport: "dispatcher",
-              correlationId: job.correlationId ?? randomUUID(),
-              peer: job.recipient,
-              textPreview: previewChannelText(job.payload),
-              trace: ["outbound_send_deduped_recent"],
-              reachedNova: undefined
-            });
-            continue;
-          }
           await this.sendSignalWithOptionalVoice(job.recipient, job.payload);
-          this.markRecentlySent(job.recipient, job.payload);
         }
+        this.markRecentlySent(job.channel, job.recipient, job.payload);
         this.queue.markSuccess(job.id);
         pushChannelDebug({
           channel: job.channel,
@@ -143,20 +152,39 @@ export class OutboundDispatcher {
     }
   }
 
-  private signalSendKey(recipient: string, text: string): string {
-    return `${recipient.trim().toLowerCase()}::${text.trim().slice(0, 500)}`;
-  }
-
-  private wasRecentlySent(recipient: string, text: string): boolean {
-    const now = Date.now();
-    for (const [key, expiresAt] of this.recentSignalSends) {
-      if (expiresAt <= now) this.recentSignalSends.delete(key);
+  /**
+   * Default 2 000 ms — short enough that Nova can naturally repeat a one-word reply later in a
+   * conversation, long enough to swallow accidental retry storms / dispatcher loops. Tunable via
+   * `NOVA_OUTBOUND_DEDUPE_MS` (e.g. set higher in CI to keep tests deterministic).
+   */
+  private outboundDedupeWindowMs(): number {
+    const raw = process.env.NOVA_OUTBOUND_DEDUPE_MS?.trim();
+    if (raw) {
+      const parsed = Number(raw);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        return parsed;
+      }
     }
-    return this.recentSignalSends.has(this.signalSendKey(recipient, text));
+    return 2000;
   }
 
-  private markRecentlySent(recipient: string, text: string): void {
-    this.recentSignalSends.set(this.signalSendKey(recipient, text), Date.now() + 5 * 60 * 1000);
+  private outboundSendKey(channel: string, recipient: string, text: string): string {
+    return `${channel}::${recipient.trim().toLowerCase()}::${text.trim().slice(0, 500)}`;
+  }
+
+  private wasRecentlySent(channel: string, recipient: string, text: string): boolean {
+    const now = Date.now();
+    for (const [key, expiresAt] of this.recentOutboundSends) {
+      if (expiresAt <= now) this.recentOutboundSends.delete(key);
+    }
+    return this.recentOutboundSends.has(this.outboundSendKey(channel, recipient, text));
+  }
+
+  private markRecentlySent(channel: string, recipient: string, text: string): void {
+    this.recentOutboundSends.set(
+      this.outboundSendKey(channel, recipient, text),
+      Date.now() + this.outboundDedupeWindowMs()
+    );
   }
 
   private async sendSignalWithOptionalVoice(recipient: string, text: string): Promise<void> {
