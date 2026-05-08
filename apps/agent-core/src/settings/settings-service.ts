@@ -846,13 +846,21 @@ function normalizeImportantPeople(
   return result.filter((item, index, all) => all.findIndex((other) => other.phone === item.phone) === index);
 }
 
+function normalizeChannelTierDisplayName(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const t = raw.trim().slice(0, 80);
+  return t.length > 0 ? t : undefined;
+}
+
 function normalizeChannelTiers(
   values: AppSettings["messagingAccess"]["channelTiers"] | undefined
 ): AppSettings["messagingAccess"]["channelTiers"] {
   const normalizeWhatsAppRows = (
-    rows: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }> | undefined
+    rows:
+      | Array<{ phone: string; name?: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>
+      | undefined
   ) => {
-    const out: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }> = [];
+    const out: Array<{ phone: string; name?: string; tier: "admin" | "co_admin" | "restricted" | "guest" }> = [];
     for (const row of rows ?? []) {
       const phone = normalizePhone(row.phone);
       if (!phone) continue;
@@ -860,16 +868,26 @@ function normalizeChannelTiers(
         row.tier === "admin" || row.tier === "co_admin" || row.tier === "restricted" || row.tier === "guest"
           ? row.tier
           : "guest";
+      const name = normalizeChannelTierDisplayName(row.name);
       if (!out.find((x) => x.phone === phone)) {
-        out.push({ phone, tier });
+        const next: { phone: string; name?: string; tier: typeof tier } = { phone, tier };
+        if (name) next.name = name;
+        out.push(next);
       }
     }
     return out;
   };
   const normalizeSignalRows = (
-    rows: Array<{ phone: string; signalUuid?: string; tier: "admin" | "co_admin" | "restricted" | "guest" }> | undefined
+    rows:
+      | Array<{ phone: string; signalUuid?: string; name?: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>
+      | undefined
   ) => {
-    const out: Array<{ phone: string; signalUuid?: string; tier: "admin" | "co_admin" | "restricted" | "guest" }> = [];
+    const out: Array<{
+      phone: string;
+      signalUuid?: string;
+      name?: string;
+      tier: "admin" | "co_admin" | "restricted" | "guest";
+    }> = [];
     for (const row of rows ?? []) {
       const phone = normalizePhone(row.phone);
       if (!phone) continue;
@@ -878,9 +896,11 @@ function normalizeChannelTiers(
           ? row.tier
           : "guest";
       const uuid = normalizeSignalUuid(row.signalUuid);
+      const name = normalizeChannelTierDisplayName(row.name);
       if (!out.find((x) => x.phone === phone)) {
-        const next: { phone: string; signalUuid?: string; tier: typeof tier } = { phone, tier };
+        const next: { phone: string; signalUuid?: string; name?: string; tier: typeof tier } = { phone, tier };
         if (uuid) next.signalUuid = uuid;
+        if (name) next.name = name;
         out.push(next);
       }
     }

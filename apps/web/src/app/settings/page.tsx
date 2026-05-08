@@ -1,9 +1,9 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
-import { FaChevronDown, FaCopy, FaPenToSquare, FaRotateRight } from "react-icons/fa6";
+import { FaChevronDown, FaCopy, FaPenToSquare, FaRotateRight, FaXmark } from "react-icons/fa6";
 import QRCode from "qrcode";
 import { Card } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
@@ -182,8 +182,13 @@ type SettingsState = {
     novaPhoneNumber: string;
     denyUnknownNumbers: boolean;
     channelTiers: {
-      signal: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>;
-      whatsapp: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>;
+      signal: Array<{
+        phone: string;
+        signalUuid?: string;
+        name?: string;
+        tier: AccessTier;
+      }>;
+      whatsapp: Array<{ phone: string; name?: string; tier: AccessTier }>;
     };
     systemAdmins: string[];
     guests: string[];
@@ -257,6 +262,15 @@ type WhatsAppWebBridgeStatus = {
   authDir?: string;
 };
 type SshTestResult = { ok: boolean; detail: string } | null;
+
+type AccessTier = "admin" | "co_admin" | "restricted" | "guest";
+
+const ACCESS_TIER_LABEL: Record<AccessTier, string> = {
+  admin: "Admin",
+  co_admin: "Co-Admin",
+  restricted: "Restricted",
+  guest: "Guest"
+};
 
 const DEFAULT_SETTINGS: SettingsState = {
   delegatedFolders: [],
@@ -540,6 +554,17 @@ export default function SettingsPage() {
   const lastSavedVoiceSilenceSecRef = useRef<number>(DEFAULT_SETTINGS.web.voiceDictationSilenceSec);
   const [chatStyleSaveState, setChatStyleSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [voiceSilenceSaveState, setVoiceSilenceSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [channelTierAddFor, setChannelTierAddFor] = useState<"signal" | "whatsapp" | null>(null);
+  const [channelTierAddDraft, setChannelTierAddDraft] = useState({ phone: "", name: "", tier: "guest" as AccessTier });
+  const [channelTierEdit, setChannelTierEdit] = useState<{ channel: "signal" | "whatsapp"; index: number } | null>(null);
+  const [channelTierEditTier, setChannelTierEditTier] = useState<AccessTier>("guest");
+  const [channelTierNameEdit, setChannelTierNameEdit] = useState<{ channel: "signal" | "whatsapp"; index: number } | null>(
+    null
+  );
+  const [channelTierNameDraft, setChannelTierNameDraft] = useState("");
+  const [channelTiersSaveState, setChannelTiersSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [signalChannelSetupExpanded, setSignalChannelSetupExpanded] = useState(true);
+  const [whatsAppChannelSetupExpanded, setWhatsAppChannelSetupExpanded] = useState(true);
   const [sentiCoreModalOpen, setSentiCoreModalOpen] = useState(false);
   const [sentiCoreDraft, setSentiCoreDraft] = useState("");
   const [sentiCoreResolvedPath, setSentiCoreResolvedPath] = useState("");
@@ -685,6 +710,29 @@ export default function SettingsPage() {
     }, 400);
     return () => clearTimeout(timer);
   }, [settings.web.voiceDictationSilenceSec, loading]);
+
+  const channelSetupSummary = useMemo(() => {
+    const cs = (settings.skillSettings["channel-setup"] ?? {}) as Record<string, string>;
+    const signalApiUrl = String(cs.signalApiUrl ?? "").trim();
+    const signalAccount = String(cs.signalAccountNumber ?? settings.messagingAccess.novaPhoneNumber ?? "").trim();
+    const whatsAppCloudReady = Boolean(
+      String(cs.whatsAppPhoneNumberId ?? "").trim() && String(cs.whatsAppToken ?? "").trim()
+    );
+    return {
+      signalSetupLooksReady: Boolean(signalApiUrl && signalAccount),
+      whatsAppSetupLooksReady: (whatsAppWebStatus?.connected === true) || whatsAppCloudReady
+    };
+  }, [settings.skillSettings, settings.messagingAccess.novaPhoneNumber, whatsAppWebStatus?.connected]);
+
+  useEffect(() => {
+    if (channelSetupSummary.signalSetupLooksReady) setSignalChannelSetupExpanded(false);
+    else setSignalChannelSetupExpanded(true);
+  }, [channelSetupSummary.signalSetupLooksReady]);
+
+  useEffect(() => {
+    if (channelSetupSummary.whatsAppSetupLooksReady) setWhatsAppChannelSetupExpanded(false);
+    else setWhatsAppChannelSetupExpanded(true);
+  }, [channelSetupSummary.whatsAppSetupLooksReady]);
 
   useEffect(() => {
     if (!copilotDeviceLoginSessionId) return;
@@ -946,53 +994,107 @@ export default function SettingsPage() {
     }));
   }
 
-  function updateChannelTier(
-    channel: "signal" | "whatsapp",
-    index: number,
-    patch: Partial<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>
-  ): void {
-    setSettings((prev) => {
-      const rows = [...prev.messagingAccess.channelTiers[channel]];
-      const row = rows[index];
-      if (!row) return prev;
-      rows[index] = { ...row, ...patch };
-      return {
-        ...prev,
-        messagingAccess: {
-          ...prev.messagingAccess,
-          channelTiers: {
-            ...prev.messagingAccess.channelTiers,
-            [channel]: rows
-          }
-        }
-      };
-    });
+  async function persistMessagingChannelTiers(next: SettingsState["messagingAccess"]["channelTiers"]): Promise<boolean> {
+    setChannelTiersSaveState("saving");
+    try {
+      const response = await apiFetch("/api/settings", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ messagingAccess: { channelTiers: next } })
+      });
+      const data = await readJsonOrEmpty<{ settings?: Partial<SettingsState>; error?: string }>(response);
+      if (!response.ok) {
+        setError(data.error ?? "Could not save phone list");
+        setChannelTiersSaveState("error");
+        return false;
+      }
+      if (data.settings) setSettings(normalizeSettings(data.settings));
+      setChannelTiersSaveState("saved");
+      window.setTimeout(() => setChannelTiersSaveState("idle"), 1200);
+      return true;
+    } catch {
+      setChannelTiersSaveState("error");
+      setError("Could not save phone list (network error).");
+      return false;
+    }
   }
 
-  function addChannelTierRow(channel: "signal" | "whatsapp"): void {
+  async function removeChannelTierRowPersist(channel: "signal" | "whatsapp", index: number): Promise<void> {
+    const base = settings.messagingAccess.channelTiers;
+    const next = {
+      ...base,
+      [channel]: base[channel].filter((_, i) => i !== index)
+    };
     setSettings((prev) => ({
       ...prev,
-      messagingAccess: {
-        ...prev.messagingAccess,
-        channelTiers: {
-          ...prev.messagingAccess.channelTiers,
-          [channel]: [...prev.messagingAccess.channelTiers[channel], { phone: "", tier: "guest" }]
-        }
-      }
+      messagingAccess: { ...prev.messagingAccess, channelTiers: next }
     }));
+    await persistMessagingChannelTiers(next);
   }
 
-  function removeChannelTierRow(channel: "signal" | "whatsapp", index: number): void {
+  async function confirmAddChannelTier(): Promise<void> {
+    if (!channelTierAddFor) return;
+    const phone = channelTierAddDraft.phone.trim();
+    if (!phone) {
+      setError("Enter a phone number.");
+      return;
+    }
+    const nameRaw = channelTierAddDraft.name.trim().slice(0, 80);
+    const ch = channelTierAddFor;
+    const row = {
+      phone,
+      tier: channelTierAddDraft.tier,
+      ...(nameRaw ? { name: nameRaw } : {})
+    };
+    const base = settings.messagingAccess.channelTiers;
+    const next = { ...base, [ch]: [...base[ch], row] };
     setSettings((prev) => ({
       ...prev,
-      messagingAccess: {
-        ...prev.messagingAccess,
-        channelTiers: {
-          ...prev.messagingAccess.channelTiers,
-          [channel]: prev.messagingAccess.channelTiers[channel].filter((_, i) => i !== index)
-        }
-      }
+      messagingAccess: { ...prev.messagingAccess, channelTiers: next }
     }));
+    setChannelTierAddFor(null);
+    setChannelTierAddDraft({ phone: "", name: "", tier: "guest" });
+    setError(null);
+    await persistMessagingChannelTiers(next);
+  }
+
+  async function confirmChannelTierEdit(): Promise<void> {
+    if (!channelTierEdit) return;
+    const { channel, index } = channelTierEdit;
+    const rows = [...settings.messagingAccess.channelTiers[channel]];
+    const row = rows[index];
+    if (!row) return;
+    rows[index] = { ...row, tier: channelTierEditTier };
+    const next = { ...settings.messagingAccess.channelTiers, [channel]: rows };
+    setSettings((prev) => ({
+      ...prev,
+      messagingAccess: { ...prev.messagingAccess, channelTiers: next }
+    }));
+    setChannelTierEdit(null);
+    setError(null);
+    await persistMessagingChannelTiers(next);
+  }
+
+  async function confirmChannelNameEdit(): Promise<void> {
+    if (!channelTierNameEdit) return;
+    const { channel, index } = channelTierNameEdit;
+    const rows = [...settings.messagingAccess.channelTiers[channel]];
+    const row = rows[index];
+    if (!row) return;
+    const nameRaw = channelTierNameDraft.trim().slice(0, 80);
+    const nextRow = { ...row } as { phone: string; tier: AccessTier; name?: string; signalUuid?: string };
+    if (nameRaw) nextRow.name = nameRaw;
+    else delete nextRow.name;
+    rows[index] = nextRow as (typeof rows)[number];
+    const next = { ...settings.messagingAccess.channelTiers, [channel]: rows };
+    setSettings((prev) => ({
+      ...prev,
+      messagingAccess: { ...prev.messagingAccess, channelTiers: next }
+    }));
+    setChannelTierNameEdit(null);
+    setChannelTierNameDraft("");
+    setError(null);
+    await persistMessagingChannelTiers(next);
   }
 
   async function runOneClickChannelSetup(): Promise<void> {
@@ -2729,8 +2831,114 @@ export default function SettingsPage() {
             </label>
             <label className="grid gap-1 text-sm">Nova phone number<Input value={settings.messagingAccess.novaPhoneNumber} onChange={(e) => setSettings((p) => ({ ...p, messagingAccess: { ...p.messagingAccess, novaPhoneNumber: e.target.value } }))} /></label>
             <label className="flex items-center gap-2"><Checkbox checked={settings.messagingAccess.denyUnknownNumbers} onChange={(e) => setSettings((p) => ({ ...p, messagingAccess: { ...p.messagingAccess, denyUnknownNumbers: e.target.checked } }))} /> Silent deny unknown numbers</label>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2 rounded-ui border bg-surface p-3">
+            <div className="space-y-4 rounded-ui border bg-surface p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold">Allowed phone numbers</h3>
+                  <p className="text-xs text-muted">
+                    Add people with a display name and tier. The phone number cannot be edited after it is saved. Tier changes save automatically.
+                  </p>
+                </div>
+                {channelTiersSaveState === "saving" ? (
+                  <span className="text-[11px] text-muted">Saving…</span>
+                ) : channelTiersSaveState === "saved" ? (
+                  <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-300">Saved</span>
+                ) : null}
+              </div>
+              <div className="space-y-4">
+                {(["signal", "whatsapp"] as const).map((channel) => (
+                  <div key={channel} className="rounded-ui border border-border/70 bg-surface2 p-3">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <strong className="text-sm">{channel === "signal" ? "Signal" : "WhatsApp"}</strong>
+                      <Button
+                        type="button"
+                        tone="blue"
+                        className="h-8 px-2 text-xs"
+                        onClick={() => {
+                          setChannelTierAddDraft({ phone: "", name: "", tier: "guest" });
+                          setChannelTierAddFor(channel);
+                          setError(null);
+                        }}
+                      >
+                        Add…
+                      </Button>
+                    </div>
+                    <div className="hidden min-w-0 grid-cols-2 gap-2 border-b border-border/50 pb-2 text-[11px] font-semibold uppercase tracking-wide text-muted sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_6rem_2.25rem]">
+                      <span>Name</span>
+                      <span>Phone</span>
+                      <span>Tier</span>
+                      <span className="sr-only">Remove</span>
+                    </div>
+                    <div className="space-y-2">
+                      {settings.messagingAccess.channelTiers[channel].map((row, idx) => (
+                        <div
+                          key={`${channel}-${idx}-${row.phone}`}
+                          className="grid grid-cols-1 gap-2 rounded-ui border border-border/40 bg-surface px-2 py-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_6rem_2.25rem] sm:items-center"
+                        >
+                          <button
+                            type="button"
+                            className="min-w-0 text-left text-sm font-medium leading-tight sm:order-none rounded-ui border border-transparent px-0.5 py-0.5 transition hover:border-border/60 hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                            onClick={() => {
+                              setChannelTierNameDraft(row.name?.trim() ?? "");
+                              setChannelTierNameEdit({ channel, index: idx });
+                              setError(null);
+                            }}
+                          >
+                            <span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Name</span>
+                            <div className="truncate" title={row.name ?? "Click to set name"}>
+                              {row.name?.trim() ? row.name : "—"}
+                            </div>
+                          </button>
+                          <div className="min-w-0 font-mono text-[13px] text-foreground sm:order-none">
+                            <span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Phone</span>
+                            {row.phone}
+                          </div>
+                          <button
+                            type="button"
+                            className="rounded-ui border border-border/60 bg-surface px-2 py-1.5 text-left text-xs font-semibold text-foreground transition hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                            onClick={() => {
+                              setChannelTierEditTier(row.tier);
+                              setChannelTierEdit({ channel, index: idx });
+                              setError(null);
+                            }}
+                          >
+                            <span className="text-[10px] font-semibold uppercase text-muted sm:hidden">Tier </span>
+                            {ACCESS_TIER_LABEL[row.tier]}
+                          </button>
+                          <div className="flex justify-end sm:justify-center">
+                            <button
+                              type="button"
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-ui text-rose-600 transition hover:bg-rose-500/15 dark:text-rose-400"
+                              aria-label={`Remove ${row.phone}`}
+                              onClick={() => void removeChannelTierRowPersist(channel, idx)}
+                            >
+                              <FaXmark className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {settings.messagingAccess.channelTiers[channel].length === 0 ? (
+                        <p className="text-[11px] text-muted">No numbers yet — use Add…</p>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <details
+              className="rounded-ui border border-border/80 bg-surface"
+              open={signalChannelSetupExpanded}
+              onToggle={(e) => setSignalChannelSetupExpanded(e.currentTarget.open)}
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-3 text-sm font-semibold outline-none [&::-webkit-details-marker]:hidden">
+                <span>Signal — self-hosted CLI bridge</span>
+                {channelSetupSummary.signalSetupLooksReady ? (
+                  <span className="shrink-0 rounded-full border border-emerald-600/35 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-900 dark:border-emerald-500/40 dark:bg-emerald-950/40 dark:text-emerald-100">
+                    Signal CLI working
+                  </span>
+                ) : null}
+              </summary>
+              <div className="space-y-2 border-t border-border/60 px-3 pb-3 pt-0">
                 <h3 className="text-sm font-semibold">Signal setup (self-hosted)</h3>
                 <p className="text-xs text-muted">
                   Install and run <a className="underline" href="https://github.com/bbernhard/signal-cli-rest-api" target="_blank" rel="noreferrer">signal-cli-rest-api</a>. If this number already uses Signal on a phone, use{" "}
@@ -2749,8 +2957,167 @@ export default function SettingsPage() {
                 <div className="text-[11px] text-muted">
                   Install guide: run Docker container from project docs, open REST API, verify account registration, then paste URL + account number here.
                 </div>
+                <div className="pt-2">
+                  <Button type="button" tone="blue" onClick={() => void runSignalDockerBootstrap()}>
+                    Start Signal bridge via Docker
+                  </Button>
+                </div>
               </div>
-              <div className="space-y-2 rounded-ui border bg-surface p-3">
+              <div className="space-y-3 border-t border-border/60 px-3 pb-3 pt-3">
+                <h3 className="text-sm font-semibold">Signal: link phone (QR)</h3>
+                <p className="text-[11px] leading-snug text-muted">
+                  Same as Signal Desktop: this bridge becomes a linked device on your primary phone. Open Signal on the phone → Settings → Linked devices → Link new device, then scan the QR. No SMS code.
+                </p>
+                <label className="grid gap-1 text-xs">
+                  Device name (shown under linked devices on the phone)
+                  <Input
+                    value={signalQrDeviceName}
+                    onChange={(e) => setSignalQrDeviceName(e.target.value)}
+                    placeholder="Nova Agent Web"
+                  />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" tone="blue" disabled={signalQrLoading} onClick={() => void runSignalQrLinkFetch()}>
+                    {signalQrLoading ? "Loading QR…" : "Generate link QR"}
+                  </Button>
+                  <Button type="button" tone="green" disabled={signalAccountsLoading} onClick={() => void runSignalAccountsRefresh()}>
+                    {signalAccountsLoading ? "Checking…" : "Refresh linked accounts"}
+                  </Button>
+                </div>
+                {signalQrEndpoint ? (
+                  <p className="break-all font-mono text-[10px] text-muted" title="Upstream URL used by agent-core">
+                    {signalQrEndpoint}
+                  </p>
+                ) : null}
+                {signalQrImageUrl ? (
+                  <div className="space-y-2 rounded-ui border border-border bg-surface2 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-[11px] font-semibold text-muted">Scan with your phone</div>
+                      <div className="flex flex-wrap gap-2">
+                        {!signalQrDismissed ? (
+                          <Button type="button" tone="neutral" className="h-7 px-2 text-xs" onClick={() => setSignalQrDismissed(true)}>
+                            Dismiss QR
+                          </Button>
+                        ) : (
+                          <Button type="button" tone="blue" className="h-7 px-2 text-xs" onClick={() => setSignalQrDismissed(false)}>
+                            Show QR again
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    {!signalQrDismissed ? (
+                      <img
+                        className="max-h-80 w-80 max-w-full rounded-ui border border-border bg-white p-2"
+                        src={signalQrImageUrl}
+                        alt="Signal device link QR code"
+                      />
+                    ) : (
+                      <p className="text-[11px] text-muted">QR hidden. Use Show QR again, or Generate link QR for a fresh code.</p>
+                    )}
+                    <p className="text-[11px] text-muted">
+                      signal-cli-rest-api issues a new QR on each request. If scanning fails or times out, click Generate link QR again.
+                    </p>
+                  </div>
+                ) : null}
+                {signalLinkedAccounts !== null ? (
+                  <div className="rounded-ui border border-emerald-600/25 bg-surface2 p-2 text-[11px]">
+                    <div className="mb-1 font-semibold text-muted">Accounts on this bridge</div>
+                    {signalLinkedAccounts.length > 0 ? (
+                      <ul className="list-inside list-disc space-y-1 font-mono">
+                        {signalLinkedAccounts.map((n) => (
+                          <li key={n}>{n}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-muted">None yet — finish linking on the phone, then Refresh linked accounts.</p>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+              <details className="mx-3 mb-3 rounded-ui border border-border/60 bg-surface2 p-2">
+                <summary className="cursor-pointer list-none text-sm font-semibold text-foreground outline-none [&::-webkit-details-marker]:hidden">
+                  Signal: new number (SMS) — only if this number is not on Signal yet
+                </summary>
+                <div className="mt-3 space-y-3 border-t border-border/60 pt-3">
+                  <p className="text-[11px] leading-snug text-muted">
+                    If your number already uses Signal on a phone, skip this — use <strong className="text-foreground">Generate link QR</strong> above. Otherwise: request the SMS code, enter it below, then submit. If Nova says a captcha is required, open the captcha helper panel (or it may open automatically).
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" tone="purple" onClick={() => void runSignalRegisterStart()}>
+                      Step 1 — request SMS / voice code
+                    </Button>
+                    <Button
+                      type="button"
+                      tone="neutral"
+                      onClick={() => {
+                        setSignalCaptchaModalDetail("");
+                        setSignalCaptchaModalOpen(true);
+                      }}
+                    >
+                      Captcha helper panel
+                    </Button>
+                  </div>
+                  <label className="grid gap-1 text-xs">
+                    SMS or voice verification code
+                    <Input
+                      value={signalVerificationCode}
+                      onChange={(e) => setSignalVerificationCode(e.target.value)}
+                      placeholder="Digits from Signal / SMS"
+                    />
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 text-xs text-text">
+                    <Checkbox
+                      checked={signalRegistrationUseVoice}
+                      onChange={(e) => setSignalRegistrationUseVoice(e.target.checked)}
+                    />
+                    Request voice call instead of SMS (optional)
+                  </label>
+                  <label className="grid gap-1 text-xs">
+                    Captcha token (filled automatically from the helper when possible)
+                    <Textarea
+                      value={signalRegistrationCaptcha}
+                      onChange={(e) => setSignalRegistrationCaptcha(e.target.value)}
+                      placeholder="signal-hcaptcha-… (pasted URL or token is fine)"
+                      rows={2}
+                      className="font-mono text-[11px]"
+                    />
+                  </label>
+                  <div className="flex flex-wrap items-start gap-2">
+                    <Button type="button" tone="green" onClick={() => void runSignalVerifyCode()}>
+                      Submit verification code
+                    </Button>
+                    {signalRegisterStatus ? (
+                      <span
+                        className={`inline-flex max-w-full min-w-0 flex-1 items-center rounded-lg border px-2 py-1.5 text-xs font-semibold leading-snug sm:flex-initial sm:rounded-full ${
+                          signalRegisterStatus.ok
+                            ? "border-emerald-600/35 bg-emerald-50 text-emerald-900 dark:border-emerald-400/60 dark:bg-emerald-400/10 dark:text-emerald-200"
+                            : "border-rose-600/40 bg-rose-50 text-rose-900 dark:border-rose-400/60 dark:bg-rose-400/10 dark:text-rose-200"
+                        }`}
+                        aria-live="polite"
+                      >
+                        <span className="break-words">
+                          SMS registration: {signalRegisterStatus.ok ? "OK" : "Failed"} — {signalRegisterStatus.detail}
+                        </span>
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </details>
+            </details>
+            <details
+              className="rounded-ui border border-border/80 bg-surface"
+              open={whatsAppChannelSetupExpanded}
+              onToggle={(e) => setWhatsAppChannelSetupExpanded(e.currentTarget.open)}
+            >
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-3 text-sm font-semibold outline-none [&::-webkit-details-marker]:hidden">
+                <span>WhatsApp — Web bridge and Cloud API</span>
+                {channelSetupSummary.whatsAppSetupLooksReady ? (
+                  <span className="shrink-0 rounded-full border border-emerald-600/35 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-900 dark:border-emerald-500/40 dark:bg-emerald-950/40 dark:text-emerald-100">
+                    {whatsAppWebStatus?.connected ? "WhatsApp Bridge working" : "WhatsApp Cloud configured"}
+                  </span>
+                ) : null}
+              </summary>
+              <div className="space-y-2 border-t border-border/60 px-3 pb-3 pt-0">
                 <h3 className="text-sm font-semibold">WhatsApp setup</h3>
                 <p className="text-xs text-muted">Primary: link your phone with WhatsApp Web (below). Optional: Meta Cloud API in the expandable section.</p>
                 <div className="grid gap-3 rounded-ui border bg-surface2 p-3">
@@ -2833,7 +3200,7 @@ export default function SettingsPage() {
                   </div>
                 </details>
               </div>
-            </div>
+            </details>
             <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
               <div>
                 <strong>Signal quick checklist:</strong> <strong>Start Signal bridge via Docker</strong> {"->"} link phone with <strong>Generate link QR</strong> (or SMS registration only if the number is new to Signal) {"->"}
@@ -2844,9 +3211,6 @@ export default function SettingsPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 pt-1">
-              <Button type="button" tone="blue" onClick={() => void runSignalDockerBootstrap()}>
-                Start Signal bridge via Docker
-              </Button>
               <Button
                 type="button"
                 tone="green"
@@ -2913,199 +3277,153 @@ export default function SettingsPage() {
                 </span>
               ) : null}
             </div>
-            <div className="space-y-3 rounded-ui border bg-surface p-3">
-              <h3 className="text-sm font-semibold">Signal: link phone (QR)</h3>
-              <p className="text-[11px] leading-snug text-muted">
-                Same as Signal Desktop: this bridge becomes a linked device on your primary phone. Open Signal on the phone → Settings → Linked devices → Link new device, then scan the QR. No SMS code.
-              </p>
-              <label className="grid gap-1 text-xs">
-                Device name (shown under linked devices on the phone)
-                <Input
-                  value={signalQrDeviceName}
-                  onChange={(e) => setSignalQrDeviceName(e.target.value)}
-                  placeholder="Nova Agent Web"
-                />
-              </label>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" tone="blue" disabled={signalQrLoading} onClick={() => void runSignalQrLinkFetch()}>
-                  {signalQrLoading ? "Loading QR…" : "Generate link QR"}
-                </Button>
-                <Button type="button" tone="green" disabled={signalAccountsLoading} onClick={() => void runSignalAccountsRefresh()}>
-                  {signalAccountsLoading ? "Checking…" : "Refresh linked accounts"}
-                </Button>
-              </div>
-              {signalQrEndpoint ? (
-                <p className="break-all font-mono text-[10px] text-muted" title="Upstream URL used by agent-core">
-                  {signalQrEndpoint}
-                </p>
-              ) : null}
-              {signalQrImageUrl ? (
-                <div className="space-y-2 rounded-ui border border-border bg-surface2 p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-[11px] font-semibold text-muted">Scan with your phone</div>
-                    <div className="flex flex-wrap gap-2">
-                      {!signalQrDismissed ? (
-                        <Button type="button" tone="neutral" className="h-7 px-2 text-xs" onClick={() => setSignalQrDismissed(true)}>
-                          Dismiss QR
-                        </Button>
-                      ) : (
-                        <Button type="button" tone="blue" className="h-7 px-2 text-xs" onClick={() => setSignalQrDismissed(false)}>
-                          Show QR again
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                  {!signalQrDismissed ? (
-                    <img
-                      className="max-h-80 w-80 max-w-full rounded-ui border border-border bg-white p-2"
-                      src={signalQrImageUrl}
-                      alt="Signal device link QR code"
-                    />
-                  ) : (
-                    <p className="text-[11px] text-muted">QR hidden. Use Show QR again, or Generate link QR for a fresh code.</p>
-                  )}
-                  <p className="text-[11px] text-muted">
-                    signal-cli-rest-api issues a new QR on each request. If scanning fails or times out, click Generate link QR again.
-                  </p>
-                </div>
-              ) : null}
-              {signalLinkedAccounts !== null ? (
-                <div className="rounded-ui border border-emerald-600/25 bg-surface2 p-2 text-[11px]">
-                  <div className="mb-1 font-semibold text-muted">Accounts on this bridge</div>
-                  {signalLinkedAccounts.length > 0 ? (
-                    <ul className="list-inside list-disc space-y-1 font-mono">
-                      {signalLinkedAccounts.map((n) => (
-                        <li key={n}>{n}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="text-muted">None yet — finish linking on the phone, then Refresh linked accounts.</p>
-                  )}
-                </div>
-              ) : null}
-            </div>
-            <details className="rounded-ui border bg-surface p-2">
-              <summary className="cursor-pointer list-none text-sm font-semibold text-foreground outline-none [&::-webkit-details-marker]:hidden">
-                Signal: new number (SMS) — only if this number is not on Signal yet
-              </summary>
-              <div className="mt-3 space-y-3 border-t border-border/60 pt-3">
-                <p className="text-[11px] leading-snug text-muted">
-                  If your number already uses Signal on a phone, skip this — use <strong className="text-foreground">Generate link QR</strong> above. Otherwise: request the SMS code, enter it below, then submit. If Nova says a captcha is required, open the captcha helper panel (or it may open automatically).
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" tone="purple" onClick={() => void runSignalRegisterStart()}>
-                    Step 1 — request SMS / voice code
-                  </Button>
-                  <Button
-                    type="button"
-                    tone="neutral"
-                    onClick={() => {
-                      setSignalCaptchaModalDetail("");
-                      setSignalCaptchaModalOpen(true);
-                    }}
-                  >
-                    Captcha helper panel
-                  </Button>
-                </div>
-                <label className="grid gap-1 text-xs">
-                  SMS or voice verification code
-                  <Input
-                    value={signalVerificationCode}
-                    onChange={(e) => setSignalVerificationCode(e.target.value)}
-                    placeholder="Digits from Signal / SMS"
-                  />
-                </label>
-                <label className="flex cursor-pointer items-center gap-2 text-xs text-text">
-                  <Checkbox
-                    checked={signalRegistrationUseVoice}
-                    onChange={(e) => setSignalRegistrationUseVoice(e.target.checked)}
-                  />
-                  Request voice call instead of SMS (optional)
-                </label>
-                <label className="grid gap-1 text-xs">
-                  Captcha token (filled automatically from the helper when possible)
-                  <Textarea
-                    value={signalRegistrationCaptcha}
-                    onChange={(e) => setSignalRegistrationCaptcha(e.target.value)}
-                    placeholder="signal-hcaptcha-… (pasted URL or token is fine)"
-                    rows={2}
-                    className="font-mono text-[11px]"
-                  />
-                </label>
-                <div className="flex flex-wrap items-start gap-2">
-                  <Button type="button" tone="green" onClick={() => void runSignalVerifyCode()}>
-                    Submit verification code
-                  </Button>
-                  {signalRegisterStatus ? (
-                    <span
-                      className={`inline-flex max-w-full min-w-0 flex-1 items-center rounded-lg border px-2 py-1.5 text-xs font-semibold leading-snug sm:flex-initial sm:rounded-full ${
-                        signalRegisterStatus.ok
-                          ? "border-emerald-600/35 bg-emerald-50 text-emerald-900 dark:border-emerald-400/60 dark:bg-emerald-400/10 dark:text-emerald-200"
-                          : "border-rose-600/40 bg-rose-50 text-rose-900 dark:border-rose-400/60 dark:bg-rose-400/10 dark:text-rose-200"
-                      }`}
-                      aria-live="polite"
-                    >
-                      <span className="break-words">
-                        SMS registration: {signalRegisterStatus.ok ? "OK" : "Failed"} — {signalRegisterStatus.detail}
-                      </span>
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-            </details>
-            <div className="rounded-ui border bg-surface p-3 space-y-3">
-              <h3 className="text-sm font-semibold">Allowed phone numbers by channel</h3>
-              <p className="text-xs text-muted">
-                Assign tiers for messaging channels only (Signal/WhatsApp). Save Settings to apply.
-              </p>
-              <div className="grid gap-3 md:grid-cols-2">
-                {(["signal", "whatsapp"] as const).map((channel) => (
-                  <div key={channel} className="rounded-ui border bg-surface2 p-2 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <strong className="text-sm">{channel === "signal" ? "Signal" : "WhatsApp"}</strong>
-                      <Button type="button" tone="blue" className="h-7 px-2 text-xs" onClick={() => addChannelTierRow(channel)}>
-                        Add
+            {channelTierAddFor ? (
+              <div
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="channel-tier-add-title"
+                onClick={() => setChannelTierAddFor(null)}
+              >
+                <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+                  <Card className="flex flex-col gap-3 p-4 shadow-xl">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 id="channel-tier-add-title" className="text-base font-semibold">
+                        Add {channelTierAddFor === "signal" ? "Signal" : "WhatsApp"} number
+                      </h3>
+                      <Button type="button" tone="neutral" className="h-8 px-2 text-xs" onClick={() => setChannelTierAddFor(null)}>
+                        Cancel
                       </Button>
                     </div>
-                    <div className="space-y-1.5">
-                      {settings.messagingAccess.channelTiers[channel].map((row, idx) => (
-                        <div
-                          key={`${channel}-${idx}`}
-                          className="grid grid-cols-1 gap-1.5 sm:grid-cols-[minmax(14rem,1fr)_130px_auto] sm:items-center"
-                        >
-                          <Input
-                            value={row.phone}
-                            onChange={(e) => updateChannelTier(channel, idx, { phone: e.target.value })}
-                            placeholder="+15551234567"
-                            title={row.phone.trim() || "E.164 phone number"}
-                            className="min-w-0 font-mono text-[13px]"
-                          />
-                          <Select
-                            value={row.tier}
-                            onChange={(e) =>
-                              updateChannelTier(channel, idx, {
-                                tier: e.target.value as "admin" | "co_admin" | "restricted" | "guest"
-                              })
-                            }
-                          >
-                            <option value="admin">Admin</option>
-                            <option value="co_admin">Co-Admin</option>
-                            <option value="restricted">Restricted</option>
-                            <option value="guest">Guest</option>
-                          </Select>
-                          <Button type="button" tone="red" className="h-9 px-2 text-xs" onClick={() => removeChannelTierRow(channel, idx)}>
-                            Remove
-                          </Button>
-                        </div>
-                      ))}
-                      {settings.messagingAccess.channelTiers[channel].length === 0 ? (
-                        <p className="text-[11px] text-muted">No numbers assigned yet.</p>
-                      ) : null}
+                    <label className="grid gap-1 text-xs">
+                      Phone number (E.164)
+                      <Input
+                        value={channelTierAddDraft.phone}
+                        onChange={(e) => setChannelTierAddDraft((d) => ({ ...d, phone: e.target.value }))}
+                        placeholder="+15551234567"
+                        className="font-mono text-[13px]"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs">
+                      Name (label for you)
+                      <Input
+                        value={channelTierAddDraft.name}
+                        onChange={(e) => setChannelTierAddDraft((d) => ({ ...d, name: e.target.value }))}
+                        placeholder="Alex"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs">
+                      Tier
+                      <Select
+                        value={channelTierAddDraft.tier}
+                        onChange={(e) =>
+                          setChannelTierAddDraft((d) => ({ ...d, tier: e.target.value as AccessTier }))
+                        }
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="co_admin">Co-Admin</option>
+                        <option value="restricted">Restricted</option>
+                        <option value="guest">Guest</option>
+                      </Select>
+                    </label>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button type="button" tone="green" onClick={() => void confirmAddChannelTier()}>
+                        Add and save
+                      </Button>
                     </div>
-                  </div>
-                ))}
+                  </Card>
+                </div>
               </div>
-            </div>
+            ) : null}
+            {channelTierEdit ? (
+              <div
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="channel-tier-edit-title"
+                onClick={() => setChannelTierEdit(null)}
+              >
+                <div className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+                  <Card className="flex flex-col gap-3 p-4 shadow-xl">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 id="channel-tier-edit-title" className="text-base font-semibold">
+                        Change tier
+                      </h3>
+                      <Button type="button" tone="neutral" className="h-8 px-2 text-xs" onClick={() => setChannelTierEdit(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                    <label className="grid gap-1 text-xs">
+                      Tier
+                      <Select
+                        value={channelTierEditTier}
+                        onChange={(e) => setChannelTierEditTier(e.target.value as AccessTier)}
+                      >
+                        <option value="admin">Admin</option>
+                        <option value="co_admin">Co-Admin</option>
+                        <option value="restricted">Restricted</option>
+                        <option value="guest">Guest</option>
+                      </Select>
+                    </label>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button type="button" tone="green" onClick={() => void confirmChannelTierEdit()}>
+                        Save
+                      </Button>
+                    </div>
+                  </Card>
+                </div>
+              </div>
+            ) : null}
+            {channelTierNameEdit ? (
+              <div
+                className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="channel-tier-name-edit-title"
+                onClick={() => setChannelTierNameEdit(null)}
+              >
+                <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+                  <Card className="flex flex-col gap-3 p-4 shadow-xl">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 id="channel-tier-name-edit-title" className="text-base font-semibold">
+                        Edit display name
+                      </h3>
+                      <Button type="button" tone="neutral" className="h-8 px-2 text-xs" onClick={() => setChannelTierNameEdit(null)}>
+                        Cancel
+                      </Button>
+                    </div>
+                    <p className="text-[11px] leading-snug text-muted">
+                      Label for this contact in the list. The phone number cannot be changed here. Clear the field to remove the name.
+                    </p>
+                    <label className="grid gap-1 text-xs">
+                      Phone (read-only)
+                      <Input
+                        readOnly
+                        value={
+                          settings.messagingAccess.channelTiers[channelTierNameEdit.channel][channelTierNameEdit.index]?.phone ??
+                          ""
+                        }
+                        className="font-mono text-[13px] text-muted"
+                      />
+                    </label>
+                    <label className="grid gap-1 text-xs">
+                      Name
+                      <Input
+                        value={channelTierNameDraft}
+                        onChange={(e) => setChannelTierNameDraft(e.target.value)}
+                        placeholder="Display name"
+                        maxLength={80}
+                      />
+                    </label>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button type="button" tone="green" onClick={() => void confirmChannelNameEdit()}>
+                        Save
+                      </Button>
+                    </div>
+                  </Card>
+                </div>
+              </div>
+            ) : null}
             <div className="rounded-ui border bg-surface p-3 space-y-2">
               <h3 className="text-sm font-semibold">Tier control (fixed policy)</h3>
               <div className="overflow-auto">
@@ -3144,7 +3462,7 @@ export default function SettingsPage() {
                 </table>
               </div>
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
+            <div className="space-y-3">
               <BridgeGuide title="SignalBridge" item={catalog?.setup?.signalBridge} />
               <BridgeGuide title="WhatsAppBridge" item={catalog?.setup?.whatsAppBridge} />
             </div>
@@ -4876,24 +5194,45 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
       channelTiers: {
         signal: Array.isArray(value?.messagingAccess?.channelTiers?.signal)
           ? value.messagingAccess.channelTiers.signal
-              .map((row) => ({
-                phone: String(row?.phone ?? "").trim(),
-                tier:
+              .map((row) => {
+                const phone = String(row?.phone ?? "").trim();
+                const tier: AccessTier =
                   row?.tier === "admin" || row?.tier === "co_admin" || row?.tier === "restricted" || row?.tier === "guest"
                     ? row.tier
-                    : ("guest" as const)
-              }))
+                    : "guest";
+                const rx = row as { signalUuid?: string; name?: string };
+                const signalUuid =
+                  typeof rx.signalUuid === "string" && rx.signalUuid.trim().length > 0
+                    ? rx.signalUuid.trim().toLowerCase()
+                    : undefined;
+                const name =
+                  typeof rx.name === "string" && rx.name.trim().length > 0 ? rx.name.trim().slice(0, 80) : undefined;
+                return {
+                  phone,
+                  tier,
+                  ...(signalUuid ? { signalUuid } : {}),
+                  ...(name ? { name } : {})
+                };
+              })
               .filter((row) => row.phone.length > 0)
           : DEFAULT_SETTINGS.messagingAccess.channelTiers.signal,
         whatsapp: Array.isArray(value?.messagingAccess?.channelTiers?.whatsapp)
           ? value.messagingAccess.channelTiers.whatsapp
-              .map((row) => ({
-                phone: String(row?.phone ?? "").trim(),
-                tier:
+              .map((row) => {
+                const phone = String(row?.phone ?? "").trim();
+                const tier: AccessTier =
                   row?.tier === "admin" || row?.tier === "co_admin" || row?.tier === "restricted" || row?.tier === "guest"
                     ? row.tier
-                    : ("guest" as const)
-              }))
+                    : "guest";
+                const wx = row as { name?: string };
+                const name =
+                  typeof wx.name === "string" && wx.name.trim().length > 0 ? wx.name.trim().slice(0, 80) : undefined;
+                return {
+                  phone,
+                  tier,
+                  ...(name ? { name } : {})
+                };
+              })
               .filter((row) => row.phone.length > 0)
           : DEFAULT_SETTINGS.messagingAccess.channelTiers.whatsapp
       },

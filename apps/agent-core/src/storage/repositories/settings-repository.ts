@@ -85,8 +85,14 @@ export type AppSettings = {
        * sealed-sender messages from this UUID are matched against this row even though the phone number
        * is hidden on the wire. Auto-populated on the first non-sealed message from a known phone.
        */
-      signal: Array<{ phone: string; signalUuid?: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>;
-      whatsapp: Array<{ phone: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>;
+      signal: Array<{
+        phone: string;
+        signalUuid?: string;
+        /** Display label in admin UIs (optional). */
+        name?: string;
+        tier: "admin" | "co_admin" | "restricted" | "guest";
+      }>;
+      whatsapp: Array<{ phone: string; name?: string; tier: "admin" | "co_admin" | "restricted" | "guest" }>;
     };
     systemAdmins: string[];
     guests: string[];
@@ -353,7 +359,12 @@ export class SettingsRepository {
               ? parsed.messagingAccess.channelTiers.signal
                   .filter((item) => typeof item?.phone === "string")
                   .map((item) => {
-                    const row: { phone: string; signalUuid?: string; tier: "admin" | "co_admin" | "restricted" | "guest" } = {
+                    const row: {
+                      phone: string;
+                      signalUuid?: string;
+                      name?: string;
+                      tier: "admin" | "co_admin" | "restricted" | "guest";
+                    } = {
                       phone: String(item.phone),
                       tier:
                         item.tier === "admin" || item.tier === "co_admin" || item.tier === "restricted" || item.tier === "guest"
@@ -363,19 +374,28 @@ export class SettingsRepository {
                     if (typeof item.signalUuid === "string" && item.signalUuid.trim().length > 0) {
                       row.signalUuid = String(item.signalUuid).trim().toLowerCase();
                     }
+                    if (typeof item.name === "string" && item.name.trim().length > 0) {
+                      row.name = item.name.trim();
+                    }
                     return row;
                   })
               : [],
             whatsapp: Array.isArray(parsed.messagingAccess?.channelTiers?.whatsapp)
               ? parsed.messagingAccess.channelTiers.whatsapp
                   .filter((item) => typeof item?.phone === "string")
-                  .map((item) => ({
-                    phone: String(item.phone),
-                    tier:
-                      item.tier === "admin" || item.tier === "co_admin" || item.tier === "restricted" || item.tier === "guest"
-                        ? item.tier
-                        : "guest"
-                  }))
+                  .map((item) => {
+                    const row: { phone: string; name?: string; tier: "admin" | "co_admin" | "restricted" | "guest" } = {
+                      phone: String(item.phone),
+                      tier:
+                        item.tier === "admin" || item.tier === "co_admin" || item.tier === "restricted" || item.tier === "guest"
+                          ? item.tier
+                          : "guest"
+                    };
+                    if (typeof item.name === "string" && item.name.trim().length > 0) {
+                      row.name = item.name.trim();
+                    }
+                    return row;
+                  })
               : []
           },
           systemAdmins: Array.isArray(parsed.messagingAccess?.systemAdmins)
