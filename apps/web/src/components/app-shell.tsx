@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { IconType } from "react-icons";
 import {
   FaCamera,
@@ -123,9 +123,55 @@ function AppMainColumn({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Sidebar open/closed state survives reloads, agent updates, and tab switches via localStorage.
+ * SSR defaults to "collapsed" so the first paint matches; right after hydration we read the user's
+ * preference and the existing `transition-all` on `<aside>` smoothly opens it if it was open before.
+ * The preference is only written when the user actively toggles, so the initial read can never be
+ * overwritten by a stale render.
+ */
+const NAV_COLLAPSED_STORAGE_KEY = "nova:nav-collapsed";
+
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [navCollapsed, setNavCollapsed] = useState(true);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(NAV_COLLAPSED_STORAGE_KEY);
+      if (stored === "false") {
+        setNavCollapsed(false);
+      } else if (stored === "true") {
+        setNavCollapsed(true);
+      }
+    } catch {
+      // localStorage unavailable (private mode, disabled storage); fall back to default collapsed.
+    }
+  }, []);
+
+  // Cross-tab sync: if the user opens or closes the sidebar in another window of the same browser,
+  // mirror it here so all tabs stay consistent.
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== NAV_COLLAPSED_STORAGE_KEY || event.newValue === null) return;
+      if (event.newValue === "false") setNavCollapsed(false);
+      else if (event.newValue === "true") setNavCollapsed(true);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  const toggleNavCollapsed = useCallback(() => {
+    setNavCollapsed((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(NAV_COLLAPSED_STORAGE_KEY, next ? "true" : "false");
+      } catch {
+        // Persistence is best-effort; UI state still flips even if storage is blocked.
+      }
+      return next;
+    });
+  }, []);
 
   return (
     <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-gradient-to-br from-surface via-surface to-surface2">
@@ -142,7 +188,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <button
             type="button"
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-ui border bg-surface2 text-[10px]"
-            onClick={() => setNavCollapsed((prev) => !prev)}
+            onClick={toggleNavCollapsed}
             title={navCollapsed ? "Expand menu" : "Collapse menu"}
           >
             {navCollapsed ? <FaChevronRight className="h-3 w-3" /> : <FaChevronLeft className="h-3 w-3" />}
