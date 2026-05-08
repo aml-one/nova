@@ -1,0 +1,21 @@
+---
+description: Nova big-picture + ops context (read first)
+alwaysApply: true
+---
+
+# Nova: read this first
+
+Before making changes or giving instructions about how Nova is set up, how to start it, or how to operate the macOS service/SSH, **read**:
+
+- `docs/CURSOR_AGENT_ONBOARDING.md`
+
+## Non-negotiables
+
+- Treat `docs/CURSOR_AGENT_ONBOARDING.md` as the source of truth for the current machine’s Nova wiring (service label, ports, env vars, log paths).
+- Prefer **explicit** `NOVA_AGENT_API_URL` for WebUI → agent-core; when web + agent are on the same host, use **`http://127.0.0.1:8787`** or set **`NOVA_AGENT_API_COLOCATED=1`** so `http://nova:8787` in `.env` is rewritten for Node (mDNS `nova` is not always resolvable from `fetch`).
+- On macOS service installs, remember the LaunchDaemon label is `com.nova.localstack` and restart usually requires interactive sudo on the Mac:
+  - `sudo launchctl kickstart -k system/com.nova.localstack`
+
+## When you’re unsure
+
+- Link to `docs/CURSOR_AGENT_ONBOARDING.md` and `docs/install-nova-complete-guide.md` rather than guessing.

@@ -1,4 +1,4 @@
-import { getAgentBaseUrl, getAgentBaseUrlDebug, type AgentBaseUrlDebug } from "./agent-core";
+import { fetchFromAgent, getAgentBaseUrlDebug, type AgentBaseUrlDebug } from "./agent-core";
 
 /**
  * Interpret agent `/v1/auth/state` loginEnabled (handles occasional stringly JSON).
@@ -76,9 +76,8 @@ export async function fetchAgentAuthState(request: Request): Promise<AgentAuthSt
   };
   try {
     const debug = getAgentBaseUrlDebug(request);
-    const res = await fetch(`${debug.baseUrl}/v1/auth/state`, {
-      headers: { accept: "application/json" },
-      cache: "no-store"
+    const res = await fetchFromAgent(request, "/v1/auth/state", {
+      headers: { accept: "application/json" }
     });
     if (!res.ok) {
       if (envLogin !== undefined) {

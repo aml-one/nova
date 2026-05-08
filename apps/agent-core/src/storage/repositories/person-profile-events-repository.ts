@@ -43,17 +43,18 @@ export class PersonProfileEventsRepository {
       created_at?: string;
     }>;
     return rows
-      .map((r) => {
+      .map((r): PersonProfileEvent | undefined => {
         if (!r.id || !r.person_id || !r.event_type) return undefined;
+        const createdAt = typeof r.created_at === "string" ? r.created_at : undefined;
         return {
           id: r.id,
           personId: r.person_id,
           eventType: r.event_type,
           payload: safeParseJson(r.payload_json) ?? {},
-          createdAt: r.created_at
-        } satisfies PersonProfileEvent;
+          ...(createdAt ? { createdAt } : {})
+        };
       })
-      .filter((v): v is PersonProfileEvent => Boolean(v));
+      .filter(isDefined);
   }
 }
 
@@ -68,5 +69,9 @@ function safeParseJson(value: string | undefined): Record<string, unknown> | und
   } catch {
     return undefined;
   }
+}
+
+function isDefined<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
 }
 

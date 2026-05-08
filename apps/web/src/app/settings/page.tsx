@@ -251,6 +251,10 @@ type WhatsAppWebBridgeStatus = {
   connected?: boolean;
   startedAt?: string;
   lastEventAt?: string;
+  lastDisconnectCode?: number;
+  lastDisconnectMessage?: string;
+  lastConnection?: string;
+  authDir?: string;
 };
 type SshTestResult = { ok: boolean; detail: string } | null;
 

@@ -51,6 +51,8 @@ Local-first headless AI agent framework for macOS, Windows, and Ubuntu.
 
 For a **long-form, step-by-step** guide (Nova core, optional providers, SentiCore / Orpheus / MemoryBear, offline repo backups, **disaster recovery**, **backup/restore**, and troubleshooting), see **[docs/install-nova-complete-guide.md](docs/install-nova-complete-guide.md)**.
 
+**Cursor / automation:** operational layout, macOS LaunchDaemon, SSH, and env vars (including `NOVA_AGENT_API_URL`) are summarized in **[docs/CURSOR_AGENT_ONBOARDING.md](docs/CURSOR_AGENT_ONBOARDING.md)** — read that first for “how is Nova wired up on this machine.”
+
 ### Prerequisites (all platforms)
 - Git 2.40+
 - Node.js 22 LTS (recommended)

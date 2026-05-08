@@ -91,7 +91,8 @@ export class WhatsAppChannelAdapter {
       return;
     }
 
-    const blob = new Blob([audio], { type: mimeType || "audio/ogg" });
+    // Avoid TS lib.dom BlobPart incompatibility with Node Buffer's ArrayBufferLike typing.
+    const blob = new Blob([new Uint8Array(audio)], { type: mimeType || "audio/ogg" });
     const form = new FormData();
     form.append("messaging_product", "whatsapp");
     form.append("type", "audio");

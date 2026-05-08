@@ -14,8 +14,9 @@ export NOVA_WEB_HTTPS=true
 export NOVA_WEB_STANDARD_PORTS=1
 export NOVA_WEB_TLS_SAN="${TLS_SAN}"
 
-# Make WebUI routing deterministic behind reverse proxies.
-# This prevents `x-forwarded-host` / `host` inference changes from breaking WebUI after updates.
-export NOVA_AGENT_API_URL="${NOVA_AGENT_API_URL:-http://nova:8787}"
+# WebUI (Next.js) and agent-core run on the same Mac here; Node must reach agent-core via loopback.
+# (A hostname like `nova` is for browsers on the LAN — it is not always resolvable from Node's fetch.)
+export NOVA_AGENT_API_COLOCATED="${NOVA_AGENT_API_COLOCATED:-1}"
+export NOVA_AGENT_API_URL="${NOVA_AGENT_API_URL:-http://127.0.0.1:8787}"
 
 exec /bin/bash "${ROOT_DIR}/scripts/start-local.sh"

@@ -6,6 +6,32 @@ function agentListenPort(): string {
   return process.env.NOVA_AGENT_PORT?.trim() || "8787";
 }
 
+/**
+ * When WebUI and agent-core run on the same host (typical `start-local.sh` / macOS LaunchDaemon),
+ * `NOVA_AGENT_API_URL` is sometimes set to `http://nova:8787` for browser-friendly naming — but
+ * Node's `fetch` may not resolve the mDNS/LAN name `nova`, while `127.0.0.1` always works.
+ * Enable with `NOVA_AGENT_API_COLOCATED=1` (set by `scripts/start-local-macos-service.sh`).
+ */
+function applyColocatedHostRewrite(baseUrl: string, port: string): string {
+  const enabled =
+    process.env.NOVA_AGENT_API_COLOCATED === "1" ||
+    process.env.NOVA_AGENT_API_COLOCATED === "true" ||
+    process.env.NOVA_AGENT_API_COLOCATED === "yes";
+  if (!enabled) {
+    return baseUrl;
+  }
+  try {
+    const u = new URL(baseUrl);
+    if (u.hostname !== "nova" && u.hostname !== "nova.local") {
+      return baseUrl;
+    }
+    const effectivePort = u.port || port;
+    return `http://127.0.0.1:${effectivePort}`;
+  } catch {
+    return baseUrl;
+  }
+}
+
 export type AgentBaseUrlDebug = {
   baseUrl: string;
   source: "explicit_env" | "infer_from_host" | "infer_disabled" | "fallback_localhost";
@@ -52,7 +78,8 @@ export function getAgentBaseUrlDebug(request?: Request): AgentBaseUrlDebug {
   const port = agentListenPort();
   const explicit = process.env.NOVA_AGENT_API_URL?.trim();
   if (explicit) {
-    return { baseUrl: stripTrailingSlashes(explicit), source: "explicit_env", port };
+    const baseUrl = applyColocatedHostRewrite(stripTrailingSlashes(explicit), port);
+    return { baseUrl, source: "explicit_env", port };
   }
 
   const inferDisabled =
@@ -73,8 +100,9 @@ export function getAgentBaseUrlDebug(request?: Request): AgentBaseUrlDebug {
       }
       const usedHeader: AgentBaseUrlDebug["usedHeader"] =
         candidate === forwardedHost ? "x-forwarded-host" : "host";
+      const inferredBase = `http://${hostname}:${port}`;
       return {
-        baseUrl: `http://${hostname}:${port}`,
+        baseUrl: applyColocatedHostRewrite(inferredBase, port),
         source: "infer_from_host",
         usedHeader,
         forwardedHost,
@@ -85,6 +113,34 @@ export function getAgentBaseUrlDebug(request?: Request): AgentBaseUrlDebug {
   }
 
   return { baseUrl: `http://127.0.0.1:${port}`, source: "fallback_localhost", port };
+}
+
+/**
+ * Server-side fetch to agent-core; on network failure, retry once on loopback (same port).
+ * Does not retry on HTTP error responses.
+ */
+export async function fetchFromAgent(
+  request: Request | undefined,
+  path: string,
+  init?: RequestInit
+): Promise<Response> {
+  const debug = getAgentBaseUrlDebug(request);
+  const suffix = path.startsWith("/") ? path : `/${path}`;
+  const primary = `${stripTrailingSlashes(debug.baseUrl)}${suffix}`;
+  const loopback = `http://127.0.0.1:${debug.port}${suffix}`;
+  const merged: RequestInit = { cache: "no-store", ...init };
+  try {
+    return await fetch(primary, merged);
+  } catch (first) {
+    if (stripTrailingSlashes(debug.baseUrl) === `http://127.0.0.1:${debug.port}`) {
+      throw first;
+    }
+    try {
+      return await fetch(loopback, merged);
+    } catch {
+      throw first;
+    }
+  }
 }
 
 export function getAgentHeaders(request?: Request, includeJsonContentType = false): HeadersInit {

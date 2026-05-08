@@ -26,5 +26,20 @@ describe("getAgentBaseUrlDebug", () => {
       process.env.NOVA_AGENT_API_URL = prev;
     }
   });
+
+  it("rewrites hostname nova to loopback when NOVA_AGENT_API_COLOCATED=1", () => {
+    const prevUrl = process.env.NOVA_AGENT_API_URL;
+    const prevCol = process.env.NOVA_AGENT_API_COLOCATED;
+    process.env.NOVA_AGENT_API_URL = "http://nova:8787";
+    process.env.NOVA_AGENT_API_COLOCATED = "1";
+    try {
+      const out = getAgentBaseUrlDebug(undefined);
+      expect(out.baseUrl).toBe("http://127.0.0.1:8787");
+      expect(out.source).toBe("explicit_env");
+    } finally {
+      process.env.NOVA_AGENT_API_URL = prevUrl;
+      process.env.NOVA_AGENT_API_COLOCATED = prevCol;
+    }
+  });
 });
 

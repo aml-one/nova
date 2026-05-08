@@ -38,12 +38,19 @@ export class PersonIdentitiesRepository {
       created_at?: string;
     }>;
     return rows
-      .map((r) => {
+      .map((r): PersonIdentityRecord | undefined => {
         if (typeof r.id !== "number" || !r.person_id || !r.kind || !r.value) return undefined;
         if (!isKind(r.kind)) return undefined;
-        return { id: r.id, personId: r.person_id, kind: r.kind, value: r.value, createdAt: r.created_at } satisfies PersonIdentityRecord;
+        const createdAt = typeof r.created_at === "string" ? r.created_at : undefined;
+        return {
+          id: r.id,
+          personId: r.person_id,
+          kind: r.kind,
+          value: r.value,
+          ...(createdAt ? { createdAt } : {})
+        };
       })
-      .filter((v): v is PersonIdentityRecord => Boolean(v));
+      .filter(isDefined);
   }
 
   upsertIdentity(personId: string, kind: PersonIdentityKind, value: string): { ok: true } | { ok: false; reason: "conflict" } {
@@ -72,5 +79,9 @@ export class PersonIdentitiesRepository {
 
 function isKind(value: string): value is PersonIdentityKind {
   return value === "web_user_id" || value === "phone_e164" || value === "signal_uuid" || value === "whatsapp_phone_e164";
+}
+
+function isDefined<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
 }
 

@@ -119,13 +119,19 @@ export class PeopleRepository {
       .all(safeLimit, safeOffset) as Array<Record<string, unknown>>;
 
     return rows
-      .map((row) => {
+      .map((row): PersonRecord | undefined => {
         const id = typeof row.id === "string" ? row.id : "";
         if (!id) return undefined;
+
+        const displayName = typeof row.display_name === "string" ? row.display_name : undefined;
+        const aboutNotes = typeof row.about_notes === "string" ? row.about_notes : undefined;
+        const createdAt = typeof row.created_at === "string" ? row.created_at : undefined;
+        const updatedAt = typeof row.updated_at === "string" ? row.updated_at : undefined;
+
         return {
           id,
-          displayName: typeof row.display_name === "string" ? row.display_name : undefined,
-          aboutNotes: typeof row.about_notes === "string" ? row.about_notes : undefined,
+          ...(displayName ? { displayName } : {}),
+          ...(aboutNotes ? { aboutNotes } : {}),
           rating: clampInt((row.rating as number | null | undefined) ?? 50, 0, 100),
           interestScore: clampNumber((row.interest_score as number | null | undefined) ?? 0.5, 0, 1),
           rudenessScore: clampNumber((row.rudeness_score as number | null | undefined) ?? 0, 0, 1),
@@ -133,11 +139,11 @@ export class PeopleRepository {
           topics: parseTopics((row.topics_json as string | null | undefined) ?? null),
           optedOut: Boolean(row.opted_out),
           blocked: Boolean(row.blocked),
-          createdAt: typeof row.created_at === "string" ? row.created_at : undefined,
-          updatedAt: typeof row.updated_at === "string" ? row.updated_at : undefined
-        } satisfies PersonRecord;
+          ...(createdAt ? { createdAt } : {}),
+          ...(updatedAt ? { updatedAt } : {})
+        };
       })
-      .filter((v): v is PersonRecord => Boolean(v));
+      .filter(isDefined);
   }
 
   upsert(person: PersonRecord): void {
@@ -205,5 +211,9 @@ function clampInt(value: number, min: number, max: number): number {
 function clampNumber(value: number, min: number, max: number): number {
   const v = Number.isFinite(value) ? value : min;
   return Math.max(min, Math.min(max, v));
+}
+
+function isDefined<T>(value: T | null | undefined): value is T {
+  return value !== null && value !== undefined;
 }
 
