@@ -4674,6 +4674,16 @@ function extractAudioBytesFromPreview(preview: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Short label for channel-debug peer (E.164, Signal UUID, or raw). */
+function formatChannelDebugPeerLabel(peer: string): string {
+  const p = peer.trim();
+  if (!p) return "Unknown peer";
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(p)) {
+    return `UUID ${p.slice(0, 8)}…`;
+  }
+  return p;
+}
+
 /**
  * Collapses transport-level rows into a chat-like timeline. Returns newest-first to match the
  * existing trace order. Heuristics:
@@ -4702,6 +4712,7 @@ function buildChannelConversation(entries: ChannelDebugEntry[]): ConversationIte
       has("deduped_other_transport") ||
       has("parsed_zero_text_dm_or_receipt") ||
       has("parsed_zero_messages") ||
+      has("parsed_zero_inbound_messages") ||
       has("parsed_zero_messages_throttled") ||
       has("receive_ws_connected")
     ) {
@@ -4883,12 +4894,15 @@ function ConversationRow({ item }: { item: ConversationItem }) {
         : item.reachedNova
           ? { label: "Nova handled", tone: "text-emerald-700 dark:text-emerald-400" }
           : { label: "Nova did not handle", tone: "text-amber-700 dark:text-amber-400" };
+    const peerTitle = item.peer.trim() ? item.peer : "";
     return (
       <div className="rounded-md border border-blue-500/40 bg-blue-500/[0.08] px-2 py-1.5 text-[12px] leading-snug dark:bg-blue-500/15">
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="font-mono text-[11px] text-muted">{time}</span>
-            <strong>You</strong>
+            <strong className="max-w-[min(280px,100%)] truncate" title={peerTitle || undefined}>
+              From {formatChannelDebugPeerLabel(item.peer)}
+            </strong>
             <span className="text-[11px] text-muted capitalize">· {item.channel}</span>
           </div>
           {novaStatus ? (
@@ -4908,6 +4922,11 @@ function ConversationRow({ item }: { item: ConversationItem }) {
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
             <span className="font-mono text-[11px] text-muted">{time}</span>
             <strong>Nova</strong>
+            {item.peer.trim() ? (
+              <span className="max-w-[min(220px,100%)] truncate text-[11px] font-normal text-muted" title={item.peer}>
+                → {formatChannelDebugPeerLabel(item.peer)}
+              </span>
+            ) : null}
             <span className="text-[11px] text-muted capitalize">· {item.channel}</span>
           </div>
           <div className="flex shrink-0 items-center gap-1">

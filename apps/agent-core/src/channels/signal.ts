@@ -18,10 +18,6 @@ type SignalEnvelopeLike = {
   dataMessage?: DataMessageLike;
   /** Edited-message wrapper seen on some envelopes. */
   editMessage?: { dataMessage?: DataMessageLike };
-  /** Linked-device / sync payloads may carry text under syncMessage. */
-  syncMessage?: {
-    sentMessage?: DataMessageLike;
-  };
 };
 
 type SignalWebhookPayload = {
@@ -83,10 +79,9 @@ export class SignalChannelAdapter {
     const uuid = asSignalUuid(envelope?.sourceUuid) ?? asSignalUuid(envelope?.source);
     const peer = phone || uuid || "";
     if (!peer) return [];
-    const dm =
-      envelope?.dataMessage ??
-      envelope?.editMessage?.dataMessage ??
-      envelope?.syncMessage?.sentMessage;
+    // Only real inbound DMs — do not use `syncMessage.sentMessage` (linked-device echo of *your*
+    // own sends); treating it as inbound mis-attributes the peer and can look like "you" messaged yourself.
+    const dm = envelope?.dataMessage ?? envelope?.editMessage?.dataMessage;
     const text = textFromDataMessage(dm) || trimOrEmpty(parsed.message);
     if (!text) return [];
     const envelopeTimestamp =

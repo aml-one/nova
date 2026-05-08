@@ -133,12 +133,24 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   registerCopilotSettingsSource(() => options.settings.get());
   registerOllamaSettingsSource(() => options.settings.get());
   const port = options.port ?? Number(process.env.NOVA_AGENT_PORT ?? "8787");
-  const wa = new WhatsAppChannelAdapter(() => options.settings.get());
+  const voice = new VoiceService(() => options.settings.get(), () => options.orchestrator.getEmotionState());
+  const whatsappInboundTranscribe = async (bytes: Buffer, mime?: string): Promise<string> => {
+    if (!isVoiceSttConfigured()) {
+      return "[Voice note — speech-to-text is not configured on agent-core (OPENAI_API_KEY or NOVA_STT_COMMAND).]";
+    }
+    try {
+      return await voice.transcribeAudioBytes({ bytes, mimeType: mime });
+    } catch (err) {
+      return `[Voice note — transcription failed: ${err instanceof Error ? err.message : String(err)}]`;
+    }
+  };
+  const wa = new WhatsAppChannelAdapter(() => options.settings.get(), {
+    transcribeInboundVoice: whatsappInboundTranscribe
+  });
   const signal = new SignalChannelAdapter(() => options.settings.get());
   const router = new ChannelRouter();
   const dispatcher = new OutboundDispatcher(() => options.settings.get());
   const logger = new Logger();
-  const voice = new VoiceService(() => options.settings.get(), () => options.orchestrator.getEmotionState());
   const rag = new RagService();
   const backup = new BackupService();
   const identityBackup = new IdentityBackupService();
@@ -235,7 +247,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
   };
   if ((process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase() === "baileys") {
-    void startWhatsAppWebBridge(baileysInboundHandler).catch((error) => {
+    void startWhatsAppWebBridge(baileysInboundHandler, {
+      transcribeInboundVoice: whatsappInboundTranscribe
+    }).catch((error) => {
       console.warn("[channels] Could not auto-start WhatsApp Web bridge:", error instanceof Error ? error.message : String(error));
     });
   }
@@ -1062,7 +1076,8 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       if (request.method === "POST" && parsedUrl.pathname === "/v1/setup/channels/whatsapp/web/start") {
         const payload = (await readJson(request)) as { forceNewPairing?: boolean };
         let status = await startWhatsAppWebBridge(baileysInboundHandler, {
-          resetAuth: payload.forceNewPairing === true
+          resetAuth: payload.forceNewPairing === true,
+          transcribeInboundVoice: whatsappInboundTranscribe
         });
         // Give Baileys a brief window to emit the QR update so the UI can render immediately.
         const deadline = Date.now() + 6000;
@@ -1687,9 +1702,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
             correlationId,
             peer: "",
             textPreview: "",
-            trace: ["webhook_received", "parsed_zero_text_messages"],
+            trace: ["webhook_received", "parsed_zero_inbound_messages"],
             reachedNova: false,
-            error: "No inbound text messages in payload (typing/status-only or unsupported shape)"
+            error: "No inbound text/voice messages in payload (typing/status-only or unsupported shape)"
           });
         }
         for (const message of messages) {

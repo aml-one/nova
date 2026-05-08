@@ -3,11 +3,13 @@ import { resolve } from "node:path";
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  downloadMediaMessage,
   useMultiFileAuthState,
   type WASocket
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import { resolveWhatsAppInboundSenderJid } from "./whatsapp-sender-jid.js";
+import { normalizeWhatsAppRecipientJid, tryEncodeVoicePttOggOpus } from "./whatsapp-voice-utils.js";
 
 /** Optional override for bundled WA Web client version `[major, minor, build]`, e.g. `2,3000,1030100000` */
 function waWebVersionFromEnv(): [number, number, number] | undefined {
@@ -23,6 +25,12 @@ function waWebVersionFromEnv(): [number, number, number] | undefined {
 type BridgeState = "idle" | "starting" | "qr" | "connected" | "reconnecting" | "logged_out" | "error";
 
 type InboundHandler = (message: { from: string; text: string }) => Promise<void> | void;
+
+export type WhatsAppWebBridgeStartOpts = {
+  resetAuth?: boolean;
+  /** When set, inbound voice/audio notes are downloaded and transcribed to text before dispatch. */
+  transcribeInboundVoice?: (bytes: Buffer, mimeType?: string) => Promise<string>;
+};
 
 type Status = {
   state: BridgeState;
@@ -45,6 +53,8 @@ class WhatsAppWebBridge {
   private startedAt = "";
   private lastEventAt = "";
   private inboundHandler: InboundHandler | null = null;
+  /** Preserved across reconnect so voice STT + inbound voice handling survive socket recycle. */
+  private lastStartOpts: WhatsAppWebBridgeStartOpts | undefined;
   private lastDisconnectCode: number | undefined;
   private lastDisconnectMessage: string | undefined;
   private lastConnection: string | undefined;
@@ -54,8 +64,12 @@ class WhatsAppWebBridge {
     return resolve(process.cwd(), "data", "state", "whatsapp-baileys-auth");
   }
 
-  async start(inboundHandler: InboundHandler, opts?: { resetAuth?: boolean }): Promise<Status> {
+  async start(inboundHandler: InboundHandler, opts?: WhatsAppWebBridgeStartOpts): Promise<Status> {
     this.inboundHandler = inboundHandler;
+    if (opts !== undefined) {
+      const { resetAuth: _resetConsumedHere, ...persist } = opts;
+      this.lastStartOpts = { ...(this.lastStartOpts ?? {}), ...persist };
+    }
 
     if (opts?.resetAuth === true) {
       await this.stop();
@@ -187,7 +201,7 @@ class WhatsAppWebBridge {
         this.detail = loggedOut ? "Logged out. Re-scan QR to reconnect." : "Connection closed. Reconnecting...";
         this.socket = null;
         if (!loggedOut && stillActive) {
-          void this.start(inboundHandler).catch((error) => {
+          void this.start(this.inboundHandler!, this.lastStartOpts ?? {}).catch((error) => {
             this.state = "error";
             this.detail = error instanceof Error ? error.message : "Bridge reconnect failed";
             this.touch();
@@ -203,15 +217,49 @@ class WhatsAppWebBridge {
       for (const msg of evt.messages) {
         if (msg.key.fromMe) continue;
         const rawRemote = msg.key.remoteJid ?? "";
-        const text =
-          msg.message?.conversation?.trim() ||
-          msg.message?.extendedTextMessage?.text?.trim() ||
+        if (!rawRemote) continue;
+
+        const base = msg.message;
+        const inner = base?.ephemeralMessage?.message;
+        let text =
+          base?.conversation?.trim() ||
+          base?.extendedTextMessage?.text?.trim() ||
+          inner?.conversation?.trim() ||
+          inner?.extendedTextMessage?.text?.trim() ||
           "";
-        if (!rawRemote || !text) continue;
+        const audioMessage = base?.audioMessage || inner?.audioMessage;
+
+        if (audioMessage) {
+          const transcribe = this.lastStartOpts?.transcribeInboundVoice;
+          if (transcribe) {
+            try {
+              const buf = await downloadMediaMessage(
+                msg,
+                "buffer",
+                {},
+                {
+                  logger,
+                  reuploadRequest: (m) => sock.updateMediaMessage(m as never)
+                }
+              );
+              const mime = (audioMessage.mimetype || "audio/ogg").toString();
+              const transcript = (await transcribe(Buffer.from(buf as Uint8Array), mime)).trim();
+              text = [text, transcript].filter(Boolean).join("\n");
+            } catch {
+              text = text || "[Voice note — could not download or transcribe.]";
+            }
+          } else {
+            text =
+              text ||
+              "[Voice note — speech-to-text is not configured on agent-core (set OPENAI_API_KEY or NOVA_STT_COMMAND).]";
+          }
+        }
+
+        if (!text.trim()) continue;
         try {
           const from = await resolveWhatsAppInboundSenderJid(msg, sock);
           if (!from) continue;
-          await this.inboundHandler?.({ from, text });
+          await this.inboundHandler?.({ from, text: text.trim() });
         } catch {
           // Keep bridge alive even if orchestration fails.
         }
@@ -249,7 +297,7 @@ class WhatsAppWebBridge {
     if (!sock || this.state !== "connected") {
       throw new Error("WhatsApp Web bridge is not connected");
     }
-    const jid = to.includes("@") ? to : `${to.replace(/\D/g, "")}@s.whatsapp.net`;
+    const jid = normalizeWhatsAppRecipientJid(to);
     await sock.sendMessage(jid, { text: text.slice(0, 4096) });
   }
 
@@ -258,8 +306,11 @@ class WhatsAppWebBridge {
     if (!sock || this.state !== "connected") {
       throw new Error("WhatsApp Web bridge is not connected");
     }
-    const jid = to.includes("@") ? to : `${to.replace(/\D/g, "")}@s.whatsapp.net`;
-    await sock.sendMessage(jid, { audio, mimetype: mimeType, ptt: true });
+    const jid = normalizeWhatsAppRecipientJid(to);
+    const converted = tryEncodeVoicePttOggOpus(audio, mimeType);
+    const payload = converted ?? audio;
+    const mimetype = converted ? "audio/ogg; codecs=opus" : mimeType || "audio/wav";
+    await sock.sendMessage(jid, { audio: payload, mimetype, ptt: true });
   }
 
   getStatus(): Status {
@@ -286,7 +337,7 @@ const globalBridge = new WhatsAppWebBridge();
 
 export async function startWhatsAppWebBridge(
   inboundHandler: InboundHandler,
-  opts?: { resetAuth?: boolean }
+  opts?: WhatsAppWebBridgeStartOpts
 ): Promise<Status> {
   return globalBridge.start(inboundHandler, opts);
 }
