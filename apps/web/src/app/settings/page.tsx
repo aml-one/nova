@@ -3069,11 +3069,16 @@ export default function SettingsPage() {
                     </div>
                     <div className="space-y-1.5">
                       {settings.messagingAccess.channelTiers[channel].map((row, idx) => (
-                        <div key={`${channel}-${idx}`} className="grid grid-cols-[1fr_130px_auto] gap-1.5">
+                        <div
+                          key={`${channel}-${idx}`}
+                          className="grid grid-cols-1 gap-1.5 sm:grid-cols-[minmax(14rem,1fr)_130px_auto] sm:items-center"
+                        >
                           <Input
                             value={row.phone}
                             onChange={(e) => updateChannelTier(channel, idx, { phone: e.target.value })}
                             placeholder="+15551234567"
+                            title={row.phone.trim() || "E.164 phone number"}
+                            className="min-w-0 font-mono text-[13px]"
                           />
                           <Select
                             value={row.tier}
