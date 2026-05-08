@@ -68,6 +68,16 @@ describe("stripOrpheusSpeechCues", () => {
   it("collapses double spaces left by removed cues", () => {
     expect(stripOrpheusSpeechCues("Hello <sigh> world")).toBe("Hello world");
   });
+
+  it("regression: cleans the exact phrase the user reported leaking into Signal", () => {
+    expect(
+      stripOrpheusSpeechCues(
+        "You're really committed to this greeting marathon, aren't you? <chuckle> I'm still here, I promise. What's the actual plan?"
+      )
+    ).toBe(
+      "You're really committed to this greeting marathon, aren't you? I'm still here, I promise. What's the actual plan?"
+    );
+  });
 });
 
 describe("prepareChatTextForSpeech", () => {
