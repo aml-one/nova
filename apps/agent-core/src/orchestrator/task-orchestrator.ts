@@ -286,6 +286,11 @@ const WHATSAPP_SIGNAL_REPLY_FORMAT =
   "No bullet lists of Context/Goal/Identity/Tone/Constraints, no 'User says:' lines, no rehearsal or alternate drafts, no 'Final polish' labels, no step-by-step planning visible to the user. " +
   "Think silently if needed; the visible reply must read like a normal text.";
 
+const SIGNAL_WALKIE_CALL_HINT =
+  "Signal walkie-talkie / scheduled callback: the user is in a short spoken-style exchange using voice notes (not a live PSTN call). " +
+  "Keep replies brief and natural for speech—usually one to three sentences unless they asked for detail. " +
+  "Do not mention phone carriers, SIP, or Signal native voice-call APIs.";
+
 function userMessageTargetsNovaIdentityBio(text: string): boolean {
   const slice = text.trim().slice(0, 400);
   return /\b(tell me (something )?about yourself|tell me about you\b|something about yourself|who are you|what are you|describe yourself|introduce yourself)\b/i.test(
@@ -398,6 +403,10 @@ export class TaskOrchestrator {
     onToken?: (token: string) => void;
     /** Optional UI phases for streaming clients (e.g. SSE `activity` events). */
     onActivity?: (evt: { kind: string; phase: "start" | "end" }) => void;
+    /** Signal: user is in a walkie-talkie voice-note session (or first voice note opened it). */
+    signalWalkieCall?: boolean;
+    /** Signal: inbound turn came from a transcribed voice note. */
+    signalInboundVoiceNote?: boolean;
   }): Promise<string> {
     this.inFlightCount += 1;
     this.lastActivityAt = Date.now();
@@ -1185,6 +1194,16 @@ export class TaskOrchestrator {
       ...(input.channel === "whatsapp" || input.channel === "signal"
         ? ([{ role: "system" as const, content: WHATSAPP_SIGNAL_REPLY_FORMAT }] as const)
         : []),
+      ...(input.channel === "signal" && (input.signalWalkieCall || input.signalInboundVoiceNote)
+        ? ([
+            {
+              role: "system" as const,
+              content:
+                SIGNAL_WALKIE_CALL_HINT +
+                (input.signalInboundVoiceNote ? " The user's last turn was a transcribed voice note." : "")
+            }
+          ] as const)
+        : []),
       ...memoryContext,
       ...(cognitiveCoreBlock.trim()
         ? ([{ role: "system" as const, content: cognitiveCoreBlock.trim() }] as const)
@@ -1295,6 +1314,16 @@ export class TaskOrchestrator {
           ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
           ...(input.channel === "whatsapp" || input.channel === "signal"
             ? ([{ role: "system" as const, content: WHATSAPP_SIGNAL_REPLY_FORMAT }] as const)
+            : []),
+          ...(input.channel === "signal" && (input.signalWalkieCall || input.signalInboundVoiceNote)
+            ? ([
+                {
+                  role: "system" as const,
+                  content:
+                    SIGNAL_WALKIE_CALL_HINT +
+                    (input.signalInboundVoiceNote ? " The user's last turn was a transcribed voice note." : "")
+                }
+              ] as const)
             : []),
           ...(compactMem as ChatMessage[]),
           ...(cognitiveCoreBlock.trim()

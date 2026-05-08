@@ -11,6 +11,17 @@ import { resolveChannelAccess } from "../security/phone-access.js";
 import { previewChannelText, pushChannelDebug } from "./channel-debug-log.js";
 import { getDatabase } from "../storage/sqlite.js";
 import { stripOrpheusSpeechCues } from "../voice/tts-text.js";
+import { insertSignalDeferredRing } from "./signal-deferred-rings.js";
+import {
+  isSignalHangupCommand,
+  parseNaturalLanguageCallMe,
+  parseSignalWalkieCallCommand,
+  SIGNAL_WALKIE_GREETING,
+  signalWalkieCallEnd,
+  signalWalkieCallIsActive,
+  signalWalkieCallRefresh,
+  signalWalkieCallStart
+} from "./signal-walkie-call-session.js";
 
 export type SignalInboundTransport = "webhook" | "receive_ws";
 
@@ -162,14 +173,76 @@ export async function dispatchSignalInboundMessages(
       if (typeof typingHeartbeat.unref === "function") typingHeartbeat.unref();
       let reply: string;
       try {
-        reply = await deps.orchestrator.handleChannelMessage({
-          channel: "signal",
-          phoneNumber: message.phoneNumber,
-          signalUuid: message.signalUuid,
-          text: message.text,
-          correlationId: msgCorr,
-          accessProfile
-        });
+        const voiceNote = Boolean(message.signalInboundVoiceNote);
+        if (isSignalHangupCommand(message.text)) {
+          signalWalkieCallEnd(message.from);
+          reply =
+            "Call ended. Message me anytime—or send /call for another walkie-style voice session. (Signal still uses voice notes here, not a live phone line.)";
+          trace.push("walkie_hangup");
+        } else {
+          const nlCall = parseNaturalLanguageCallMe(message.text);
+          if (nlCall?.kind === "immediate") {
+            signalWalkieCallStart(message.from);
+            reply = SIGNAL_WALKIE_GREETING;
+            trace.push("walkie_nl_immediate");
+          } else if (nlCall?.kind === "in_ms") {
+            const whenMs = Date.now() + nlCall.delayMs;
+            insertSignalDeferredRing({
+              recipient: message.from,
+              fireAtMs: whenMs,
+              note: nlCall.label
+            });
+            reply = `Got it — I'll reach out around ${new Date(whenMs).toLocaleString()} (${nlCall.label}) with my walkie greeting on Signal. Say /hangup if you change your mind.`;
+            trace.push("walkie_scheduled_delay");
+          } else if (nlCall?.kind === "at") {
+            insertSignalDeferredRing({
+              recipient: message.from,
+              fireAtMs: nlCall.whenMs,
+              note: nlCall.label
+            });
+            reply = `Got it — I'll reach out around ${new Date(nlCall.whenMs).toLocaleString()} (${nlCall.label}) with my walkie greeting on Signal. Say /hangup if you change your mind.`;
+            trace.push("walkie_scheduled_at");
+          } else {
+            const callCmd = parseSignalWalkieCallCommand(message.text);
+            if (callCmd) {
+              signalWalkieCallStart(message.from);
+              if (callCmd.remainder.length > 0) {
+                reply = await deps.orchestrator.handleChannelMessage({
+                  channel: "signal",
+                  phoneNumber: message.phoneNumber,
+                  signalUuid: message.signalUuid,
+                  text: callCmd.remainder,
+                  correlationId: msgCorr,
+                  accessProfile,
+                  signalWalkieCall: true,
+                  signalInboundVoiceNote: voiceNote
+                });
+                trace.push("walkie_call_with_message");
+              } else {
+                reply = SIGNAL_WALKIE_GREETING;
+                trace.push("walkie_call_greeting");
+              }
+            } else {
+              let walkie = signalWalkieCallIsActive(message.from);
+              if (voiceNote && !walkie) {
+                signalWalkieCallStart(message.from);
+                walkie = true;
+              } else if (walkie) {
+                signalWalkieCallRefresh(message.from);
+              }
+              reply = await deps.orchestrator.handleChannelMessage({
+                channel: "signal",
+                phoneNumber: message.phoneNumber,
+                signalUuid: message.signalUuid,
+                text: message.text,
+                correlationId: msgCorr,
+                accessProfile,
+                signalWalkieCall: walkie || voiceNote,
+                signalInboundVoiceNote: voiceNote
+              });
+            }
+          }
+        }
       } finally {
         clearInterval(typingHeartbeat);
       }

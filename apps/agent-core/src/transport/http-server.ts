@@ -16,7 +16,9 @@ import {
 import { getWhatsAppWebBridgeStatus, startWhatsAppWebBridge, stopWhatsAppWebBridge } from "../channels/whatsapp-web-bridge.js";
 import { mapInboundIdentity } from "../channels/identity-mapping.js";
 import { listChannelDebugEntries, previewChannelText, pushChannelDebug } from "../channels/channel-debug-log.js";
+import { claimDueSignalDeferredRings } from "../channels/signal-deferred-rings.js";
 import { dispatchSignalInboundMessages } from "../channels/signal-inbound-dispatch.js";
+import { SIGNAL_WALKIE_GREETING, signalWalkieCallStart } from "../channels/signal-walkie-call-session.js";
 import { startSignalReceiveWsPoller } from "../channels/signal-receive-ws-poller.js";
 import { ChannelRouter } from "../channels/channel-router.js";
 import {
@@ -167,6 +169,19 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   const copilotDeviceLoginSessions = new Map<string, CopilotDeviceLoginSession>();
   const thoughtWs = new WebSocketServer({ noServer: true });
   dispatcher.start();
+  const signalWalkieDeferredTimer = setInterval(() => {
+    try {
+      for (const row of claimDueSignalDeferredRings(Date.now())) {
+        signalWalkieCallStart(row.recipient);
+        dispatcher.enqueue("signal", row.recipient, SIGNAL_WALKIE_GREETING, randomUUID());
+      }
+    } catch {
+      /* ignore */
+    }
+  }, 15_000);
+  if (typeof signalWalkieDeferredTimer.unref === "function") {
+    signalWalkieDeferredTimer.unref();
+  }
   const outreach = new ProactiveOutreachDaemon({ settings: options.settings, orchestrator: options.orchestrator, dispatcher });
   outreach.start();
   const runScheduledTask = async (taskPayload: string): Promise<void> => {

@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 
 let database: DatabaseSync | undefined;
-const LATEST_SCHEMA_VERSION = 23;
+const LATEST_SCHEMA_VERSION = 24;
 
 export function getDatabase(): DatabaseSync {
   if (database) {
@@ -633,6 +633,20 @@ function runMigrations(db: DatabaseSync): void {
       ON person_relationships(a_person_id, status);
     CREATE INDEX IF NOT EXISTS idx_person_relationships_b
       ON person_relationships(b_person_id, status);
+  `);
+    },
+    () => {
+      db.exec(`
+    CREATE TABLE IF NOT EXISTS signal_deferred_rings (
+      id TEXT PRIMARY KEY,
+      recipient TEXT NOT NULL,
+      fire_at_ms INTEGER NOT NULL,
+      note TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_signal_deferred_rings_fire
+      ON signal_deferred_rings(fire_at_ms ASC);
   `);
     }
   ];

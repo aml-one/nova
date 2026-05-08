@@ -115,9 +115,11 @@ export class SignalChannelAdapter {
     // own sends); treating it as inbound mis-attributes the peer and can look like "you" messaged yourself.
     const dm = envelope?.dataMessage ?? envelope?.editMessage?.dataMessage;
     let text = textFromDataMessage(dm) || trimOrEmpty(parsed.message);
+    let inboundVoiceNote = false;
     if (!text) {
       const attachId = firstVoiceLikeAttachmentId(dm);
       if (attachId) {
+        inboundVoiceNote = true;
         const transcribe = this.adapterOpts?.transcribeInboundVoice;
         if (!transcribe) {
           text =
@@ -146,7 +148,8 @@ export class SignalChannelAdapter {
       channel: "signal",
       from: peer,
       ...(phone ? { phoneNumber: phone } : {}),
-      text
+      text,
+      ...(inboundVoiceNote ? { signalInboundVoiceNote: true } : {})
     };
     if (uuid) message.signalUuid = uuid;
     if (envelopeTimestamp) message.envelopeTimestamp = envelopeTimestamp;
@@ -228,18 +231,21 @@ export class SignalChannelAdapter {
       console.log(`signal send skipped (missing SIGNAL_API_URL/SIGNAL_ACCOUNT_NUMBER) => ${to}: ${text}`);
       return;
     }
+    // signal-cli-rest-api expects raw base64 file contents (see doc/EXAMPLES.md), not RFC-2397 data URLs.
+    const payload: Record<string, unknown> = {
+      message: text,
+      number: account,
+      recipients: [to]
+    };
+    if (voice?.bytes?.length) {
+      payload.base64_attachments = [voice.bytes.toString("base64")];
+    }
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}/v2/send`, {
       method: "POST",
       headers: {
         "content-type": "application/json"
       },
-      body: JSON.stringify({
-        message: text,
-        base64_attachments: voice ? [`data:${voice.mimeType};filename=${voice.filename};base64,${voice.bytes.toString("base64")}`] : [],
-        number: account,
-        recipients: [to],
-        text_mode: "normal"
-      })
+      body: JSON.stringify(payload)
     });
     if (!response.ok) {
       const body = await response.text();
