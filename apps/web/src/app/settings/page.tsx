@@ -272,6 +272,10 @@ const ACCESS_TIER_LABEL: Record<AccessTier, string> = {
   guest: "Guest"
 };
 
+const SIGNAL_UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const SIGNAL_UUID_INVALID_MSG =
+  "Signal UUID must be a full standard UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx, 32 hex digits). Check you did not drop a leading character when pasting.";
+
 const DEFAULT_SETTINGS: SettingsState = {
   delegatedFolders: [],
   requireApprovals: false,
@@ -1050,9 +1054,9 @@ export default function SettingsPage() {
     const ch = channelTierAddFor;
     const uuidRaw = channelTierAddDraft.signalUuid.trim().toLowerCase();
     if (ch === "signal" && uuidRaw) {
-      const uuidOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uuidRaw);
+      const uuidOk = SIGNAL_UUID_RX.test(uuidRaw);
       if (!uuidOk) {
-        setError("Signal UUID must be 8-4-4-4-12 hex (sealed-sender id from channel debug).");
+        setError(SIGNAL_UUID_INVALID_MSG);
         return;
       }
     }
@@ -1079,7 +1083,10 @@ export default function SettingsPage() {
     const { channel, index } = channelTierEdit;
     const rows = [...settings.messagingAccess.channelTiers[channel]];
     const row = rows[index];
-    if (!row) return;
+    if (!row) {
+      setError("This row is no longer in the list. Close the dialog and try again.");
+      return;
+    }
     rows[index] = { ...row, tier: channelTierEditTier };
     const next = { ...settings.messagingAccess.channelTiers, [channel]: rows };
     setSettings((prev) => ({
@@ -1096,7 +1103,10 @@ export default function SettingsPage() {
     const { channel, index } = channelTierNameEdit;
     const rows = [...settings.messagingAccess.channelTiers[channel]];
     const row = rows[index];
-    if (!row) return;
+    if (!row) {
+      setError("This row is no longer in the list. Close the dialog and try again.");
+      return;
+    }
     const nameRaw = channelTierNameDraft.trim().slice(0, 80);
     const nextRow = { ...row } as { phone: string; tier: AccessTier; name?: string; signalUuid?: string };
     if (nameRaw) nextRow.name = nameRaw;
@@ -1104,9 +1114,9 @@ export default function SettingsPage() {
     if (channel === "signal") {
       const uuidRaw = channelTierUuidDraft.trim().toLowerCase();
       if (uuidRaw) {
-        const uuidOk = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uuidRaw);
+        const uuidOk = SIGNAL_UUID_RX.test(uuidRaw);
         if (!uuidOk) {
-          setError("Signal UUID must be 8-4-4-4-12 hex (sealed-sender id from channel debug).");
+          setError(SIGNAL_UUID_INVALID_MSG);
           return;
         }
         nextRow.signalUuid = uuidRaw;
@@ -3338,11 +3348,22 @@ export default function SettingsPage() {
                         Cancel
                       </Button>
                     </div>
+                    {error ? (
+                      <p
+                        className="rounded-ui border border-rose-500/45 bg-rose-500/10 px-2 py-1.5 text-xs font-medium text-rose-900 dark:text-rose-100"
+                        role="alert"
+                      >
+                        {error}
+                      </p>
+                    ) : null}
                     <label className="grid gap-1 text-xs">
                       Phone number (E.164)
                       <Input
                         value={channelTierAddDraft.phone}
-                        onChange={(e) => setChannelTierAddDraft((d) => ({ ...d, phone: e.target.value }))}
+                        onChange={(e) => {
+                          setError(null);
+                          setChannelTierAddDraft((d) => ({ ...d, phone: e.target.value }));
+                        }}
                         placeholder="+15551234567"
                         className="font-mono text-[13px]"
                       />
@@ -3351,7 +3372,10 @@ export default function SettingsPage() {
                       Name (label for you)
                       <Input
                         value={channelTierAddDraft.name}
-                        onChange={(e) => setChannelTierAddDraft((d) => ({ ...d, name: e.target.value }))}
+                        onChange={(e) => {
+                          setError(null);
+                          setChannelTierAddDraft((d) => ({ ...d, name: e.target.value }));
+                        }}
                         placeholder="Alex"
                       />
                     </label>
@@ -3360,9 +3384,10 @@ export default function SettingsPage() {
                         Signal sealed-sender UUID (optional)
                         <Input
                           value={channelTierAddDraft.signalUuid}
-                          onChange={(e) =>
-                            setChannelTierAddDraft((d) => ({ ...d, signalUuid: e.target.value }))
-                          }
+                          onChange={(e) => {
+                            setError(null);
+                            setChannelTierAddDraft((d) => ({ ...d, signalUuid: e.target.value }));
+                          }}
                           placeholder="8-4-4-4-12 hex from channel debug"
                           className="font-mono text-[13px]"
                         />
@@ -3375,9 +3400,10 @@ export default function SettingsPage() {
                       Tier
                       <Select
                         value={channelTierAddDraft.tier}
-                        onChange={(e) =>
-                          setChannelTierAddDraft((d) => ({ ...d, tier: e.target.value as AccessTier }))
-                        }
+                        onChange={(e) => {
+                          setError(null);
+                          setChannelTierAddDraft((d) => ({ ...d, tier: e.target.value as AccessTier }));
+                        }}
                       >
                         <option value="admin">Admin</option>
                         <option value="co_admin">Co-Admin</option>
@@ -3412,11 +3438,22 @@ export default function SettingsPage() {
                         Cancel
                       </Button>
                     </div>
+                    {error ? (
+                      <p
+                        className="rounded-ui border border-rose-500/45 bg-rose-500/10 px-2 py-1.5 text-xs font-medium text-rose-900 dark:text-rose-100"
+                        role="alert"
+                      >
+                        {error}
+                      </p>
+                    ) : null}
                     <label className="grid gap-1 text-xs">
                       Tier
                       <Select
                         value={channelTierEditTier}
-                        onChange={(e) => setChannelTierEditTier(e.target.value as AccessTier)}
+                        onChange={(e) => {
+                          setError(null);
+                          setChannelTierEditTier(e.target.value as AccessTier);
+                        }}
                       >
                         <option value="admin">Admin</option>
                         <option value="co_admin">Co-Admin</option>
@@ -3451,6 +3488,14 @@ export default function SettingsPage() {
                         Cancel
                       </Button>
                     </div>
+                    {error ? (
+                      <p
+                        className="rounded-ui border border-rose-500/45 bg-rose-500/10 px-2 py-1.5 text-xs font-medium text-rose-900 dark:text-rose-100"
+                        role="alert"
+                      >
+                        {error}
+                      </p>
+                    ) : null}
                     <p className="text-[11px] leading-snug text-muted">
                       {channelTierNameEdit.channel === "signal" ? (
                         <>
@@ -3480,7 +3525,10 @@ export default function SettingsPage() {
                       Name
                       <Input
                         value={channelTierNameDraft}
-                        onChange={(e) => setChannelTierNameDraft(e.target.value)}
+                        onChange={(e) => {
+                          setError(null);
+                          setChannelTierNameDraft(e.target.value);
+                        }}
                         placeholder="Display name"
                         maxLength={80}
                       />
@@ -3490,7 +3538,10 @@ export default function SettingsPage() {
                         Signal sealed-sender UUID (optional)
                         <Input
                           value={channelTierUuidDraft}
-                          onChange={(e) => setChannelTierUuidDraft(e.target.value)}
+                          onChange={(e) => {
+                            setError(null);
+                            setChannelTierUuidDraft(e.target.value);
+                          }}
                           placeholder="8-4-4-4-12 hex"
                           className="font-mono text-[13px]"
                         />
