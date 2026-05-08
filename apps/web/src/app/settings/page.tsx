@@ -2794,7 +2794,9 @@ export default function SettingsPage() {
               {personaPath ? <span className="text-xs text-muted">File: <code>{personaPath}</code></span> : null}
             </div>
             <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
-              Identity backups include persona files + learning history + DB snapshot, so Nova&apos;s evolving identity is recoverable after machine issues.
+              Identity backups include persona files, learning history, full <code className="text-[11px]">nova.db</code> (including{" "}
+              <strong>People</strong> profiles, identities, and relationships), plus a <code className="text-[11px]">people-identity.json</code>{" "}
+              mirror for easy diff in your private backup repo.
             </div>
             <div className="rounded-ui border bg-surface p-3 space-y-3">
               <div>
@@ -4127,7 +4129,9 @@ export default function SettingsPage() {
               Pushes a snapshot branch to the Git remote you configure below (default <code className="text-[11px]">origin</code>). For a <strong>public</strong> Nova repo, create an empty <strong>private</strong> repository, then on the agent host run once:{" "}
               <code className="text-[11px]">git remote add identity-private &lt;private-repo-url&gt;</code> and set push remote to{" "}
               <code className="text-[11px]">identity-private</code>. Needs Git + credentials with push access to that remote. Includes DB, personas, config, and learning sidecars. If Git says the repo is not initialized, set{" "}
-              <code className="text-[11px]">NOVA_REPO_ROOT</code> on the agent to the monorepo path.
+              <code className="text-[11px]">NOVA_REPO_ROOT</code> on the agent to the monorepo path. Each snapshot also writes{" "}
+              <code className="text-[11px]">people-identity.json</code> (People admin data, redundant with the DB) for review alongside{" "}
+              <code className="text-[11px]">nova.db</code>.
             </p>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox

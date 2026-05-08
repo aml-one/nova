@@ -25,6 +25,35 @@ type BackupRunStatus = {
   createdAt: string;
 };
 
+/** Tables that back the People admin UI + channel identity resolution (also inside nova.db). */
+const PEOPLE_IDENTITY_TABLES = [
+  "people",
+  "person_identities",
+  "person_channel_state",
+  "person_field_locks",
+  "person_profile_events",
+  "person_relationships",
+  "identity_map"
+] as const;
+
+function writePeopleIdentityExport(snapshotDir: string): void {
+  const db = getDatabase();
+  const tables: Record<string, unknown[]> = {};
+  for (const name of PEOPLE_IDENTITY_TABLES) {
+    try {
+      tables[name] = db.prepare(`SELECT * FROM ${name}`).all() as unknown[];
+    } catch {
+      tables[name] = [];
+    }
+  }
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    note: "Mirror of People-related SQLite tables at backup time; authoritative copy is nova.db.",
+    tables
+  };
+  writeFileSync(join(snapshotDir, "people-identity.json"), JSON.stringify(payload, null, 2), "utf8");
+}
+
 export class IdentityBackupService {
   private readonly personas = new PersonaLoader();
 
@@ -194,6 +223,8 @@ export class IdentityBackupService {
       cpSync(target.from, target.to, { recursive: target.recursive === true });
     }
 
+    writePeopleIdentityExport(snapshotDir);
+
     writeFileSync(
       resolve(snapshotDir, "README-SNAPSHOT.txt"),
       [
@@ -202,6 +233,9 @@ export class IdentityBackupService {
         "",
         "- nova.db          : SQLite database (chat/run history, memory, emotion, Web UI settings in table app_settings,",
         "                     sessions, improvement proposals, etc.). This already includes Settings you changed in /settings.",
+        "                     People admin profiles are stored here too (people, person_identities, relationships, channel state, …).",
+        "- people-identity.json : Redundant JSON export of People-related tables (same data as in nova.db) for review/diff in Git;",
+        "                       restoring a host still uses nova.db as the source of truth.",
         "- learning-log.json, curiosity-store.json, install-meta.json : optional sidecar state (also partially reflected in DB).",
         "- config/          : checked-in YAML personas, cameras, improvement + gitops policy (and any other files you added).",
         "",
