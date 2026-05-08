@@ -67,7 +67,8 @@ export class UpdateManager {
       this.record("check", "failed", installedAt, undefined, status.lastError);
       return status;
     }
-    const latestCommit = await this.fetchLatestCommit(settings.repoOwner, settings.repoName);
+    const updateBranch = resolveUpdateBranch(settings);
+    const latestCommit = await this.fetchLatestCommit(settings.repoOwner, settings.repoName, updateBranch);
     if (!latestCommit.pushedAt) {
       const status: UpdateStatus = {
         installedAt,
@@ -190,9 +191,10 @@ export class UpdateManager {
 
   private async fetchLatestCommit(
     owner: string,
-    repo: string
+    repo: string,
+    branch: string
   ): Promise<{ pushedAt?: string; sha?: string; url?: string; error?: string }> {
-    const url = `https://api.github.com/repos/${owner}/${repo}/commits?per_page=1`;
+    const url = `https://api.github.com/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(branch)}&per_page=1`;
     try {
       const githubToken = process.env.GITHUB_TOKEN?.trim();
       const response = await fetch(url, {
@@ -251,7 +253,20 @@ export class UpdateManager {
     const includeBuild = process.env.NOVA_UPDATE_INCLUDE_BUILD === "true";
     const pnpmInstallCmd = "(corepack pnpm install || pnpm install || npx --yes pnpm install)";
     const pnpmBuildCmd = "(corepack pnpm -r build || pnpm -r build || npx --yes pnpm -r build)";
-    const cmd = includeBuild ? `git pull && ${pnpmInstallCmd} && ${pnpmBuildCmd}` : `git pull && ${pnpmInstallCmd}`;
+    const remote = sanitizeGitRef(process.env.NOVA_UPDATE_REMOTE?.trim() || "origin", "origin");
+    const branch = resolveUpdateBranch(this.getSettings());
+    const remoteRef = `${remote}/${branch}`;
+    const cmd = [
+      `git fetch ${shellQuote(remote)} ${shellQuote(branch)}`,
+      // The updater must not depend on the currently checked-out branch having upstream tracking:
+      // autonomous work often leaves the repo on agent/auto/<id>, where plain `git pull` fails with
+      // "There is no tracking information for the current branch." Switch to the configured update
+      // branch and fast-forward it from the configured remote instead.
+      `(git checkout ${shellQuote(branch)} || git checkout -B ${shellQuote(branch)} ${shellQuote(remoteRef)})`,
+      `git merge --ff-only ${shellQuote(remoteRef)}`,
+      pnpmInstallCmd,
+      ...(includeBuild ? [pnpmBuildCmd] : [])
+    ].join(" && ");
     const prevSha = captureCurrentCommitSha(repoRoot);
     if (prevSha) {
       writeUpdateRollbackMarker(repoRoot, prevSha);
@@ -298,6 +313,35 @@ export class UpdateManager {
       )
       .run(randomUUID(), eventType, status, currentVersion, targetVersion ?? null, details ?? null);
   }
+}
+
+function resolveUpdateBranch(settings: UpdateSettings): string {
+  // Keep the UI's stable/beta selector future-compatible, but today updates are a single stream.
+  // Use NOVA_UPDATE_BRANCH when a deployment intentionally tracks another branch.
+  const envBranch = process.env.NOVA_UPDATE_BRANCH?.trim();
+  return sanitizeGitRef(envBranch || (settings.channel === "beta" ? "beta" : "main"), "main");
+}
+
+function sanitizeGitRef(value: string, fallback: string): string {
+  const candidate = value.trim();
+  // Conservative subset: enough for branch/remotes like main, stable, release/2026-05, origin.
+  // Reject whitespace, shell metacharacters, path traversal, and ref suffixes Git disallows anyway.
+  if (
+    candidate &&
+    /^[A-Za-z0-9._/-]+$/.test(candidate) &&
+    !candidate.startsWith("/") &&
+    !candidate.includes("..") &&
+    !candidate.endsWith(".") &&
+    !candidate.endsWith("/") &&
+    !candidate.endsWith(".lock")
+  ) {
+    return candidate;
+  }
+  return fallback;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 /**
