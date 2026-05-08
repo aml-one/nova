@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
 import { gitSafeDirectoryEnvForRepo } from "../util/git-safe-directory-env.js";
+import { chownRepoGitIfConfigured } from "../util/chown-repo-git-if-configured.js";
 import { CheckpointService } from "./checkpoint-service.js";
 import { RollbackService } from "./rollback-service.js";
 
@@ -127,6 +128,11 @@ function runGit(args: string[]): string {
   if (result.status !== 0) {
     throw new Error(result.stderr || `git ${args.join(" ")} failed`);
   }
+  // When agent-core runs as root (macOS LaunchDaemon binding :443), `git checkout/commit/branch`
+  // creates `.git/refs/heads/<…>` files owned by root. A subsequent `git pull` from the user's
+  // ambrus shell then fails with "Unable to create lock: Permission denied" on those refs. Re-chown
+  // after any successful git op so manual pulls keep working without sudo.
+  chownRepoGitIfConfigured(cwd);
   return result.stdout ?? "";
 }
 
