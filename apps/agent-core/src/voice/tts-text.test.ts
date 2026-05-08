@@ -3,7 +3,8 @@ import {
   dedupeAdjacentOrpheusCueTags,
   ensureOrpheusCueTagsClosed,
   normalizeOrpheusSpeechCues,
-  prepareChatTextForSpeech
+  prepareChatTextForSpeech,
+  stripOrpheusSpeechCues
 } from "./tts-text.js";
 
 describe("ensureOrpheusCueTagsClosed", () => {
@@ -41,6 +42,31 @@ describe("dedupeAdjacentOrpheusCueTags", () => {
   it("collapses repeated identical cue tags", () => {
     expect(dedupeAdjacentOrpheusCueTags("<chuckle> <chuckle> Hello")).toBe("<chuckle> Hello");
     expect(dedupeAdjacentOrpheusCueTags("<chuckle> <chuckle> <chuckle> Hi")).toBe("<chuckle> Hi");
+  });
+});
+
+describe("stripOrpheusSpeechCues", () => {
+  it("removes well-formed cues and tightens punctuation spacing", () => {
+    expect(
+      stripOrpheusSpeechCues(
+        "Third time's the charm? <chuckle> You're really testing my greeting counter."
+      )
+    ).toBe("Third time's the charm? You're really testing my greeting counter.");
+  });
+
+  it("removes malformed / glued cues that show up in the wild", () => {
+    expect(stripOrpheusSpeechCues("Hi <chuckleOkay let me try.")).toBe("Hi Okay let me try.");
+    expect(stripOrpheusSpeechCues("Hi <chuckle ")).toBe("Hi");
+  });
+
+  it("leaves regular angle-bracket text alone", () => {
+    expect(stripOrpheusSpeechCues("Use <code>x</code> not <chucklebee>.")).toBe(
+      "Use <code>x</code> not <chucklebee>."
+    );
+  });
+
+  it("collapses double spaces left by removed cues", () => {
+    expect(stripOrpheusSpeechCues("Hello <sigh> world")).toBe("Hello world");
   });
 });
 

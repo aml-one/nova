@@ -77,6 +77,24 @@ export function normalizeOrpheusSpeechCues(text: string): string {
 }
 
 /**
+ * Removes Orpheus voice-cue tags (`<chuckle>`, `<sigh>`, `<laugh>`, …) from a string so it can be
+ * shown as a transcript / chat body without the TTS hints leaking into the visible message. The
+ * audio path keeps the original cues — only callers that surface the text to humans should strip.
+ */
+export function stripOrpheusSpeechCues(text: string): string {
+  if (!text) return text;
+  // First normalize so the tags are well-formed, then drop them. Handles `<chuckle>`, `<chuckle  >`,
+  // and stray opens left after partial normalization.
+  const normalized = normalizeOrpheusSpeechCues(text);
+  const tag = new RegExp(`<\\s*(?:${ORPHEUS_SPEECH_CUE_NAMES})\\b[^>]*>`, "gi");
+  return normalized
+    .replace(tag, "")
+    .replace(/\s+([,.!?;:])/g, "$1")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+/**
  * Normalize assistant/chat markdown for speech synthesis (same rules as web chat read-aloud).
  */
 export function prepareChatTextForSpeech(raw: string, maxChars = 8000): string {

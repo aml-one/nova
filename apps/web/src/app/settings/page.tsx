@@ -522,6 +522,11 @@ export default function SettingsPage() {
   const [signalDockerLogs, setSignalDockerLogs] = useState("");
   const [signalDockerNote, setSignalDockerNote] = useState<string | null>(null);
   const signalDockerLogsRef = useRef<HTMLPreElement | null>(null);
+  /**
+   * "conversation" collapses internal transport rows into a chat-like timeline (User: …,
+   * Nova typing…, Nova: response). "raw" keeps the full diagnostic trace for debugging.
+   */
+  const [channelDebugView, setChannelDebugView] = useState<"conversation" | "raw">("conversation");
   // Tracks consecutive failed channel-debug refreshes so a one-off blip (Next.js dev hot-reload, brief
   // 503 from agent-core) does not flash the red "Temporary connection problem" banner. Only persistent
   // (≥3 polls = ~12 s) outages are surfaced to the user.
@@ -3130,6 +3135,38 @@ export default function SettingsPage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold">Channel message trace</h3>
                 <div className="flex flex-wrap items-center gap-2">
+                  <div
+                    role="tablist"
+                    aria-label="Trace view mode"
+                    className="inline-flex overflow-hidden rounded-md border border-border/60 text-[11px]"
+                  >
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={channelDebugView === "conversation"}
+                      className={`px-2 py-1 transition ${
+                        channelDebugView === "conversation"
+                          ? "bg-indigo-600 text-white"
+                          : "bg-surface text-muted hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                      }`}
+                      onClick={() => setChannelDebugView("conversation")}
+                    >
+                      Conversation
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={channelDebugView === "raw"}
+                      className={`px-2 py-1 transition ${
+                        channelDebugView === "raw"
+                          ? "bg-indigo-600 text-white"
+                          : "bg-surface text-muted hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"
+                      }`}
+                      onClick={() => setChannelDebugView("raw")}
+                    >
+                      Raw trace
+                    </button>
+                  </div>
                   <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted">
                     <Checkbox checked={channelDebugAutoRefresh} onChange={(e) => setChannelDebugAutoRefresh(e.target.checked)} />
                     Auto-refresh (4s)
@@ -3204,7 +3241,11 @@ export default function SettingsPage() {
                         No webhook hits yet — only Signal/WhatsApp POSTs to the agent show here.
                       </p>
                     ) : null}
-                    {channelDebugEntries.map((entry) => {
+                    {channelDebugView === "conversation"
+                      ? buildChannelConversation(channelDebugEntries).map((item) => (
+                          <ConversationRow key={item.id} item={item} />
+                        ))
+                      : channelDebugEntries.map((entry) => {
                       const handledElsewhere = entry.trace?.includes("deduped_other_transport") ?? false;
                       const novaStatus =
                         entry.direction === "in" && typeof entry.reachedNova === "boolean"
@@ -3260,6 +3301,11 @@ export default function SettingsPage() {
                       </div>
                       );
                     })}
+                    {channelDebugView === "conversation" && buildChannelConversation(channelDebugEntries).length === 0 && channelDebugEntries.length > 0 ? (
+                      <p className="px-1 py-4 text-center text-xs text-muted">
+                        No conversation events yet — only diagnostic rows in this window. Switch to <em>Raw trace</em> to inspect them.
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <div className="min-h-0">
@@ -4233,6 +4279,353 @@ export default function SettingsPage() {
         </div>
       ) : null}
     </form>
+  );
+}
+
+type ConversationItem =
+  | {
+      kind: "user";
+      id: string;
+      at: string;
+      peer: string;
+      channel: "signal" | "whatsapp";
+      text: string;
+      reachedNova: boolean | null;
+      correlationId: string;
+    }
+  | {
+      kind: "nova";
+      id: string;
+      at: string;
+      peer: string;
+      channel: "signal" | "whatsapp";
+      text: string;
+      hasAudio: boolean;
+      audioBytes: number | null;
+      audioFailed: boolean;
+      audioFailReason: string | null;
+      correlationId: string;
+    }
+  | {
+      kind: "typing";
+      id: string;
+      at: string;
+      peer: string;
+      channel: "signal" | "whatsapp";
+      correlationId: string;
+    }
+  | {
+      kind: "system";
+      id: string;
+      at: string;
+      peer: string;
+      channel: "signal" | "whatsapp";
+      text: string;
+      tone: "info" | "warn" | "error";
+      correlationId: string;
+    };
+
+const ORPHEUS_CUE_RE = /<\s*(?:laugh|sigh|chuckle|cough|sniffle|groan|gasp)\b[^>]*>/gi;
+
+function stripCuesForDisplay(text: string): string {
+  if (!text) return text;
+  return text.replace(ORPHEUS_CUE_RE, "").replace(/\s+([,.!?;:])/g, "$1").replace(/\s{2,}/g, " ").trim();
+}
+
+function extractAudioBytesFromPreview(preview: string): number | null {
+  const match = /\((\d+)\s*bytes\)/i.exec(preview);
+  if (!match) return null;
+  const n = Number(match[1]);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Collapses transport-level rows into a chat-like timeline. Returns newest-first to match the
+ * existing trace order. Heuristics:
+ *  - skip pure noise (`deduped_other_transport`, `parsed_zero_*`, `receive_ws_connected`)
+ *  - one "Nova is typing…" per correlation id (so heartbeat re-issues do not clutter the view)
+ *  - merge `signal_voice_attachment_sent` + `outbound_send_ok` for the same correlation id into a
+ *    single Nova row that shows both the text and the audio size
+ *  - keep `outbound_send_failed` / `outbound_send_deduped_recent` / `signal_voice_attachment_failed`
+ *    as small system notes so the user still sees what went wrong
+ *  - skip `reply_enqueued` (it duplicates the dispatcher row)
+ *  - skip `typing_indicator_off` (a Nova row implicitly ends the typing state)
+ */
+function buildChannelConversation(entries: ChannelDebugEntry[]): ConversationItem[] {
+  const oldestFirst = [...entries].reverse();
+  const items: ConversationItem[] = [];
+  const seenTypingForCorr = new Set<string>();
+
+  for (const entry of oldestFirst) {
+    const trace = entry.trace ?? [];
+    const has = (token: string) => trace.includes(token);
+    const peer = entry.peer ?? "";
+    const corr = entry.correlationId;
+
+    // Pure-noise rows.
+    if (
+      has("deduped_other_transport") ||
+      has("parsed_zero_text_dm_or_receipt") ||
+      has("parsed_zero_messages") ||
+      has("parsed_zero_messages_throttled") ||
+      has("receive_ws_connected")
+    ) {
+      continue;
+    }
+
+    // Internal duplicate of the dispatcher row.
+    if (has("reply_enqueued")) continue;
+    // Implied by Nova's response.
+    if (has("typing_indicator_off")) continue;
+
+    if (entry.direction === "in") {
+      if (has("parsed_inbound") && entry.textPreview && !entry.textPreview.startsWith("(")) {
+        items.push({
+          kind: "user",
+          id: entry.id,
+          at: entry.at,
+          peer,
+          channel: entry.channel,
+          text: entry.textPreview,
+          reachedNova: typeof entry.reachedNova === "boolean" ? entry.reachedNova : null,
+          correlationId: corr
+        });
+        continue;
+      }
+      if (trace.some((t) => t.startsWith("access_denied"))) {
+        items.push({
+          kind: "system",
+          id: entry.id,
+          at: entry.at,
+          peer,
+          channel: entry.channel,
+          text: entry.error || "Blocked by channel access policy",
+          tone: "warn",
+          correlationId: corr
+        });
+        continue;
+      }
+      if (has("orchestrator_error")) {
+        items.push({
+          kind: "system",
+          id: entry.id,
+          at: entry.at,
+          peer,
+          channel: entry.channel,
+          text: entry.error || "Orchestrator error",
+          tone: "error",
+          correlationId: corr
+        });
+        continue;
+      }
+      continue;
+    }
+
+    // Outbound rows below.
+    if (entry.transport !== "dispatcher") continue;
+
+    if (has("typing_indicator_on")) {
+      if (!seenTypingForCorr.has(corr)) {
+        seenTypingForCorr.add(corr);
+        items.push({
+          kind: "typing",
+          id: entry.id,
+          at: entry.at,
+          peer,
+          channel: entry.channel,
+          correlationId: corr
+        });
+      }
+      continue;
+    }
+
+    if (has("signal_voice_attachment_sent")) {
+      // Audio first; the matching `outbound_send_ok` row that follows will fill in the text.
+      items.push({
+        kind: "nova",
+        id: entry.id,
+        at: entry.at,
+        peer,
+        channel: entry.channel,
+        text: "",
+        hasAudio: true,
+        audioBytes: extractAudioBytesFromPreview(entry.textPreview),
+        audioFailed: false,
+        audioFailReason: null,
+        correlationId: corr
+      });
+      continue;
+    }
+
+    if (has("signal_voice_attachment_failed")) {
+      // Don't add a separate row — annotate the next Nova row for the same correlation id.
+      // We push a placeholder if there is none yet.
+      const reason = entry.error || "Voice synthesis failed (text-only fallback)";
+      items.push({
+        kind: "nova",
+        id: entry.id,
+        at: entry.at,
+        peer,
+        channel: entry.channel,
+        text: "",
+        hasAudio: false,
+        audioBytes: null,
+        audioFailed: true,
+        audioFailReason: reason,
+        correlationId: corr
+      });
+      continue;
+    }
+
+    if (has("outbound_send_ok")) {
+      const text = stripCuesForDisplay(entry.textPreview);
+      const lastIdx = items.length - 1;
+      const last = lastIdx >= 0 ? items[lastIdx] : null;
+      if (
+        last &&
+        last.kind === "nova" &&
+        last.correlationId === corr &&
+        last.peer === peer &&
+        last.text === ""
+      ) {
+        items[lastIdx] = { ...last, text, at: entry.at };
+        continue;
+      }
+      items.push({
+        kind: "nova",
+        id: entry.id,
+        at: entry.at,
+        peer,
+        channel: entry.channel,
+        text,
+        hasAudio: false,
+        audioBytes: null,
+        audioFailed: false,
+        audioFailReason: null,
+        correlationId: corr
+      });
+      continue;
+    }
+
+    if (has("outbound_send_deduped_recent")) {
+      items.push({
+        kind: "system",
+        id: entry.id,
+        at: entry.at,
+        peer,
+        channel: entry.channel,
+        text: entry.error || "Duplicate suppressed (anti-spam guard)",
+        tone: "warn",
+        correlationId: corr
+      });
+      continue;
+    }
+
+    if (has("outbound_send_failed")) {
+      items.push({
+        kind: "system",
+        id: entry.id,
+        at: entry.at,
+        peer,
+        channel: entry.channel,
+        text: entry.error || "Outbound send failed",
+        tone: "error",
+        correlationId: corr
+      });
+      continue;
+    }
+  }
+
+  return items.reverse();
+}
+
+function ConversationRow({ item }: { item: ConversationItem }) {
+  const time = formatChannelDebugTime(item.at);
+  if (item.kind === "user") {
+    const novaStatus =
+      item.reachedNova === null
+        ? null
+        : item.reachedNova
+          ? { label: "Nova handled", tone: "text-emerald-700 dark:text-emerald-400" }
+          : { label: "Nova did not handle", tone: "text-amber-700 dark:text-amber-400" };
+    return (
+      <div className="rounded-md border border-blue-500/40 bg-blue-500/[0.08] px-2 py-1.5 text-[12px] leading-snug dark:bg-blue-500/15">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="font-mono text-[11px] text-muted">{time}</span>
+            <strong>You</strong>
+            <span className="text-[11px] text-muted capitalize">· {item.channel}</span>
+          </div>
+          {novaStatus ? (
+            <span className={`shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-[11px] font-medium dark:bg-white/10 ${novaStatus.tone}`}>
+              {novaStatus.label}
+            </span>
+          ) : null}
+        </div>
+        <div className="break-words">{item.text}</div>
+      </div>
+    );
+  }
+  if (item.kind === "nova") {
+    return (
+      <div className="rounded-md border border-indigo-600/40 bg-indigo-600/[0.09] px-2 py-1.5 text-[12px] leading-snug dark:bg-indigo-950/35">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <span className="font-mono text-[11px] text-muted">{time}</span>
+            <strong>Nova</strong>
+            <span className="text-[11px] text-muted capitalize">· {item.channel}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            {item.hasAudio ? (
+              <span
+                className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300"
+                title={item.audioBytes ? `${item.audioBytes.toLocaleString()} bytes` : undefined}
+              >
+                voice attached{item.audioBytes ? ` · ${Math.round(item.audioBytes / 1024)} KB` : ""}
+              </span>
+            ) : null}
+            {item.audioFailed ? (
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-800 dark:text-amber-300">
+                voice failed (text only)
+              </span>
+            ) : null}
+          </div>
+        </div>
+        {item.text ? <div className="break-words">{item.text}</div> : null}
+        {item.audioFailed && item.audioFailReason ? (
+          <div className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">{item.audioFailReason}</div>
+        ) : null}
+      </div>
+    );
+  }
+  if (item.kind === "typing") {
+    return (
+      <div className="rounded-md border border-dashed border-indigo-600/40 bg-indigo-600/[0.04] px-2 py-1.5 text-[12px] leading-snug text-muted dark:bg-indigo-950/15">
+        <div className="flex items-baseline gap-2">
+          <span className="font-mono text-[11px]">{time}</span>
+          <span>
+            <strong>Nova</strong> is typing… <span className="italic">(generating reply{item.channel === "signal" ? " + audio" : ""})</span>
+          </span>
+        </div>
+      </div>
+    );
+  }
+  // system
+  const tone =
+    item.tone === "error"
+      ? "border-red-500/50 bg-red-500/[0.08] text-red-700 dark:text-red-300"
+      : item.tone === "warn"
+        ? "border-amber-500/50 bg-amber-500/[0.08] text-amber-800 dark:text-amber-300"
+        : "border-border/60 bg-surface2 text-muted";
+  return (
+    <div className={`rounded-md border px-2 py-1.5 text-[12px] leading-snug ${tone}`}>
+      <div className="flex items-baseline gap-2">
+        <span className="font-mono text-[11px]">{time}</span>
+        <span className="capitalize">{item.channel}</span>
+        <span className="text-[11px] text-muted">system</span>
+      </div>
+      <div className="break-words">{item.text}</div>
+    </div>
   );
 }
 

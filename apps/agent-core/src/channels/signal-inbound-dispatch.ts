@@ -6,6 +6,7 @@ import type { ChannelMessage } from "./channel-router.js";
 import { resolveChannelAccess } from "../security/phone-access.js";
 import { previewChannelText, pushChannelDebug } from "./channel-debug-log.js";
 import { getDatabase } from "../storage/sqlite.js";
+import { stripOrpheusSpeechCues } from "../voice/tts-text.js";
 
 export type SignalInboundTransport = "webhook" | "receive_ws";
 
@@ -167,7 +168,9 @@ export async function dispatchSignalInboundMessages(
         transport: deps.transport,
         correlationId: msgCorr,
         peer: message.from,
-        textPreview: previewChannelText(reply),
+        // Trace shows the visible body (without `<chuckle>` / `<sigh>` cues). The dispatcher still
+        // synthesizes audio from the original `reply` so the audio keeps the cues.
+        textPreview: previewChannelText(stripOrpheusSpeechCues(reply)),
         trace: ["reply_enqueued"]
       });
       replies.push({ to: message.from, reply, delivered: true });

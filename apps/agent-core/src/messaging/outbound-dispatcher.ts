@@ -5,6 +5,7 @@ import { WhatsAppChannelAdapter } from "../channels/whatsapp.js";
 import { Logger } from "../observability/logger.js";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import { VoiceService } from "../voice/voice-service.js";
+import { stripOrpheusSpeechCues } from "../voice/tts-text.js";
 import { OutboundQueueService } from "./outbound-queue.js";
 
 export class OutboundDispatcher {
@@ -89,11 +90,14 @@ export class OutboundDispatcher {
     try {
     const jobs = this.queue.listReady(20);
     for (const job of jobs) {
+      // Visible body for Signal/WhatsApp + the trace. TTS still gets the original `job.payload`
+      // (with `<chuckle>`/`<sigh>` etc.) so the audio keeps the cues.
+      const visiblePayload = stripOrpheusSpeechCues(job.payload);
       try {
         // Anti-spam guard (same body to same number within ~2 s). Applies to BOTH transports so
         // a runaway whatsapp loop is also stopped, and so accidental duplicates from a retry are
         // dropped without penalising legit multi-line replies (different text passes immediately).
-        if (this.wasRecentlySent(job.channel, job.recipient, job.payload)) {
+        if (this.wasRecentlySent(job.channel, job.recipient, visiblePayload)) {
           this.queue.markSuccess(job.id);
           pushChannelDebug({
             channel: job.channel,
@@ -101,7 +105,7 @@ export class OutboundDispatcher {
             transport: "dispatcher",
             correlationId: job.correlationId ?? randomUUID(),
             peer: job.recipient,
-            textPreview: previewChannelText(job.payload),
+            textPreview: previewChannelText(visiblePayload),
             trace: ["outbound_send_deduped_recent"],
             reachedNova: undefined,
             error: `Identical message already sent to ${job.recipient} within ${this.outboundDedupeWindowMs()}ms — dropped to prevent accidental spam.`
@@ -109,11 +113,16 @@ export class OutboundDispatcher {
           continue;
         }
         if (job.channel === "whatsapp") {
-          await this.wa.sendMessage(job.recipient, job.payload);
+          await this.wa.sendMessage(job.recipient, visiblePayload);
         } else {
-          await this.sendSignalWithOptionalVoice(job.recipient, job.payload);
+          await this.sendSignalWithOptionalVoice(
+            job.recipient,
+            job.payload,
+            visiblePayload,
+            job.correlationId ?? randomUUID()
+          );
         }
-        this.markRecentlySent(job.channel, job.recipient, job.payload);
+        this.markRecentlySent(job.channel, job.recipient, visiblePayload);
         this.queue.markSuccess(job.id);
         pushChannelDebug({
           channel: job.channel,
@@ -121,7 +130,7 @@ export class OutboundDispatcher {
           transport: "dispatcher",
           correlationId: job.correlationId ?? randomUUID(),
           peer: job.recipient,
-          textPreview: previewChannelText(job.payload),
+          textPreview: previewChannelText(visiblePayload),
           trace: ["outbound_send_ok"],
           reachedNova: undefined
         });
@@ -133,7 +142,7 @@ export class OutboundDispatcher {
           transport: "dispatcher",
           correlationId: job.correlationId ?? randomUUID(),
           peer: job.recipient,
-          textPreview: previewChannelText(job.payload),
+          textPreview: previewChannelText(visiblePayload),
           trace: ["outbound_send_failed"],
           error: message
         });
@@ -187,15 +196,25 @@ export class OutboundDispatcher {
     );
   }
 
-  private async sendSignalWithOptionalVoice(recipient: string, text: string): Promise<void> {
+  /**
+   * `ttsSource` keeps cue tags so Orpheus produces the chuckle/sigh; `visibleText` is the cleaned
+   * body that is shown to the recipient (and in the trace) so the cues never leak into the chat.
+   * `correlationId` matches the queue job so the conversation view can merge the audio + text rows.
+   */
+  private async sendSignalWithOptionalVoice(
+    recipient: string,
+    ttsSource: string,
+    visibleText: string,
+    correlationId: string
+  ): Promise<void> {
     try {
       const settings = this.getSettings();
       const tts = settings?.orpheusTts;
       if (tts?.enabled && tts.baseUrl.trim()) {
-        const audio = await this.voice.synthesizeOrpheusBuffer(text);
+        const audio = await this.voice.synthesizeOrpheusBuffer(ttsSource);
         const ext = (tts.responseFormat || "wav").replace(/[^a-z0-9]/gi, "") || "wav";
         const mimeType = this.voice.mimeTypeForCurrentFormat();
-        await this.signal.sendMessage(recipient, text, {
+        await this.signal.sendMessage(recipient, visibleText, {
           bytes: audio,
           mimeType,
           filename: `nova-reply.${ext}`
@@ -204,7 +223,7 @@ export class OutboundDispatcher {
           channel: "signal",
           direction: "out",
           transport: "dispatcher",
-          correlationId: randomUUID(),
+          correlationId,
           peer: recipient,
           textPreview: previewChannelText(`voice+transcript (${audio.byteLength} bytes)`),
           trace: ["signal_voice_attachment_sent"]
@@ -216,13 +235,13 @@ export class OutboundDispatcher {
         channel: "signal",
         direction: "out",
         transport: "dispatcher",
-        correlationId: randomUUID(),
+        correlationId,
         peer: recipient,
-        textPreview: previewChannelText(text),
+        textPreview: previewChannelText(visibleText),
         trace: ["signal_voice_attachment_failed", "falling_back_to_text"],
         error: error instanceof Error ? error.message : String(error)
       });
     }
-    await this.signal.sendMessage(recipient, text);
+    await this.signal.sendMessage(recipient, visibleText);
   }
 }
