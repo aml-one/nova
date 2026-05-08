@@ -48,15 +48,15 @@ export function getAgentBaseUrl(request?: Request): string {
   }
 
   if (request) {
-    const hostHeader =
-      request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || request.headers.get("host");
-    const hostname = hostnameFromHostHeader(hostHeader);
-    if (
-      hostname &&
-      hostname !== "localhost" &&
-      hostname !== "127.0.0.1" &&
-      hostname !== "::1"
-    ) {
+    const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim() || null;
+    const directHost = request.headers.get("host");
+    const candidates = [forwardedHost, directHost].filter(Boolean) as string[];
+    for (const candidate of candidates) {
+      const hostname = hostnameFromHostHeader(candidate);
+      if (!hostname) continue;
+      if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") {
+        continue;
+      }
       return `http://${hostname}:${agentListenPort()}`;
     }
   }
