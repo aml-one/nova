@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { GitOpsManager } from "../git/gitops-manager.js";
+import { resolveNovaRepoRoot } from "../util/resolve-repo-root.js";
 import { LearningLog } from "./learning-log.js";
 import { generateSkillFromTemplate } from "./patch-generator.js";
 import { generateImprovementPrompt, summarizeOutcomes } from "./proposal-generator.js";
@@ -301,7 +302,28 @@ export class SelfImprovementLoop {
     if (!delta) {
       return;
     }
-    const soulPath = resolve(process.cwd(), soulPathRaw);
+    // Always resolve the configured soul path against the *repo root* (not process.cwd()), and reject
+    // anything that escapes the repo. Earlier behaviour used `process.cwd()` for both the file-write
+    // anchor and the git-relative path. With agent-core launched from `apps/agent-core/` (pnpm filter)
+    // and `gitOps.commitFilesAndOpenPr` running `git add` from the repo root, a config value of
+    // `../../config/personas/soul.md` produced an absolute path correctly, but the resulting relative
+    // path (`../../config/personas/soul.md`) escapes the repo when interpreted from the repo root, so
+    // `git add` failed every learning cycle with:
+    //   fatal: ../../config/personas/soul.md: '...' is outside repository at '<repoRoot>'
+    const repoRoot = resolveNovaRepoRoot();
+    const soulPath = isAbsolute(soulPathRaw) ? resolve(soulPathRaw) : resolve(repoRoot, soulPathRaw);
+    const rel = relative(repoRoot, soulPath).replace(/\\/g, "/");
+    if (!rel || rel.startsWith("..") || isAbsolute(rel)) {
+      this.learningLog.append(
+        "Skipped autonomous SOUL evolution",
+        false,
+        `Configured sentiCore.orchestrationMarkdownPath ("${soulPathRaw}") resolves outside the Nova repo (${soulPath}). ` +
+          `Set it to a path inside the repo (e.g. "config/personas/soul.md") to enable autonomous refinement.`,
+        "improvement",
+        { soulPathRaw, resolved: soulPath, repoRoot }
+      );
+      return;
+    }
     const existing = existsSync(soulPath) ? readFileSync(soulPath, "utf8") : "";
     const next = applySoulDelta(existing, delta);
     if (next === existing) {
@@ -309,10 +331,9 @@ export class SelfImprovementLoop {
     }
     mkdirSync(dirname(soulPath), { recursive: true });
     writeFileSync(soulPath, next, "utf8");
-    const rel = relative(process.cwd(), soulPath).replace(/\\/g, "/");
     const firstLine = delta.split(/\r?\n/)[0]?.slice(0, 120) ?? "SOUL refinement";
     const result = await this.gitOps.commitFilesAndOpenPr({
-      files: [rel || soulPath],
+      files: [rel],
       commitMessage: `chore(soul): autonomous persona refinement\n\n${firstLine}`,
       title: "Autonomous SOUL refinement",
       body: [
@@ -330,7 +351,7 @@ export class SelfImprovementLoop {
       true,
       result?.prUrl ? `PR: ${result.prUrl}` : `Branch pushed: ${result?.branch ?? "n/a"} (gh not available)`,
       "improvement",
-      { soulPath: rel || soulPath, prUrl: result?.prUrl ?? "", branch: result?.branch ?? "" }
+      { soulPath: rel, prUrl: result?.prUrl ?? "", branch: result?.branch ?? "" }
     );
   }
 
