@@ -27,7 +27,8 @@ import {
   FaChevronRight,
   FaShareNodes,
   FaWindowRestore,
-  FaScrewdriverWrench
+  FaScrewdriverWrench,
+  FaUsers
 } from "react-icons/fa6";
 import { ThemeToggle } from "./theme-toggle";
 import { TextScaleToggle } from "./text-scale-toggle";
@@ -50,6 +51,7 @@ const links: NavLink[] = [
     icon: FaShareNodes,
     subtitle: "Read-only identity evolution timeline (persona, learning, backups)."
   },
+  { href: "/admin/people", label: "People", icon: FaUsers, subtitle: "Per-person profiles, identities, relationships, and admin overrides." },
   { href: "/reports", label: "Reports", icon: FaBookOpen, subtitle: "Weekly learning summaries and overnight digests." },
   { href: "/learning", label: "Learning", icon: FaRobot, subtitle: "Self-improvement events and autonomous learning runs." },
   { href: "/autonomy", label: "Autonomy", icon: FaRobot, subtitle: "Deep diagnostics for learning loops and independence health." },

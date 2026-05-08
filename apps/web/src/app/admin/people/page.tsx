@@ -62,7 +62,7 @@ export default function PeopleAdminPage() {
         <div className="flex-1">
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search people (name, id, topics)..." />
         </div>
-        <Button onClick={() => location.reload()} variant="secondary">
+        <Button onClick={() => location.reload()} tone="neutral">
           Refresh
         </Button>
       </div>
@@ -83,7 +83,7 @@ export default function PeopleAdminPage() {
                   <div className="text-xs opacity-70 truncate">{p.id}</div>
                 </div>
                 <Link href={`/admin/people/${encodeURIComponent(p.id)}`}>
-                  <Button size="sm">Open</Button>
+                  <Button>Open</Button>
                 </Link>
               </div>
               <div className="text-sm opacity-90 flex flex-wrap gap-2">

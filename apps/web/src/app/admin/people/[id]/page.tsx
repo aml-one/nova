@@ -198,7 +198,7 @@ export default function PersonAdminDetailPage() {
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-4">
       <div className="flex items-center justify-between">
         <Link href="/admin/people">
-          <Button variant="secondary">Back</Button>
+          <Button tone="neutral">Back</Button>
         </Link>
         <div className="text-xs opacity-70">{id}</div>
       </div>
@@ -217,8 +217,10 @@ export default function PersonAdminDetailPage() {
                 <div className="mt-2 flex items-center gap-2 text-sm">
                   <Checkbox
                     checked={lockedFields.includes("displayName")}
-                    onCheckedChange={(v) =>
-                      setLockedFields((cur) => (v ? Array.from(new Set([...cur, "displayName"])) : cur.filter((x) => x !== "displayName")))
+                    onChange={(e) =>
+                      setLockedFields((cur) =>
+                        e.target.checked ? Array.from(new Set([...cur, "displayName"])) : cur.filter((x) => x !== "displayName")
+                      )
                     }
                   />
                   <span className="opacity-80">Lock</span>
@@ -238,9 +240,9 @@ export default function PersonAdminDetailPage() {
                 <div className="mt-2 flex items-center gap-2 text-sm">
                   <Checkbox
                     checked={lockedFields.includes("preferredChannel")}
-                    onCheckedChange={(v) =>
+                    onChange={(e) =>
                       setLockedFields((cur) =>
-                        v ? Array.from(new Set([...cur, "preferredChannel"])) : cur.filter((x) => x !== "preferredChannel")
+                        e.target.checked ? Array.from(new Set([...cur, "preferredChannel"])) : cur.filter((x) => x !== "preferredChannel")
                       )
                     }
                   />
@@ -255,8 +257,10 @@ export default function PersonAdminDetailPage() {
               <div className="mt-2 flex items-center gap-2 text-sm">
                 <Checkbox
                   checked={lockedFields.includes("aboutNotes")}
-                  onCheckedChange={(v) =>
-                    setLockedFields((cur) => (v ? Array.from(new Set([...cur, "aboutNotes"])) : cur.filter((x) => x !== "aboutNotes")))
+                  onChange={(e) =>
+                    setLockedFields((cur) =>
+                      e.target.checked ? Array.from(new Set([...cur, "aboutNotes"])) : cur.filter((x) => x !== "aboutNotes")
+                    )
                   }
                 />
                 <span className="opacity-80">Lock</span>
@@ -276,8 +280,8 @@ export default function PersonAdminDetailPage() {
                 <div className="mt-2 flex items-center gap-2 text-sm">
                   <Checkbox
                     checked={lockedFields.includes("rating")}
-                    onCheckedChange={(v) =>
-                      setLockedFields((cur) => (v ? Array.from(new Set([...cur, "rating"])) : cur.filter((x) => x !== "rating")))
+                    onChange={(e) =>
+                      setLockedFields((cur) => (e.target.checked ? Array.from(new Set([...cur, "rating"])) : cur.filter((x) => x !== "rating")))
                     }
                   />
                   <span className="opacity-80">Lock</span>
@@ -296,9 +300,9 @@ export default function PersonAdminDetailPage() {
                 <div className="mt-2 flex items-center gap-2 text-sm">
                   <Checkbox
                     checked={lockedFields.includes("interestScore")}
-                    onCheckedChange={(v) =>
+                    onChange={(e) =>
                       setLockedFields((cur) =>
-                        v ? Array.from(new Set([...cur, "interestScore"])) : cur.filter((x) => x !== "interestScore")
+                        e.target.checked ? Array.from(new Set([...cur, "interestScore"])) : cur.filter((x) => x !== "interestScore")
                       )
                     }
                   />
@@ -318,9 +322,9 @@ export default function PersonAdminDetailPage() {
                 <div className="mt-2 flex items-center gap-2 text-sm">
                   <Checkbox
                     checked={lockedFields.includes("rudenessScore")}
-                    onCheckedChange={(v) =>
+                    onChange={(e) =>
                       setLockedFields((cur) =>
-                        v ? Array.from(new Set([...cur, "rudenessScore"])) : cur.filter((x) => x !== "rudenessScore")
+                        e.target.checked ? Array.from(new Set([...cur, "rudenessScore"])) : cur.filter((x) => x !== "rudenessScore")
                       )
                     }
                   />
@@ -335,8 +339,8 @@ export default function PersonAdminDetailPage() {
               <div className="mt-2 flex items-center gap-2 text-sm">
                 <Checkbox
                   checked={lockedFields.includes("topics")}
-                  onCheckedChange={(v) =>
-                    setLockedFields((cur) => (v ? Array.from(new Set([...cur, "topics"])) : cur.filter((x) => x !== "topics")))
+                  onChange={(e) =>
+                    setLockedFields((cur) => (e.target.checked ? Array.from(new Set([...cur, "topics"])) : cur.filter((x) => x !== "topics")))
                   }
                 />
                 <span className="opacity-80">Lock</span>
@@ -345,11 +349,11 @@ export default function PersonAdminDetailPage() {
 
             <div className="flex items-center gap-4 text-sm">
               <label className="flex items-center gap-2">
-                <Checkbox checked={form.optedOut} onCheckedChange={(v) => setForm({ ...form, optedOut: Boolean(v) })} />
+                <Checkbox checked={form.optedOut} onChange={(e) => setForm({ ...form, optedOut: e.target.checked })} />
                 <span>Opted out</span>
               </label>
               <label className="flex items-center gap-2">
-                <Checkbox checked={form.blocked} onCheckedChange={(v) => setForm({ ...form, blocked: Boolean(v) })} />
+                <Checkbox checked={form.blocked} onChange={(e) => setForm({ ...form, blocked: e.target.checked })} />
                 <span>Blocked</span>
               </label>
             </div>
@@ -393,7 +397,7 @@ export default function PersonAdminDetailPage() {
                   void addIdentity(newKind, v);
                   setNewValue("");
                 }}
-                variant="secondary"
+                tone="neutral"
               >
                 Add
               </Button>
@@ -409,7 +413,7 @@ export default function PersonAdminDetailPage() {
               <Input value={mergeSourceId} onChange={(e) => setMergeSourceId(e.target.value)} placeholder="Source person id" />
               <Button
                 type="button"
-                variant="secondary"
+                tone="neutral"
                 onClick={() => {
                   const v = mergeSourceId.trim();
                   if (!v) return;
