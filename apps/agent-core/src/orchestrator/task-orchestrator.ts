@@ -32,6 +32,7 @@ import {
 } from "../execution/implicit-auto-shell.js";
 import { detectHostTimeIntent, formatNovaLocalTimeSentence, runHostTimeCollection } from "../execution/host-time.js";
 import { parseNaturalLanguageRelayToPerson } from "./natural-language-tell.js";
+import { formatAdminRelayPayload } from "./format-admin-relay-payload.js";
 import {
   detectSkillAuthoringIntent,
   enableAuthoredSkill,
@@ -587,11 +588,12 @@ export class TaskOrchestrator {
       }
       const senderName = person?.displayName ?? "Someone";
       const rel = this.personRelationships.get(userId, target.id, "friend");
-      const prefix =
-        rel?.status === "confirmed"
-          ? `Hey — ${senderName} asked me to remind you:\n\n`
-          : `${senderName} asked me to tell you:\n\n`;
-      const outbound = `${prefix}${tell.message}`;
+      const outbound = formatAdminRelayPayload({
+        recipientDisplayName: target.displayName ?? tell.name,
+        senderDisplayName: senderName,
+        rawMessage: tell.message,
+        relationshipConfirmed: rel?.status === "confirmed"
+      });
       // Use existing dispatcher via outbound queue by re-entering as a synthetic reply job:
       // We can’t reach dispatcher directly here, so we schedule via a normal channel message path:
       // Instead, write into outbound_queue by using a tiny direct DB insert through the dispatcher is not available.
