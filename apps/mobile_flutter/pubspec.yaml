@@ -34,9 +34,15 @@ dependencies:
   dio: ^5.9.0
   flutter_secure_storage: ^9.2.4
   web_socket_channel: ^3.0.3
-  speech_to_text: ^7.3.0
+  audioplayers: ^6.1.0
+  record: ^6.2.0
+  permission_handler: ^11.3.1
+  path_provider: ^2.1.5
   firebase_core: ^4.1.1
   firebase_messaging: ^16.0.1
+  flutter_webrtc: ^0.12.7
+  google_fonts: ^6.2.1
+  vector_math: ^2.1.4
 
 dev_dependencies:
   flutter_test:

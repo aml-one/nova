@@ -1,9 +1,12 @@
-import "package:flutter/material.dart";
-import "package:flutter/foundation.dart";
-import "package:speech_to_text/speech_to_text.dart";
 import "package:firebase_core/firebase_core.dart";
 import "package:firebase_messaging/firebase_messaging.dart";
+import "package:flutter/foundation.dart";
+import "package:flutter/material.dart";
+
 import "nova_api.dart";
+import "screens/chat_page.dart";
+import "theme/nova_theme.dart";
+import "widgets/nova_voice_orb.dart";
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,9 +19,9 @@ class NovaMobileApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: "Nova Mobile",
+      title: "Nova",
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.purple), useMaterial3: true),
+      theme: NovaTheme.dark(),
       home: const RootScreen(),
     );
   }
@@ -32,20 +35,28 @@ class RootScreen extends StatefulWidget {
 }
 
 class _RootScreenState extends State<RootScreen> {
-  final NovaApi _api = NovaApi(baseUrl: const String.fromEnvironment("NOVA_API_BASE_URL", defaultValue: "http://10.0.2.2:8787"));
+  late NovaApi _api;
   bool _ready = false;
   String? _token;
 
   @override
   void initState() {
     super.initState();
+    const fromEnv = String.fromEnvironment("NOVA_API_BASE_URL", defaultValue: "http://127.0.0.1:8787");
+    _api = NovaApi(baseUrl: fromEnv);
     _bootstrap();
   }
 
   Future<void> _bootstrap() async {
     await _tryInitFirebaseAndRegisterPush();
+    final saved = await _api.readSavedBaseUrl();
+    if (saved != null && saved.isNotEmpty) {
+      _api.applyBaseUrl(saved);
+    }
     _token = await _api.readToken();
-    setState(() => _ready = true);
+    if (mounted) {
+      setState(() => _ready = true);
+    }
   }
 
   Future<void> _tryInitFirebaseAndRegisterPush() async {
@@ -58,7 +69,7 @@ class _RootScreenState extends State<RootScreen> {
         await _api.registerPush(
           platform: defaultTargetPlatform == TargetPlatform.iOS ? "ios" : "android",
           token: fcmToken,
-          appVersion: "0.1.0",
+          appVersion: "1.0.0",
         );
       }
     } catch (_) {
@@ -68,17 +79,27 @@ class _RootScreenState extends State<RootScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_ready) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    if (_token == null || _token!.isEmpty) {
-      return LoginScreen(api: _api, onLoggedIn: () async {
-        _token = await _api.readToken();
-        if (mounted) setState(() {});
-      });
+    if (!_ready) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    return HomeShell(api: _api, onLogout: () async {
-      await _api.clearToken();
-      setState(() => _token = null);
-    });
+    if (_token == null || _token!.isEmpty) {
+      return LoginScreen(
+        api: _api,
+        onLoggedIn: () async {
+          _token = await _api.readToken();
+          if (mounted) {
+            setState(() {});
+          }
+        },
+      );
+    }
+    return HomeShell(
+      api: _api,
+      onLogout: () async {
+        await _api.clearToken();
+        setState(() => _token = null);
+      },
+    );
   }
 }
 
@@ -92,44 +113,112 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  final TextEditingController _server = TextEditingController();
   final TextEditingController _email = TextEditingController();
   final TextEditingController _password = TextEditingController();
+  final NovaVoiceOrbController _orbDeco = NovaVoiceOrbController();
   String _error = "";
   bool _loading = false;
 
   @override
+  void initState() {
+    super.initState();
+    _server.text = widget.api.baseUrl;
+    _orbDeco.applyPreset(NovaVoiceOrbPreset.calm);
+  }
+
+  @override
+  void dispose() {
+    _orbDeco.dispose();
+    _server.dispose();
+    _email.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Nova Login")),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            TextField(controller: _email, decoration: const InputDecoration(labelText: "Email")),
-            TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: "Password")),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: _loading ? null : () async {
-                setState(() {
-                  _loading = true;
-                  _error = "";
-                });
-                try {
-                  final data = await widget.api.login(_email.text.trim(), _password.text);
-                  final token = (data["token"] ?? "").toString();
-                  if (token.isEmpty) throw Exception("No token returned");
-                  await widget.api.saveToken(token);
-                  await widget.onLoggedIn();
-                } catch (e) {
-                  setState(() => _error = e.toString());
-                } finally {
-                  if (mounted) setState(() => _loading = false);
-                }
-              },
-              child: Text(_loading ? "Signing in..." : "Sign in"),
-            ),
-            if (_error.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error, style: const TextStyle(color: Colors.red))),
-          ],
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF050810), NovaTheme.canvas, Color(0xFF0E1A2E)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+            children: [
+              const SizedBox(height: 12),
+              Center(
+                child: Column(
+                  children: [
+                    Text("Nova", style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                    const SizedBox(height: 6),
+                    Text("Companion", style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 13)),
+                    const SizedBox(height: 18),
+                    DecoratedBox(
+                      decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: NovaTheme.softGlow(NovaTheme.accent)),
+                      child: NovaVoiceOrb(controller: _orbDeco, size: 112, preset: NovaVoiceOrbPreset.calm, baseColor: NovaTheme.accent),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 28),
+              Text(
+                "Agent URL (same as WebUI). Android emulator: http://10.0.2.2:8787 — device: your LAN IP.",
+                style: TextStyle(fontSize: 12, color: Colors.white.withValues(alpha: 0.55), height: 1.35),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _server,
+                decoration: const InputDecoration(labelText: "Nova API base URL"),
+                keyboardType: TextInputType.url,
+              ),
+              const SizedBox(height: 12),
+              TextField(controller: _email, decoration: const InputDecoration(labelText: "Email")),
+              const SizedBox(height: 10),
+              TextField(controller: _password, obscureText: true, decoration: const InputDecoration(labelText: "Password")),
+              const SizedBox(height: 22),
+              FilledButton(
+                onPressed: _loading
+                    ? null
+                    : () async {
+                        setState(() {
+                          _loading = true;
+                          _error = "";
+                        });
+                        try {
+                          widget.api.applyBaseUrl(_server.text.trim());
+                          await widget.api.saveBaseUrl(_server.text.trim());
+                          final data = await widget.api.login(_email.text.trim(), _password.text);
+                          final token = (data["token"] ?? "").toString();
+                          if (token.isEmpty) {
+                            throw Exception("No token returned");
+                          }
+                          await widget.api.saveToken(token);
+                          await widget.onLoggedIn();
+                        } catch (e) {
+                          setState(() => _error = e.toString());
+                        } finally {
+                          if (mounted) {
+                            setState(() => _loading = false);
+                          }
+                        }
+                      },
+                child: Text(_loading ? "Signing in…" : "Sign in"),
+              ),
+              if (_error.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 14),
+                  child: Text(_error, style: const TextStyle(color: Colors.redAccent)),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -157,19 +246,22 @@ class _HomeShellState extends State<HomeShell> {
       ThoughtsPage(api: widget.api),
     ];
     return Scaffold(
+      extendBody: true,
       appBar: AppBar(
-        title: const Text("Nova Mobile"),
-        actions: [IconButton(onPressed: () => widget.onLogout(), icon: const Icon(Icons.logout))],
+        title: const Text("Nova"),
+        actions: [
+          IconButton(onPressed: () => widget.onLogout(), icon: const Icon(Icons.logout_rounded)),
+        ],
       ),
       body: pages[_index],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard), label: "Dashboard"),
-          NavigationDestination(icon: Icon(Icons.approval), label: "Approvals"),
-          NavigationDestination(icon: Icon(Icons.chat), label: "Chat"),
-          NavigationDestination(icon: Icon(Icons.psychology), label: "Thoughts"),
+          NavigationDestination(icon: Icon(Icons.dashboard_rounded), label: "Home"),
+          NavigationDestination(icon: Icon(Icons.approval_rounded), label: "Approvals"),
+          NavigationDestination(icon: Icon(Icons.chat_bubble_rounded), label: "Chat"),
+          NavigationDestination(icon: Icon(Icons.auto_awesome_rounded), label: "Thoughts"),
         ],
       ),
     );
@@ -194,7 +286,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<void> _refresh() async {
     final data = await widget.api.health();
-    if (mounted) setState(() => _health = data);
+    if (mounted) {
+      setState(() => _health = data);
+    }
   }
 
   @override
@@ -203,18 +297,32 @@ class _DashboardPageState extends State<DashboardPage> {
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
         children: [
           Card(
+            elevation: 0,
+            color: NovaTheme.surface2.withValues(alpha: 0.85),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
             child: ListTile(
               title: const Text("System health"),
               subtitle: Text("Level: ${((_health["health"] as Map?)?["level"] ?? "unknown").toString()}"),
-              trailing: IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh)),
+              trailing: IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh_rounded)),
             ),
           ),
           ...checks.take(12).map((item) {
             final row = item as Map;
-            return Card(child: ListTile(title: Text((row["name"] ?? "").toString()), subtitle: Text((row["detail"] ?? "").toString())));
+            return Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Card(
+                elevation: 0,
+                color: NovaTheme.surface.withValues(alpha: 0.65),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: ListTile(
+                  title: Text((row["name"] ?? "").toString()),
+                  subtitle: Text((row["detail"] ?? "").toString(), style: TextStyle(color: Colors.white.withValues(alpha: 0.55))),
+                ),
+              ),
+            );
           }),
         ],
       ),
@@ -239,7 +347,9 @@ class _ApprovalsPageState extends State<ApprovalsPage> {
 
   Future<void> _load() async {
     final rows = await widget.api.approvals();
-    if (mounted) setState(() => _items = rows);
+    if (mounted) {
+      setState(() => _items = rows);
+    }
   }
 
   @override
@@ -247,110 +357,32 @@ class _ApprovalsPageState extends State<ApprovalsPage> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
         children: _items.map((item) {
           final id = (item["id"] ?? "").toString();
-          return Card(
-            child: ListTile(
-              title: Text((item["command"] ?? "approval").toString()),
-              subtitle: Text("Risk: ${(item["risk_level"] ?? "-").toString()}"),
-              trailing: FilledButton(
-                onPressed: id.isEmpty ? null : () async {
-                  await widget.api.approve(id);
-                  await _load();
-                },
-                child: const Text("Approve"),
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Card(
+              elevation: 0,
+              color: NovaTheme.surface2.withValues(alpha: 0.88),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: ListTile(
+                title: Text((item["command"] ?? "approval").toString()),
+                subtitle: Text("Risk: ${(item["risk_level"] ?? "-").toString()}"),
+                trailing: FilledButton(
+                  onPressed: id.isEmpty
+                      ? null
+                      : () async {
+                          await widget.api.approve(id);
+                          await _load();
+                        },
+                  child: const Text("Approve"),
+                ),
               ),
             ),
           );
         }).toList(),
       ),
-    );
-  }
-}
-
-class ChatPage extends StatefulWidget {
-  const ChatPage({super.key, required this.api});
-  final NovaApi api;
-  @override
-  State<ChatPage> createState() => _ChatPageState();
-}
-
-class _ChatPageState extends State<ChatPage> {
-  final TextEditingController _input = TextEditingController();
-  final List<String> _messages = [];
-  final SpeechToText _stt = SpeechToText();
-  bool _streaming = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: _messages.map((e) => Card(child: Padding(padding: const EdgeInsets.all(12), child: Text(e)))).toList(),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              IconButton(
-                onPressed: () async {
-                  final available = await _stt.initialize();
-                  if (!available) return;
-                  await _stt.listen(onResult: (result) {
-                    _input.text = result.recognizedWords;
-                  });
-                },
-                icon: const Icon(Icons.mic),
-              ),
-              Expanded(child: TextField(controller: _input, decoration: const InputDecoration(hintText: "Message Nova"))),
-              IconButton(
-                onPressed: () async {
-                  final text = _input.text.trim();
-                  if (text.isEmpty || _streaming) return;
-                  setState(() => _messages.add("You: $text"));
-                  _input.clear();
-                  setState(() {
-                    _streaming = true;
-                    _messages.add("Nova: ");
-                  });
-                  String assembled = "";
-                  try {
-                    await for (final token in widget.api.chatStream(text)) {
-                      assembled += token;
-                      if (!mounted) break;
-                      setState(() {
-                        _messages[_messages.length - 1] = "Nova: $assembled";
-                      });
-                    }
-                    if (assembled.isEmpty) {
-                      final fallback = await widget.api.chat(text);
-                      if (mounted) {
-                        setState(() {
-                          _messages[_messages.length - 1] = "Nova: $fallback";
-                        });
-                      }
-                    }
-                  } catch (_) {
-                    final fallback = await widget.api.chat(text);
-                    if (mounted) {
-                      setState(() {
-                        _messages[_messages.length - 1] = "Nova: $fallback";
-                      });
-                    }
-                  } finally {
-                    if (mounted) setState(() => _streaming = false);
-                  }
-                },
-                icon: const Icon(Icons.send),
-              )
-            ],
-          ),
-        )
-      ],
     );
   }
 }
@@ -373,7 +405,9 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
 
   Future<void> _load() async {
     final rows = await widget.api.thoughts();
-    if (mounted) setState(() => _items = rows);
+    if (mounted) {
+      setState(() => _items = rows);
+    }
   }
 
   @override
@@ -381,12 +415,18 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
         children: _items.take(80).map((item) {
-          return Card(
-            child: ListTile(
-              title: Text((item["title"] ?? "").toString()),
-              subtitle: Text((item["content"] ?? "").toString()),
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: Card(
+              elevation: 0,
+              color: NovaTheme.surface.withValues(alpha: 0.72),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: ListTile(
+                title: Text((item["title"] ?? "").toString()),
+                subtitle: Text((item["content"] ?? "").toString(), style: TextStyle(color: Colors.white.withValues(alpha: 0.58))),
+              ),
             ),
           );
         }).toList(),
