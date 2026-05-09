@@ -30,6 +30,12 @@ import { OutboundDispatcher } from "../messaging/outbound-dispatcher.js";
 import { ProactiveOutreachDaemon } from "../messaging/proactive-outreach-daemon.js";
 import { Logger } from "../observability/logger.js";
 import { VoiceService, isVoiceSttConfigured } from "../voice/voice-service.js";
+import {
+  getVoiceGatewayStatus,
+  voiceGatewayRestart,
+  voiceGatewayStart,
+  voiceGatewayStop
+} from "../voice/voice-gateway-control.js";
 import { getRecentTtsEntries, recordTtsSpeakResult } from "../voice/tts-recent-log.js";
 import { prepareChatTextForSpeech } from "../voice/tts-text.js";
 import { getDatabase } from "../storage/sqlite.js";
@@ -1952,6 +1958,46 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       }
       if (request.method === "GET" && parsedUrl.pathname === "/v1/voice/stt-status") {
         return sendJson(response, 200, { correlationId, configured: isVoiceSttConfigured() });
+      }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/voice/gateway/status") {
+        if (!hasInternalAuth && !hasSessionAuth && loginEnabled) {
+          return sendJson(response, 401, { error: "unauthorized", correlationId });
+        }
+        const st = await getVoiceGatewayStatus();
+        return sendJson(response, 200, { correlationId, ...st });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/voice/gateway/start") {
+        if (
+          loginEnabled &&
+          !hasInternalAuth &&
+          (!sessionUser || !options.auth.isAdminUser(sessionUser.id))
+        ) {
+          return sendJson(response, 403, { error: "admin required", correlationId });
+        }
+        const r = await voiceGatewayStart();
+        return sendJson(response, r.ok ? 200 : 503, { correlationId, ...r });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/voice/gateway/stop") {
+        if (
+          loginEnabled &&
+          !hasInternalAuth &&
+          (!sessionUser || !options.auth.isAdminUser(sessionUser.id))
+        ) {
+          return sendJson(response, 403, { error: "admin required", correlationId });
+        }
+        const r = await voiceGatewayStop();
+        return sendJson(response, r.ok ? 200 : 503, { correlationId, ...r });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/voice/gateway/restart") {
+        if (
+          loginEnabled &&
+          !hasInternalAuth &&
+          (!sessionUser || !options.auth.isAdminUser(sessionUser.id))
+        ) {
+          return sendJson(response, 403, { error: "admin required", correlationId });
+        }
+        const r = await voiceGatewayRestart();
+        return sendJson(response, r.ok ? 200 : 503, { correlationId, ...r });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/voice/transcribe") {
         const payload = (await readJson(request)) as { audioPath: string };

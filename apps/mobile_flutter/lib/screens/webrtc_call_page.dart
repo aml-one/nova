@@ -25,11 +25,50 @@ class _WebrtcCallPageState extends State<WebrtcCallPage> {
   StreamSubscription<dynamic>? _sub;
   String _status = "Idle";
   bool _busy = false;
+  String _serverCtl = "";
+  bool _ctlBusy = false;
 
   @override
   void initState() {
     super.initState();
     _bootstrapGatewayField();
+    unawaited(_refreshServerGatewayCtl());
+  }
+
+  Future<void> _refreshServerGatewayCtl() async {
+    try {
+      final m = await widget.api.voiceGatewayStatus();
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _serverCtl =
+            "launchd=${m['launchdLoaded']}  http=${m['healthy']}  macOS control=${m['controlSupported']}  plist=${m['plistPresent']}";
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() => _serverCtl = "Server status: $e");
+      }
+    }
+  }
+
+  Future<void> _postCtl(Future<Map<String, dynamic>> Function() fn) async {
+    setState(() => _ctlBusy = true);
+    try {
+      final r = await fn();
+      if (mounted) {
+        setState(() => _status = "${r['ok'] == true ? 'OK' : 'Failed'}: ${r['message'] ?? r.toString()}");
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _status = "Control error: $e");
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _ctlBusy = false);
+      }
+      await _refreshServerGatewayCtl();
+    }
   }
 
   Future<void> _bootstrapGatewayField() async {
@@ -238,6 +277,36 @@ class _WebrtcCallPageState extends State<WebrtcCallPage> {
             style: TextStyle(color: Colors.white.withValues(alpha: 0.62), fontSize: 13, height: 1.35),
           ),
           const SizedBox(height: 16),
+          Text(
+            "Server (agent-core) can start/stop the macOS LaunchDaemon if Nova runs as root. Requires admin when login is enabled.",
+            style: TextStyle(color: Colors.white.withValues(alpha: 0.55), fontSize: 12, height: 1.3),
+          ),
+          const SizedBox(height: 8),
+          Text(_serverCtl.isEmpty ? "Loading server gateway status…" : _serverCtl, style: const TextStyle(fontSize: 12)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              TextButton(
+                onPressed: _ctlBusy ? null : _refreshServerGatewayCtl,
+                child: const Text("Refresh"),
+              ),
+              TextButton(
+                onPressed: _ctlBusy ? null : () => _postCtl(widget.api.voiceGatewayStart),
+                child: const Text("Start service"),
+              ),
+              TextButton(
+                onPressed: _ctlBusy ? null : () => _postCtl(widget.api.voiceGatewayStop),
+                child: const Text("Stop service"),
+              ),
+              TextButton(
+                onPressed: _ctlBusy ? null : () => _postCtl(widget.api.voiceGatewayRestart),
+                child: const Text("Restart service"),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
           TextField(
             controller: _gateway,
             decoration: const InputDecoration(labelText: "Voice gateway HTTP base"),

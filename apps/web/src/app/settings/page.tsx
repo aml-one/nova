@@ -25,7 +25,7 @@ import {
   labelForSkillBadgeState,
   type SkillBadgeState
 } from "../../lib/skill-badge";
-import { VoiceWakeWordPanel, OrpheusTtsPreviewCard } from "../../components/voice-settings-panel";
+import { VoiceWakeWordPanel, VoiceWebRtcGatewayPanel, OrpheusTtsPreviewCard } from "../../components/voice-settings-panel";
 import { apiFetch } from "../../lib/api-fetch";
 import { clearAgentRestartExpected, markAgentRestartExpected } from "../../lib/agent-restart-grace";
 
@@ -4042,6 +4042,7 @@ export default function SettingsPage() {
               </div>
             </div>
             <VoiceWakeWordPanel />
+            <VoiceWebRtcGatewayPanel />
             <div className="rounded-ui border border-border bg-surface/80 p-3 space-y-3">
               <h3 className="text-sm font-semibold">Orpheus TTS (optional)</h3>
               <p className="text-xs text-muted">

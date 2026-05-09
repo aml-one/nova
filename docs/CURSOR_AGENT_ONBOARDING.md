@@ -51,6 +51,7 @@ This is the common “Nova Mac server” pattern (example path: `~/projects/Nova
 ### Install / service identity
 
 - **LaunchDaemon label**: `com.nova.localstack`
+- **WebRTC voice gateway** (Python, mobile/WebRTC bridge): LaunchDaemon label `com.nova.voice-gateway` — HTTP `http://127.0.0.1:8790/health`. Installed with the main macOS service install unless `NOVA_SKIP_VOICE_GATEWAY_INSTALL=1`. Logs: `tmp/nova-voice-gateway.log`, `tmp/nova-voice-gateway.err.log`. Admin-only in WebUI: Settings → Voice → WebRTC voice gateway (start/stop/restart).
 - **Plist**: `/Library/LaunchDaemons/com.nova.localstack.plist`
 - **Runner script**: `scripts/start-local-macos-service.sh` → calls `scripts/start-local.sh`
 - **Install script**: `sudo bash ./scripts/install-macos-service.sh` (from repo, with **`SUDO_USER` set** — do not use bare `sudo su -`)

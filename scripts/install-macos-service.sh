@@ -101,6 +101,15 @@ fi
 launchctl enable "system/${LABEL}"
 launchctl kickstart -k "system/${LABEL}"
 
+# WebRTC voice gateway (Python, port 8790) — skip with NOVA_SKIP_VOICE_GATEWAY_INSTALL=1
+if [[ "${NOVA_SKIP_VOICE_GATEWAY_INSTALL:-}" == "1" ]]; then
+  echo "Skipping WebRTC voice gateway install (NOVA_SKIP_VOICE_GATEWAY_INSTALL=1)."
+else
+  echo ""
+  echo "Installing WebRTC voice gateway (com.nova.voice-gateway)…"
+  bash "${ROOT_DIR}/scripts/install-macos-voice-gateway-service.sh"
+fi
+
 echo "Installed ${LABEL} as root LaunchDaemon (HTTPS on 443)."
 echo "After git pull / identity backup, agent-core will: chown -R ${SERVICE_USER}:staff .git (via NOVA_REPO_GIT_CHOWN)."
 echo ""

@@ -144,3 +144,109 @@ export function OrpheusTtsPreviewCard() {
     </Card>
   );
 }
+
+type VoiceGatewayStatus = {
+  platform?: string;
+  controlSupported?: boolean;
+  plistPresent?: boolean;
+  launchdLoaded?: boolean;
+  healthy?: boolean;
+  healthBody?: string;
+  detail?: string;
+};
+
+/** macOS LaunchDaemon `com.nova.voice-gateway` — WebRTC bridge for mobile (admin actions). */
+export function VoiceWebRtcGatewayPanel() {
+  const [status, setStatus] = useState<VoiceGatewayStatus | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [lastAction, setLastAction] = useState<string | null>(null);
+
+  const refresh = async () => {
+    const response = await fetch("/api/voice/gateway/status");
+    const data = (await response.json().catch(() => ({}))) as VoiceGatewayStatus;
+    setStatus(data);
+  };
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const run = async (path: string) => {
+    setBusy(true);
+    setLastAction(null);
+    try {
+      const response = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      const data = await response.json().catch(() => ({}));
+      setLastAction(`${response.status}: ${JSON.stringify(data)}`);
+      await refresh();
+    } catch (e) {
+      setLastAction(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold">WebRTC voice gateway</h3>
+        <p className="mt-1 text-xs text-muted">
+          macOS service <code className="text-[11px]">com.nova.voice-gateway</code> (port 8790). Install:{" "}
+          <code className="text-[11px]">sudo bash ./scripts/install-macos-voice-gateway-service.sh</code> — bundled with the main Nova
+          install. Start/stop/restart require <strong>admin</strong> when login is enabled.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2 text-xs">
+        <Button type="button" tone="neutral" disabled={busy} onClick={() => void refresh()}>
+          Refresh status
+        </Button>
+        <Button type="button" tone="blue" disabled={busy} onClick={() => void run("/api/voice/gateway/start")}>
+          Start
+        </Button>
+        <Button type="button" tone="neutral" disabled={busy} onClick={() => void run("/api/voice/gateway/stop")}>
+          Stop
+        </Button>
+        <Button type="button" tone="blue" disabled={busy} onClick={() => void run("/api/voice/gateway/restart")}>
+          Restart
+        </Button>
+      </div>
+      {status ? (
+        <div className="space-y-1 rounded-ui border border-border bg-surface2/80 p-2 text-xs">
+          <div>
+            <strong>Platform:</strong> {status.platform ?? "—"}
+          </div>
+          <div>
+            <strong>Launchd control:</strong> {status.controlSupported ? "yes" : "no"}
+          </div>
+          <div>
+            <strong>Plist present:</strong> {status.plistPresent ? "yes" : "no"}
+          </div>
+          <div>
+            <strong>Job loaded:</strong> {status.launchdLoaded ? "yes" : "no"}
+          </div>
+          <div>
+            <strong>HTTP healthy:</strong> {status.healthy ? "yes" : "no"}
+          </div>
+          {status.detail ? (
+            <div className="text-muted">
+              <strong>Note:</strong> {status.detail}
+            </div>
+          ) : null}
+          {status.healthBody ? (
+            <details className="text-muted">
+              <summary className="cursor-pointer">Health body</summary>
+              <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-all">{status.healthBody}</pre>
+            </details>
+          ) : null}
+        </div>
+      ) : (
+        <div className="text-xs text-muted">Loading…</div>
+      )}
+      {lastAction ? (
+        <div className="text-[11px] text-muted">
+          <strong>Last action:</strong> {lastAction}
+        </div>
+      ) : null}
+    </Card>
+  );
+}

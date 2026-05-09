@@ -75,6 +75,47 @@ class NovaApi {
   }
 
   /// `GET /v1/ice` on the voice gateway (not agent-core).
+  /// `GET /v1/voice/gateway/status` — LaunchDaemon + HTTP health (any logged-in user when login enabled).
+  Future<Map<String, dynamic>> voiceGatewayStatus() async {
+    final token = await readToken();
+    final response = await _dio.get(
+      "/v1/voice/gateway/status",
+      options: Options(headers: _headers(token)),
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  /// Admin when login enabled. Requires agent-core running as root on macOS for launchctl.
+  Future<Map<String, dynamic>> voiceGatewayStart() async {
+    final token = await readToken();
+    final response = await _dio.post(
+      "/v1/voice/gateway/start",
+      data: const {},
+      options: Options(headers: _headers(token)),
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<Map<String, dynamic>> voiceGatewayStop() async {
+    final token = await readToken();
+    final response = await _dio.post(
+      "/v1/voice/gateway/stop",
+      data: const {},
+      options: Options(headers: _headers(token)),
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  Future<Map<String, dynamic>> voiceGatewayRestart() async {
+    final token = await readToken();
+    final response = await _dio.post(
+      "/v1/voice/gateway/restart",
+      data: const {},
+      options: Options(headers: _headers(token)),
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
   Future<List<Map<String, dynamic>>> fetchGatewayIce(String gatewayHttpBase) async {
     final root = gatewayHttpBase.trim().replaceAll(RegExp(r"/+$"), "");
     final r = await Dio().get<Map<String, dynamic>>("$root/v1/ice");
