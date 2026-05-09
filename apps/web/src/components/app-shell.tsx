@@ -255,7 +255,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-gradient-to-br from-surface via-surface to-surface2">
       <aside
         className={cn(
-          "fixed left-0 top-0 z-40 h-screen border-r bg-surface/95 p-2 backdrop-blur transition-all",
+          "fixed left-0 top-0 z-40 flex h-screen flex-col border-r bg-surface/95 p-2 backdrop-blur transition-all",
           navCollapsed ? "w-14" : "w-56"
         )}
       >
@@ -272,7 +272,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             {navCollapsed ? <FaChevronRight className="h-3 w-3" /> : <FaChevronLeft className="h-3 w-3" />}
           </button>
         </div>
-        <nav className="space-y-1 overflow-y-auto">
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto pb-2">
           {links.map((link, index) => {
             const badgeCount = navBadges[link.href] ?? 0;
             return (
@@ -324,7 +324,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Link>
           </div>
         </nav>
-        <div className={cn("absolute bottom-2 left-2 right-2", navCollapsed ? "" : "")}>
+        <div className={cn("mt-auto", navCollapsed ? "" : "")}>
           <div className={cn("mb-1 flex items-center gap-1", navCollapsed ? "justify-center" : "justify-end")}>
             <TextScaleToggle compact={navCollapsed} />
             <ThemeToggle />
