@@ -174,6 +174,9 @@ export function prepareChatTextForSpeech(raw: string, maxChars = 8000): string {
   visible = visible.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
   visible = visible.replace(/[\uFEFF\u200B-\u200D]/g, "");
   visible = visible.replace(/[\u2013\u2014]/g, ", ");
+  // Quotes and markdown markers often confuse TTS models into reading punctuation literally or repeating segments.
+  // Keep apostrophes (contractions) but drop double-quote variants.
+  visible = visible.replace(/[“”"]/g, " ");
   visible = visible.replace(/[#*_>`]+/g, " ");
   visible = visible.replace(/\s+/g, " ").trim();
   visible = normalizeOrpheusSpeechCues(visible);

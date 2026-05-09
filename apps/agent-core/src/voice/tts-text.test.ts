@@ -109,4 +109,11 @@ describe("prepareChatTextForSpeech", () => {
     expect(out).toContain("<chuckle> Next sentence");
     expect(out).not.toMatch(/<chuckle\s+N/);
   });
+
+  it("drops quotes and markdown markers that can confuse TTS", () => {
+    const out = prepareChatTextForSpeech('He said: "wow" *really* `code`.', 200);
+    expect(out).not.toMatch(/["*`]/);
+    expect(out).toContain("He said:");
+    expect(out).toContain("wow");
+  });
 });

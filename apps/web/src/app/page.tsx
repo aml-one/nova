@@ -62,6 +62,13 @@ type ChatTurn = {
   isPending?: boolean;
 };
 
+type TtsTrace = {
+  requestText?: string;
+  preparedForSpeech?: string;
+  sentToOrpheus?: string;
+  correlationId?: string;
+};
+
 type StreamPhase = "thinking" | "reasoning" | "web-search";
 
 type ChatSession = {
@@ -627,6 +634,10 @@ export default function HomePage() {
   const [ttsGeneratingTurnId, setTtsGeneratingTurnId] = useState<string | null>(null);
   /** True only while the chat audio element is in `playing` (not during fetch/generate). */
   const [ttsPlaybackActive, setTtsPlaybackActive] = useState(false);
+  const [ttsTraceOpenTurnId, setTtsTraceOpenTurnId] = useState<string | null>(null);
+  const [ttsTrace, setTtsTrace] = useState<TtsTrace | null>(null);
+  const [ttsTraceBusy, setTtsTraceBusy] = useState(false);
+  const [ttsTraceError, setTtsTraceError] = useState<string | null>(null);
   const [sttRecording, setSttRecording] = useState(false);
   const [sttTranscribing, setSttTranscribing] = useState(false);
   const [sttError, setSttError] = useState<string | null>(null);
@@ -1835,6 +1846,35 @@ export default function HomePage() {
     triggerBlobDownload(blob, mime, `nova-chat-${turnId.slice(0, 12)}`);
   }, []);
 
+  const openTtsTraceForTurn = useCallback(async (turnId: string, rawText: string): Promise<void> => {
+    const cleaned = stripMarkdownForTts(rawText);
+    setTtsTraceOpenTurnId(turnId);
+    setTtsTrace(null);
+    setTtsTraceError(null);
+    if (!cleaned.trim()) {
+      setTtsTraceError("Nothing to speak after cleanup.");
+      return;
+    }
+    setTtsTraceBusy(true);
+    try {
+      const response = await apiFetch("/api/voice/tts-trace", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: cleaned })
+      });
+      const data = (await response.json().catch(() => ({}))) as TtsTrace & { error?: string };
+      if (!response.ok) {
+        setTtsTraceError(data.error || `tts-trace failed (${response.status})`);
+        return;
+      }
+      setTtsTrace(data);
+    } catch (e) {
+      setTtsTraceError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTtsTraceBusy(false);
+    }
+  }, []);
+
   function stopGeneration(): void {
     streamAbortRef.current?.abort();
     stopChatTtsPlayback();
@@ -3030,6 +3070,17 @@ export default function HomePage() {
                       >
                         <FaDownload className="h-3.5 w-3.5 shrink-0" />
                       </button>
+                      <button
+                        type="button"
+                        disabled={!turn.text.trim()}
+                        title="Show spoken transcript (what Nova actually sent to TTS after cleanup)"
+                        aria-label="Show spoken transcript"
+                        onClick={() => void openTtsTraceForTurn(turn.id, turn.text)}
+                        className={cn(bubbleIconActionClass, "disabled:cursor-not-allowed disabled:opacity-45")}
+                        style={{ color: ensureReadableTextColor(assistantActionIconColorForTheme, isDarkTheme) }}
+                      >
+                        TTS
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -3089,6 +3140,51 @@ export default function HomePage() {
         </div>
       </div>
       <audio ref={chatTtsAudioRef} className="hidden" playsInline preload="none" />
+      {ttsTraceOpenTurnId ? (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-2xl rounded-ui border border-border bg-surface p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-semibold text-text">Spoken transcript</div>
+                <div className="mt-0.5 text-[11px] text-muted">
+                  Shows the exact text agent-core prepared for TTS (useful when quotes/markdown are stripped).
+                </div>
+              </div>
+              <button
+                type="button"
+                className="rounded-ui border border-border bg-surface2 px-2 py-1 text-xs text-text"
+                onClick={() => {
+                  setTtsTraceOpenTurnId(null);
+                  setTtsTrace(null);
+                  setTtsTraceError(null);
+                }}
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-3 space-y-3">
+              {ttsTraceBusy ? <div className="text-xs text-muted">Loading…</div> : null}
+              {ttsTraceError ? <div className="text-xs text-rose-500">{ttsTraceError}</div> : null}
+              {ttsTrace ? (
+                <>
+                  <div className="space-y-1">
+                    <div className="text-xs font-semibold text-text">Prepared for speech</div>
+                    <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-ui border border-border bg-surface2 p-2 text-[12px] text-text">
+                      {ttsTrace.preparedForSpeech || ""}
+                    </pre>
+                  </div>
+                  <details className="text-xs text-muted">
+                    <summary className="cursor-pointer">Show full TTS trace JSON</summary>
+                    <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-ui border border-border bg-surface2 p-2 text-[11px] text-muted">
+                      {JSON.stringify(ttsTrace, null, 2)}
+                    </pre>
+                  </details>
+                </>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="relative z-10 -mt-8 mb-[55px] shrink-0 bg-gradient-to-t from-surface from-15% via-surface/90 to-transparent pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] pt-10">
         <form ref={chatFormRef} onSubmit={onSubmit} className="flex w-full flex-col gap-2">
           {loading ? (
