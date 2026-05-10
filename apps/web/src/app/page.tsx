@@ -1,6 +1,7 @@
 /* eslint-disable react/no-unescaped-entities */
 "use client";
 
+import Image from "next/image";
 import type { RefObject } from "react";
 import { FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "next-themes";
@@ -2803,8 +2804,17 @@ export default function HomePage() {
         >
           {!chatStyleReady ? <div className="text-sm text-muted">Loading chat style…</div> : null}
           {chatStyleReady && turns.length === 0 ? (
-            <div className="flex min-h-[min(48vh,26rem)] flex-col items-center justify-center py-10 text-center">
-              <p className="text-lg font-normal tracking-tight text-text">What&apos;s on your mind today?</p>
+            <div className="flex min-h-[min(48vh,26rem)] flex-col items-center justify-center py-10">
+              <div className="relative h-40 w-[min(85vw,22rem)] shrink-0">
+                <Image
+                  src="/brand/nova_logo.png"
+                  alt="Nova"
+                  fill
+                  sizes="(max-width: 768px) 85vw, 22rem"
+                  className="object-contain"
+                  priority
+                />
+              </div>
             </div>
           ) : null}
           {chatStyleReady && turns.map((turn, index) => (

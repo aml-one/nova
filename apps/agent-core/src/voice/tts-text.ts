@@ -6,6 +6,25 @@ const ORPHEUS_CUE_NAMES = ORPHEUS_SPEECH_CUE_NAMES;
 /** Longer cue names first so `chuckles` wins over the `chuckle` prefix. */
 const ORPHEUS_CUE_NAME_LIST = ORPHEUS_SPEECH_CUE_NAMES.split("|").sort((a, b) => b.length - a.length);
 
+function escapeRegexCueName(name: string): string {
+  return name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * One-shot repair for model-authored Orpheus cues missing `>` (`<chuckle Akkor`, `<laugh  hmm`).
+ * Runs before {@link ensureOrpheusCueTagsClosed} so we do not chase each typo variant in the UI.
+ */
+export function repairUnclosedOrpheusCueOpens(text: string): string {
+  let t = text.replace(/\u00a0/g, " ").normalize("NFC");
+  for (const name of ORPHEUS_CUE_NAME_LIST) {
+    const esc = escapeRegexCueName(name);
+    t = t.replace(new RegExp(`<\\s*${esc}\\b(\\s+)(?=[^>\\n])`, "gi"), `<${name}>$1`);
+    // Do not use `i` here: `/iu` makes `(?=\p{Lu})` match after `<chuckles` (false positive).
+    t = t.replace(new RegExp(`<\\s*${esc}(?=\\p{Lu})`, "gu"), `<${name}> `);
+  }
+  return t;
+}
+
 /**
  * Ensures known cue opens are always closed with `>` before speech continues.
  * Handles `<chuckle Cleo`, `<chuckleOkay`, trailing `<chuckle`, optional spaces before `>`, any casing.
@@ -77,7 +96,8 @@ export function canonicalizeChuckleCueForOrpheus(text: string): string {
 }
 
 export function normalizeOrpheusSpeechCues(text: string): string {
-  let t = ensureOrpheusCueTagsClosed(text);
+  let t = repairUnclosedOrpheusCueOpens(text);
+  t = ensureOrpheusCueTagsClosed(t);
   t = dedupeAdjacentOrpheusCueTags(t);
   t = t.replace(/\s{2,}/g, " ").trim();
   return canonicalizeChuckleCueForOrpheus(t);

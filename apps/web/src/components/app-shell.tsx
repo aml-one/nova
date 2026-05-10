@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
@@ -24,7 +25,6 @@ import {
   FaWandMagicSparkles,
   FaBookOpen,
   FaChevronLeft,
-  FaChevronRight,
   FaShareNodes,
   FaWindowRestore,
   FaScrewdriverWrench,
@@ -293,15 +293,31 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         <div className={cn("mb-2 flex min-h-8 items-center gap-2", navCollapsed ? "justify-center" : "justify-between")}>
           {!navCollapsed ? (
-            <h1 className="min-w-0 flex-1 text-3xl font-bold leading-8 tracking-tight text-text">Nova</h1>
+            <div className="relative h-8 min-w-0 flex-1">
+              <Image
+                src="/brand/nova_logo.png"
+                alt="Nova"
+                fill
+                sizes="176px"
+                className="object-contain object-left"
+                priority
+              />
+            </div>
           ) : null}
           <button
             type="button"
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-ui border bg-surface2 text-[10px]"
+            className={cn(
+              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-ui border bg-surface2",
+              navCollapsed ? "p-0" : "text-[10px]"
+            )}
             onClick={toggleNavCollapsed}
             title={navCollapsed ? "Expand menu" : "Collapse menu"}
           >
-            {navCollapsed ? <FaChevronRight className="h-3 w-3" /> : <FaChevronLeft className="h-3 w-3" />}
+            {navCollapsed ? (
+              <Image src="/brand/nova_icon.png" alt="Open menu" width={28} height={28} className="object-contain" />
+            ) : (
+              <FaChevronLeft className="h-3 w-3" />
+            )}
           </button>
         </div>
         <div className="relative min-h-0 flex-1 overflow-hidden">

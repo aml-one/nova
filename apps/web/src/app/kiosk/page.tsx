@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FaMicrophone } from "react-icons/fa6";
 import { ChatMarkdown } from "../../components/chat-markdown";
@@ -195,14 +196,14 @@ export default function KioskPage() {
   }, [listening, startRecorder, stopRecorder]);
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-surface text-text">
+    <div className="flex h-[100dvh] flex-col bg-surface pt-14 text-text sm:pt-16">
       <div className="flex h-[33vh] min-h-[140px] shrink-0 flex-col items-center justify-center px-4">
         <div className="h-full w-full max-w-[min(52vw,420px)]">
           <NovaThreeSpeakingOrb ref={orbRef} className="h-full w-full" preset="speaking" baseColor="#5ec8ff" />
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pb-20 pt-2 [scrollbar-width:thin]">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pb-6 pt-2 [scrollbar-width:thin]">
         {markdown.trim().length === 0 ? (
           <p className="text-center text-xl text-muted">Waiting for Nova…</p>
         ) : (
@@ -214,7 +215,7 @@ export default function KioskPage() {
         {thinking ? <p className="mt-2 text-center text-sm text-muted">Thinking…</p> : null}
       </div>
 
-      <div className="pointer-events-none fixed bottom-4 left-0 right-0 flex justify-center">
+      <div className="pointer-events-none fixed left-0 right-0 top-4 z-20 flex h-10 items-center justify-center px-4">
         <button
           type="button"
           onClick={() => toggleMic()}
@@ -228,6 +229,16 @@ export default function KioskPage() {
         >
           <FaMicrophone className="h-4 w-4" />
         </button>
+        <div className="pointer-events-none absolute right-4 top-1/2 h-10 w-28 -translate-y-1/2 sm:right-8">
+          <Image
+            src="/brand/nova_logo.png"
+            alt="Nova"
+            fill
+            sizes="112px"
+            className="object-contain object-right"
+            priority
+          />
+        </div>
       </div>
 
       <audio ref={audioRef} className="hidden" playsInline />

@@ -4,6 +4,7 @@ import {
   ensureOrpheusCueTagsClosed,
   normalizeOrpheusSpeechCues,
   prepareChatTextForSpeech,
+  repairUnclosedOrpheusCueOpens,
   stripChannelAssistantScratchpad,
   stripNovaToneMarkup,
   stripOrpheusSpeechCues
@@ -51,6 +52,18 @@ describe("dedupeAdjacentOrpheusCueTags", () => {
   it("collapses repeated identical cue tags", () => {
     expect(dedupeAdjacentOrpheusCueTags("<chuckle> <chuckle> Hello")).toBe("<chuckle> Hello");
     expect(dedupeAdjacentOrpheusCueTags("<chuckle> <chuckle> <chuckle> Hi")).toBe("<chuckle> Hi");
+  });
+});
+
+describe("repairUnclosedOrpheusCueOpens", () => {
+  it("closes space-separated broken chuckle before Hungarian text", () => {
+    const raw = "Szívesen! <chuckle Akkor egy másik kedvenc";
+    expect(repairUnclosedOrpheusCueOpens(raw)).toContain("<chuckle>");
+    expect(repairUnclosedOrpheusCueOpens(raw)).toContain("<chuckle> Akkor");
+  });
+
+  it("inserts space before glued dialogue after cue name", () => {
+    expect(repairUnclosedOrpheusCueOpens("Hi <chuckleThere")).toContain("<chuckle> There");
   });
 });
 

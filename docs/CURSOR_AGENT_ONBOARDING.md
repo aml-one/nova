@@ -75,6 +75,10 @@ sudo launchctl kickstart -k system/com.nova.localstack
 
 If agent-core bind or cert generation fails, see `tmp/nova-localstack.err.log`.
 
+### Windows Web Shell (`apps/nova-web-shell`)
+
+Optional **WPF + Edge WebView2** host on an operator Windows PC. It loads the **same** Web UI URL as a browser (F5 after deploy). **Do not default it to `localhost`** for homelab Mac service setups: the LaunchDaemon stack uses **HTTPS on standard ports**, so the shell defaults to **`https://nova`** (hostname on your LAN / mDNS). Override with **`NOVA_WEB_SHELL_START_URL`**, or `StartUrl` in `%LOCALAPPDATA%\Nova\WebShell\appsettings.json` / `appsettings.json` beside the exe. Local dev on one machine only: use `http://localhost:3000` in those overrides.
+
 ---
 
 ## SSH access (operator machine → Nova Mac)
@@ -133,4 +137,4 @@ If login shows “could not read auth settings from the agent”:
 
 ## For Cursor: suggested session preamble
 
-> Nova is a pnpm monorepo. Agent-core is `apps/agent-core`, WebUI is `apps/web`. Start locally with `bash scripts/start-local.sh`. On the Mac server, Nova may run as LaunchDaemon `com.nova.localstack` using `scripts/start-local-macos-service.sh`; logs in `tmp/nova-localstack*.log`. WebUI talks to agent via `NOVA_AGENT_API_URL` (default `http://nova:8787` in the macOS service wrapper). State DB under agent-core `data/state/nova.db`. Read `docs/CURSOR_AGENT_ONBOARDING.md` for SSH/service/restart notes.
+> Nova is a pnpm monorepo. Agent-core is `apps/agent-core`, WebUI is `apps/web`. Start locally with `bash scripts/start-local.sh`. On the Mac server, Nova may run as LaunchDaemon `com.nova.localstack` using `scripts/start-local-macos-service.sh`; logs in `tmp/nova-localstack*.log`. WebUI talks to agent via `NOVA_AGENT_API_URL` (default `http://nova:8787` in the macOS service wrapper). **Production-style Web UI is HTTPS on 443** (`NOVA_WEB_STANDARD_PORTS`), not `localhost:3000`. The Windows Web Shell (`apps/nova-web-shell`) defaults to **`https://nova`** for that layout. State DB under agent-core `data/state/nova.db`. Read `docs/CURSOR_AGENT_ONBOARDING.md` for SSH/service/restart notes.

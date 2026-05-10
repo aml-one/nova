@@ -6,7 +6,10 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Nova Agent Platform",
-  description: "Local-first autonomous agent platform"
+  description: "Local-first autonomous agent platform",
+  icons: {
+    icon: "/brand/nova_icon.png"
+  }
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
