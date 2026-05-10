@@ -103,6 +103,28 @@ export function normalizeOrpheusSpeechCues(text: string): string {
   return canonicalizeChuckleCueForOrpheus(t);
 }
 
+const ORPHEUS_WELLFORMED_TAG_RE = new RegExp(`<\\s*(?:${ORPHEUS_SPEECH_CUE_NAMES})\\b[^>]*>`, "gi");
+
+/**
+ * Temporarily replaces well-formed Orpheus cue tags so markdown cleanup (`[#*_>`]+`) cannot strip
+ * the closing `>` and break Lex-au markers (e.g. `<chuckle>` → `<chuckle` breaks synthesis).
+ */
+export function shieldOrpheusSpeechCueTags(text: string): { masked: string; tokens: string[] } {
+  const tokens: string[] = [];
+  const masked = text.replace(ORPHEUS_WELLFORMED_TAG_RE, (m) => {
+    tokens.push(m);
+    return `\uE000${tokens.length - 1}\uE001`;
+  });
+  return { masked, tokens };
+}
+
+export function unshieldOrpheusSpeechCueTags(masked: string, tokens: string[]): string {
+  return masked.replace(/\uE000(\d+)\uE001/g, (_, idx) => {
+    const i = Number(idx, 10);
+    return Number.isFinite(i) && tokens[i] !== undefined ? tokens[i]! : "";
+  });
+}
+
 /**
  * Removes Orpheus voice-cue tags (`<chuckle>`, `<sigh>`, `<laugh>`, …) from a string so it can be
  * shown as a transcript / chat body without the TTS hints leaking into the visible message. The
@@ -216,7 +238,12 @@ export function prepareChatTextForSpeech(raw: string, maxChars = 8000): string {
   // Quotes and markdown markers often confuse TTS models into reading punctuation literally or repeating segments.
   // Keep apostrophes (contractions) but drop double-quote variants.
   visible = visible.replace(/[“”"]/g, " ");
-  visible = visible.replace(/[#*_>`]+/g, " ");
+  // Close/repair cues before markdown strip so `<chuckle Ú…` becomes `<chuckle> Ú…`, then shield
+  // well-formed tags so `[#*_>`]+` does not delete `>` inside `<chuckle>`.
+  visible = normalizeOrpheusSpeechCues(visible);
+  const { masked, tokens } = shieldOrpheusSpeechCueTags(visible);
+  visible = masked.replace(/[#*_>`]+/g, " ");
+  visible = unshieldOrpheusSpeechCueTags(visible, tokens);
   visible = visible.replace(/\s+/g, " ").trim();
   visible = normalizeOrpheusSpeechCues(visible);
   return visible.slice(0, maxChars);

@@ -3,6 +3,10 @@ export const CHAT_TTS_CHUNK_MIN_CHARS = 120;
 /** Hard cap per Orpheus request — long unpunctuated paragraphs (common in HU chat) must not be sent as one huge `input`. */
 export const CHAT_TTS_CHUNK_HARD_MAX = 340;
 
+/** Keep in sync with `ORPHEUS_SPEECH_CUE_NAMES` in `apps/agent-core/src/voice/tts-text.ts`. */
+const ORPHEUS_SPEECH_CUE_NAMES = "laugh|sigh|chuckles|chuckle|cough|sniffle|groan|gasp";
+const ORPHEUS_WELLFORMED_TAG_RE = new RegExp(`<\\s*(?:${ORPHEUS_SPEECH_CUE_NAMES})\\b[^>]*>`, "gi");
+
 export function stripMarkdownForTts(raw: string): string {
   let visible = raw;
   for (const pattern of [
@@ -20,7 +24,16 @@ export function stripMarkdownForTts(raw: string): string {
   visible = visible.replace(/\r\n?/g, "\n");
   visible = visible.replace(/[\uFEFF\u200B-\u200D]/g, "");
   visible = visible.replace(/[\u2013\u2014]/g, ", ");
+  const cueTokens: string[] = [];
+  visible = visible.replace(ORPHEUS_WELLFORMED_TAG_RE, (m) => {
+    cueTokens.push(m);
+    return `\uE000${cueTokens.length - 1}\uE001`;
+  });
   visible = visible.replace(/[#*_>`]+/g, " ");
+  visible = visible.replace(/\uE000(\d+)\uE001/g, (_, idx) => {
+    const i = Number(idx, 10);
+    return Number.isFinite(i) && cueTokens[i] !== undefined ? cueTokens[i]! : "";
+  });
 
   const lines = visible
     .split("\n")

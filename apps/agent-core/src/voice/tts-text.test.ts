@@ -147,4 +147,10 @@ describe("prepareChatTextForSpeech", () => {
     expect(out).toContain("He said:");
     expect(out).toContain("wow");
   });
+
+  it("preserves well-formed Orpheus tags through markdown stripping (closing > must survive)", () => {
+    const out = prepareChatTextForSpeech("Szia! <chuckle> Újra itt vagy! Miben segíthetek?");
+    expect(out).toMatch(/<chuckle>\s*Újra/);
+    expect(out).not.toMatch(/<chuckle\s+Ú/);
+  });
 });

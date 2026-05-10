@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHAT_TTS_CHUNK_HARD_MAX, splitLongTtsSegment, splitTextForTts } from "./chat-tts-text";
+import { CHAT_TTS_CHUNK_HARD_MAX, splitLongTtsSegment, splitTextForTts, stripMarkdownForTts } from "./chat-tts-text";
 
 describe("splitLongTtsSegment", () => {
   it("returns a single chunk when under the limit", () => {
@@ -14,6 +14,14 @@ describe("splitLongTtsSegment", () => {
     expect(parts.length).toBeGreaterThan(1);
     expect(parts.every((p) => p.length <= CHAT_TTS_CHUNK_HARD_MAX)).toBe(true);
     expect(parts.join(" ").replace(/\s+/g, " ").trim()).toBe(body);
+  });
+});
+
+describe("stripMarkdownForTts", () => {
+  it("does not strip > inside well-formed Orpheus cue tags", () => {
+    const out = stripMarkdownForTts("Szia! <chuckle> Újra itt vagy!");
+    expect(out).toMatch(/<chuckle>\s*Újra/);
+    expect(out).not.toMatch(/<chuckle\s+Ú/);
   });
 });
 
