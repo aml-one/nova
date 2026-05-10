@@ -77,7 +77,7 @@ If agent-core bind or cert generation fails, see `tmp/nova-localstack.err.log`.
 
 ### Windows Web Shell (`apps/nova-web-shell`)
 
-Optional **WPF + Edge WebView2** host on an operator Windows PC. It loads the **same** Web UI URL as a browser (F5 after deploy). **Do not default it to `localhost`** for homelab Mac service setups: the LaunchDaemon stack uses **HTTPS on standard ports**, so the shell defaults to **`https://nova`** (hostname on your LAN / mDNS). Override with **`NOVA_WEB_SHELL_START_URL`**, or `StartUrl` in `%LOCALAPPDATA%\Nova\WebShell\appsettings.json` / `appsettings.json` beside the exe. Local dev on one machine only: use `http://localhost:3000` in those overrides.
+Optional **WPF + Edge WebView2** host on an operator Windows PC. It loads the **same** Web UI URL as a browser (F5 after deploy). **Do not default it to `localhost`** for homelab Mac service setups: the LaunchDaemon stack uses **HTTPS on standard ports**, so the shell defaults to **`https://nova`** (hostname on your LAN / mDNS). Override with **`NOVA_WEB_SHELL_START_URL`**, or `StartUrl` in `%LOCALAPPDATA%\Nova\WebShell\appsettings.json` / `appsettings.json` beside the exe. Local dev on one machine only: use `http://localhost:3000` in those overrides. For self-signed or private CA HTTPS, the shell defaults to **`IgnoreCertificateErrors: true`** (or set **`NOVA_WEB_SHELL_IGNORE_CERT_ERRORS=0`** to enforce strict TLS).
 
 ---
 

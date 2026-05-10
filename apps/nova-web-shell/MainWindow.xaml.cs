@@ -39,6 +39,12 @@ public partial class MainWindow : Window
 
     private Uri _homeUri = new(DefaultStartUrl, UriKind.Absolute);
 
+    /// <summary>
+    /// When true, TLS errors (e.g. self-signed <c>https://nova</c>) do not block loading.
+    /// Set <c>IgnoreCertificateErrors</c> in appsettings, or <c>NOVA_WEB_SHELL_IGNORE_CERT_ERRORS=0</c> to enforce validation.
+    /// </summary>
+    private bool _ignoreCertificateErrors = true;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -81,6 +87,59 @@ public partial class MainWindow : Window
         return DefaultStartUrl;
     }
 
+    private static bool ReadIgnoreCertificateErrors()
+    {
+        var fromEnv = Environment.GetEnvironmentVariable("NOVA_WEB_SHELL_IGNORE_CERT_ERRORS")?.Trim();
+        if (!string.IsNullOrEmpty(fromEnv))
+        {
+            if (string.Equals(fromEnv, "0", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fromEnv, "false", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fromEnv, "no", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (string.Equals(fromEnv, "1", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fromEnv, "true", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fromEnv, "yes", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        foreach (var path in SettingsCandidates)
+        {
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                using var stream = File.OpenRead(path);
+                using var doc = JsonDocument.Parse(stream);
+                if (doc.RootElement.TryGetProperty("IgnoreCertificateErrors", out var el))
+                {
+                    return el.ValueKind switch
+                    {
+                        JsonValueKind.True => true,
+                        JsonValueKind.False => false,
+                        JsonValueKind.String => bool.TryParse(el.GetString(), out var b) && b,
+                        JsonValueKind.Number => el.TryGetInt64(out var n) && n != 0,
+                        _ => true
+                    };
+                }
+            }
+            catch
+            {
+                /* fall through */
+            }
+        }
+
+        // Default on: macOS/LAN stack often uses HTTPS with a cert the shell does not trust (see user NET::ERR_CERT_AUTHORITY_INVALID).
+        return true;
+    }
+
     private static string LoadThemeBridgeScript()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "WebUiThemeBridge.js");
@@ -93,6 +152,7 @@ public partial class MainWindow : Window
     {
         var start = ReadStartUrl();
         _homeUri = new Uri(start, UriKind.Absolute);
+        _ignoreCertificateErrors = ReadIgnoreCertificateErrors();
         StatusUrl.Text = start;
         ApplyChromeFromWebUi(false);
 
@@ -118,6 +178,7 @@ public partial class MainWindow : Window
 
         WebView.CoreWebView2.WebMessageReceived += CoreWebView2_WebMessageReceived;
         WebView.CoreWebView2.NavigationCompleted += CoreWebView2_NavigationCompleted;
+        WebView.CoreWebView2.ServerCertificateErrorDetected += CoreWebView2_ServerCertificateErrorDetected;
 
         WebView.CoreWebView2.DocumentTitleChanged += (_, _) =>
         {
@@ -145,6 +206,18 @@ public partial class MainWindow : Window
         };
 
         WebView.Source = _homeUri;
+    }
+
+    private void CoreWebView2_ServerCertificateErrorDetected(object? sender, CoreWebView2ServerCertificateErrorDetectedEventArgs e)
+    {
+        if (!_ignoreCertificateErrors)
+        {
+            return;
+        }
+
+        // Proceed despite untrusted / wrong-host / expired certs (typical homelab https://nova).
+        // AlwaysAllow caches acceptance for this host for the session (see WebView2 docs).
+        e.Action = CoreWebView2ServerCertificateErrorAction.AlwaysAllow;
     }
 
     private async void CoreWebView2_NavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
@@ -272,6 +345,7 @@ public partial class MainWindow : Window
             "Start URL: environment NOVA_WEB_SHELL_START_URL, else first appsettings.json below, else default " +
             DefaultStartUrl +
             " (macOS service HTTPS on 443 — see docs/CURSOR_AGENT_ONBOARDING.md).\n\n" +
+            "TLS: IgnoreCertificateErrors in appsettings (default true) or NOVA_WEB_SHELL_IGNORE_CERT_ERRORS=0 to require a trusted certificate.\n\n" +
             "Title bar and menu colors follow the Web UI light/dark theme (next-themes).\n\n" +
             "Config files (first match wins after env):\n" +
             (paths.Length > 0 ? paths : "(none beside exe)");
