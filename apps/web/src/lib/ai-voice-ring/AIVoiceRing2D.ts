@@ -66,6 +66,18 @@ function rgbStr(r: number, g: number, b: number, a = 1): string {
   return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${a})`;
 }
 
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
+function lerpRgb(
+  a: { r: number; g: number; b: number },
+  b: { r: number; g: number; b: number },
+  t: number
+): { r: number; g: number; b: number } {
+  return { r: lerp(a.r, b.r, t), g: lerp(a.g, b.g, t), b: lerp(a.b, b.b, t) };
+}
+
 /**
  * 2D neon ring: wavy inner/outer boundaries, fixed overall extent, no whole-object scale pulse.
  * Inner edge is clamped so it never crosses `innerHoleRadiusNorm` (clear center).
@@ -88,8 +100,8 @@ export class AIVoiceRing2D {
   private timeSec = 0;
   private lastFrameMs = 0;
 
-  private moodA = parseHex("#ff2200");
-  private moodB = parseHex("#00c8ff");
+  private moodA = { ...parseHex("#ff2e12") };
+  private moodB = { ...parseHex("#00dcff") };
   private moodTargetA = { ...this.moodA };
   private moodTargetB = { ...this.moodB };
 
@@ -97,7 +109,7 @@ export class AIVoiceRing2D {
     private readonly mount: HTMLElement,
     options: VoiceRing2DOptions = {}
   ) {
-    this.innerHoleNorm = options.innerHoleRadiusNorm ?? 0.38;
+    this.innerHoleNorm = options.innerHoleRadiusNorm ?? 0.4;
     this.canvas = document.createElement("canvas");
     this.canvas.style.display = "block";
     this.canvas.style.width = "100%";
@@ -125,16 +137,11 @@ export class AIVoiceRing2D {
 
   setBaseColor(hex: string): void {
     const accent = parseHex(hex);
-    const warm = {
-      r: Math.round(34 + (accent.r - 34) * 0.26),
-      g: Math.round(34 + (accent.g - 34) * 0.26),
-      b: Math.round(8 + (accent.b - 8) * 0.26)
-    };
-    const cool = {
-      r: Math.round(0 + (accent.r - 0) * 0.32),
-      g: Math.round(136 + (accent.g - 136) * 0.32),
-      b: Math.round(255 + (accent.b - 255) * 0.32)
-    };
+    // Anchor to reference art: electric cyan (BL) ↔ hot orange (TR), accent only nudges hue.
+    const warmAnchor = parseHex("#ff2e12");
+    const coolAnchor = parseHex("#00dcff");
+    const warm = lerpRgb(warmAnchor, accent, 0.22);
+    const cool = lerpRgb(coolAnchor, accent, 0.18);
     this.moodTargetA = warm;
     this.moodTargetB = cool;
     this.moodA = { ...warm };
@@ -226,16 +233,33 @@ export class AIVoiceRing2D {
   private sampleWaves(theta: number): { inner: number; outer: number } {
     const t = this.timeSec;
     const k = this.noiseSeed;
+    // Lower high-frequency weight → smoother, more “liquid” silhouette (closer to reference).
     const s0 = Math.sin(theta * 3 + t * 0.95 + k);
-    const s1 = Math.sin(theta * 7 - t * 0.62 + k * 1.3);
-    const s2 = Math.sin(theta * 11 + t * 1.15 + k * 0.4);
-    const inner = s0 * 0.48 + s1 * 0.32 + s2 * 0.2;
+    const s1 = Math.sin(theta * 6 - t * 0.58 + k * 1.2);
+    const s2 = Math.sin(theta * 9 + t * 1.05 + k * 0.35);
+    const inner = s0 * 0.52 + s1 * 0.32 + s2 * 0.16;
 
-    const o0 = Math.cos(theta * 5 + t * 0.78 + k * 0.7);
-    const o1 = Math.cos(theta * 13 - t * 0.48 + k);
-    const o2 = Math.sin(theta * 17 + t * 0.55);
-    const outer = o0 * 0.5 + o1 * 0.35 + o2 * 0.15;
+    const o0 = Math.cos(theta * 4 + t * 0.72 + k * 0.65);
+    const o1 = Math.cos(theta * 10 - t * 0.44 + k);
+    const o2 = Math.sin(theta * 14 + t * 0.5);
+    const outer = o0 * 0.54 + o1 * 0.32 + o2 * 0.14;
     return { inner, outer };
+  }
+
+  private ringPath(ctx: CanvasRenderingContext2D, outerPts: { x: number; y: number }[], innerPts: { x: number; y: number }[]): void {
+    const p0 = outerPts[0]!;
+    ctx.moveTo(p0.x, p0.y);
+    for (let i = 1; i < outerPts.length; i++) {
+      const p = outerPts[i]!;
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.moveTo(innerPts[innerPts.length - 1]!.x, innerPts[innerPts.length - 1]!.y);
+    for (let i = innerPts.length - 2; i >= 0; i--) {
+      const p = innerPts[i]!;
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
   }
 
   private animate = (): void => {
@@ -265,17 +289,19 @@ export class AIVoiceRing2D {
     const cy = h * 0.5;
     const half = Math.min(w, h) * 0.5;
     const rHole = half * this.innerHoleNorm;
-    const rOuterMean = half * 0.92;
-    const ringThickness = rOuterMean - rHole;
-    const rInnerMean = rHole + ringThickness * 0.22;
+    // Narrow band (~10–12% of radius): reads like the thin neon tube in the reference, not a thick donut.
+    const rOuterMean = half * 0.845;
+    const bandWidth = half * 0.108;
+    const rInnerMean = Math.max(rHole + half * 0.014, rOuterMean - bandWidth);
 
     const e = this.energy();
     const idleBreath = this.presentationIdleCalm ? 0.12 + Math.sin(this.timeSec * 0.85) * 0.08 : 0;
     const waveBoost = this.presentationIdleCalm ? idleBreath : e;
 
-    const innerAmp = half * (0.014 + waveBoost * 0.052);
-    const outerAmp = half * (0.022 + waveBoost * 0.078);
-    const minWall = half * 0.018;
+    const band = Math.max(rOuterMean - rInnerMean, half * 0.04);
+    const innerAmp = band * (0.14 + waveBoost * 0.55);
+    const outerAmp = band * (0.2 + waveBoost * 0.72);
+    const minWall = half * 0.006;
 
     const steps = 360;
     const outerPts: { x: number; y: number }[] = [];
@@ -302,53 +328,66 @@ export class AIVoiceRing2D {
 
     const cos = Math.cos(this.gradientAngle);
     const sin = Math.sin(this.gradientAngle);
+    // Bottom-left → top-right (reference “organic sphere” poster).
     const x0 = cx - cos * half - sin * half;
     const y0 = cy - sin * half + cos * half;
     const x1 = cx + cos * half + sin * half;
     const y1 = cy + sin * half - cos * half;
+
+    const B = this.moodB;
+    const A = this.moodA;
     const g = ctx.createLinearGradient(x0, y0, x1, y1);
-    g.addColorStop(0, rgbStr(this.moodB.r, this.moodB.g, this.moodB.b, 1));
-    g.addColorStop(0.45, rgbStr(255, 250, 245, 0.92));
-    g.addColorStop(1, rgbStr(this.moodA.r, this.moodA.g, this.moodA.b, 1));
+    g.addColorStop(0, rgbStr(B.r, B.g, B.b, 1));
+    g.addColorStop(0.28, rgbStr(lerp(B.r, 255, 0.55), lerp(B.g, 255, 0.55), lerp(B.b, 255, 0.45), 1));
+    g.addColorStop(0.42, rgbStr(lerp(B.r, 255, 0.82), lerp(B.g, 255, 0.82), lerp(B.b, 255, 0.78), 1));
+    g.addColorStop(0.52, rgbStr(255, 255, 255, 1));
+    g.addColorStop(0.62, rgbStr(255, lerp(255, A.g, 0.12), lerp(255, A.b, 0.08), 1));
+    g.addColorStop(0.78, rgbStr(lerp(255, A.r, 0.35), lerp(255, A.g, 0.25), lerp(255, A.b, 0.2), 1));
+    g.addColorStop(1, rgbStr(A.r, A.g, A.b, 1));
 
+    // Wide bloom (soft halo) — slightly transparent so the second pass defines the crisp tube.
     ctx.save();
-    ctx.shadowBlur = 18 + waveBoost * 28;
-    ctx.shadowColor = rgbStr(
-      (this.moodA.r + this.moodB.r) * 0.5,
-      (this.moodA.g + this.moodB.g) * 0.5,
-      (this.moodA.b + this.moodB.b) * 0.5,
-      0.55
-    );
-
+    ctx.globalAlpha = 0.78;
+    ctx.shadowBlur = 44 + waveBoost * 36;
+    ctx.shadowColor = rgbStr(lerp(B.r, A.r, 0.5), lerp(B.g, A.g, 0.5), lerp(B.b, A.b, 0.55), 0.52);
     ctx.beginPath();
-    {
-      const p0 = outerPts[0]!;
-      ctx.moveTo(p0.x, p0.y);
-      for (let i = 1; i < outerPts.length; i++) {
-        const p = outerPts[i]!;
-        ctx.lineTo(p.x, p.y);
-      }
-      ctx.closePath();
-    }
-    ctx.moveTo(innerPts[innerPts.length - 1]!.x, innerPts[innerPts.length - 1]!.y);
-    for (let i = innerPts.length - 2; i >= 0; i--) {
-      const p = innerPts[i]!;
-      ctx.lineTo(p.x, p.y);
-    }
-    ctx.closePath();
-
+    this.ringPath(ctx, outerPts, innerPts);
     ctx.fillStyle = g;
     ctx.fill("evenodd");
     ctx.restore();
 
     ctx.save();
-    ctx.strokeStyle = rgbStr(255, 255, 255, 0.22 + waveBoost * 0.35);
-    ctx.lineWidth = 1.25;
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = "rgba(255,255,255,0.35)";
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 14 + waveBoost * 20;
+    ctx.shadowColor = rgbStr(255, 252, 255, 0.48);
+    ctx.beginPath();
+    this.ringPath(ctx, outerPts, innerPts);
+    ctx.fillStyle = g;
+    ctx.fill("evenodd");
+    ctx.restore();
+
+    // Crisp outer highlight (white plasma edge).
+    ctx.save();
+    ctx.strokeStyle = rgbStr(255, 255, 255, 0.38 + waveBoost * 0.32);
+    ctx.lineWidth = 1.15;
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = "rgba(255,255,255,0.55)";
     ctx.beginPath();
     for (let i = 0; i < outerPts.length; i++) {
       const p = outerPts[i]!;
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = rgbStr(255, 255, 255, 0.14 + waveBoost * 0.22);
+    ctx.lineWidth = 0.85;
+    ctx.beginPath();
+    for (let i = 0; i < innerPts.length; i++) {
+      const p = innerPts[i]!;
       if (i === 0) ctx.moveTo(p.x, p.y);
       else ctx.lineTo(p.x, p.y);
     }
