@@ -144,7 +144,7 @@ export type AppSettings = {
     baseUrl: string;
     apiKey: string;
     voice: string;
-    /** When set, used for Hungarian-like `input` instead of `voice` (Lex-au has no HU-native speaker). */
+    /** When set, used for Hungarian-like `input` instead of `voice` (hosts with a separate HU speaker id). Leave empty for one bilingual voice (e.g. custom Tara). */
     voiceHungarian: string;
     model: string;
     responseFormat: "mp3" | "wav" | "opus" | "pcm" | "flac";

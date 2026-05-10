@@ -37,6 +37,21 @@ describe("ensureLexAuHungarianCueFallback", () => {
     const raw = "Szia! <chuckle> Újra itt vagyok.";
     expect(ensureLexAuHungarianCueFallback(raw)).toBe(raw);
   });
+
+  it("skips leading chuckle when NOVA_ORPHEUS_TTS_DISABLE_HU_SILENCE_CUE is set (custom bilingual GGUF)", () => {
+    const k = "NOVA_ORPHEUS_TTS_DISABLE_HU_SILENCE_CUE";
+    const prev = process.env[k];
+    process.env[k] = "1";
+    try {
+      expect(ensureLexAuHungarianCueFallback("újra itt vagyok")).toBe("újra itt vagyok");
+    } finally {
+      if (prev === undefined) {
+        delete process.env[k];
+      } else {
+        process.env[k] = prev;
+      }
+    }
+  });
 });
 
 describe("countOrpheusNonverbTags", () => {

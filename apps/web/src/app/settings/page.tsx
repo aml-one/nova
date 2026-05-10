@@ -4074,9 +4074,11 @@ export default function SettingsPage() {
                 <a className="underline" href="https://github.com/Lex-au/Orpheus-FastAPI" rel="noreferrer" target="_blank">
                   Orpheus-FastAPI
                 </a>{" "}
-                exposes <code className="text-xs">POST /v1/audio/speech</code>. Agent-core proxies synthesis for the web UI. Lex-au lists English,
-                French, German, Spanish, Italian, Korean, Hindi, and Mandarin voices — there is no native Hungarian speaker; English voices read HU
-                text with English prosody unless you pick another language voice below.
+                exposes <code className="text-xs">POST /v1/audio/speech</code>. Agent-core proxies synthesis for the web UI. Upstream Lex-au documents
+                stock voices for several languages; Nova does not assume your inference GGUF — if you run a custom bilingual speaker (e.g. Tara
+                trained for English and Hungarian), use that voice id in <strong>Voice id</strong> and leave the Hungarian alternate field empty unless
+                your server maps a different id for HU. On the agent host, <code className="text-[10px]">NOVA_ORPHEUS_TTS_DISABLE_HU_SILENCE_CUE=1</code>{" "}
+                skips Nova&apos;s optional leading <code className="text-[10px]">&lt;chuckle&gt;</code> workaround for tiny WAVs on some stock stacks.
               </p>
               <label className="flex items-center gap-2">
                 <Checkbox
@@ -4122,11 +4124,11 @@ export default function SettingsPage() {
                 </label>
               </div>
               <label className="grid gap-1 text-xs">
-                Voice for Hungarian-like text (optional)
+                Alternate voice id for Hungarian-like text (optional)
                 <Input
                   value={settings.orpheusTts.voiceHungarian}
                   onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, voiceHungarian: e.target.value } }))}
-                  placeholder="e.g. jana (German) — leave empty to always use Voice id"
+                  placeholder="only if your Orpheus server uses a different speaker id for HU — else leave empty"
                 />
               </label>
               <label className="grid gap-1 text-xs">

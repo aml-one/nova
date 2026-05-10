@@ -13,11 +13,21 @@ export function countOrpheusNonverbTags(text: string): number {
 }
 
 /**
- * Lex-au often returns near-silent WAVs for Hungarian-heavy text with no `<chuckle>` / `<laugh>` / …
- * (HTTP 200, ~9KB body). Prefix one `<chuckle>` when there are no cues yet and HU diacritics suggest
- * {@link shouldSkipEnglishHmmFiller} territory.
+ * Some **stock** Lex-au / Orpheus stacks return near-silent WAVs for Hungarian-heavy text with no
+ * `<chuckle>` / `<laugh>` / … (HTTP 200, tiny body). Prefix one `<chuckle>` when there are no cues yet
+ * and {@link shouldSkipEnglishHmmFiller} / {@link looksLikeLatinProseWithoutEnglishHints} match.
+ *
+ * **Custom bilingual models** (e.g. fine-tuned Tara for EN+HU) usually do not need this; a leading
+ * non-speech cue can even skew prosody. Set `NOVA_ORPHEUS_TTS_DISABLE_HU_SILENCE_CUE=1` on agent-core
+ * to skip this prefix entirely.
  */
 export function ensureLexAuHungarianCueFallback(text: string): string {
+  const disable =
+    process.env.NOVA_ORPHEUS_TTS_DISABLE_HU_SILENCE_CUE === "1" ||
+    process.env.NOVA_ORPHEUS_TTS_DISABLE_HU_SILENCE_CUE === "true";
+  if (disable) {
+    return text.trim();
+  }
   const t = text.trim();
   if (!t || t.length < 8) {
     return t;
@@ -31,7 +41,7 @@ export function ensureLexAuHungarianCueFallback(text: string): string {
   return t;
 }
 
-/** True when text looks Hungarian-heavy (for optional Orpheus `voiceHungarian`). */
+/** True when text looks Hungarian-heavy (for optional alternate Orpheus `voice` id only). */
 export function isHungarianLikeForOrpheusVoice(text: string): boolean {
   const t = text.trim();
   if (t.length < 8) {
