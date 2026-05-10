@@ -162,9 +162,9 @@ export class TtsVoiceOrbDriver {
     if (!this.analyser) {
       this.analyser = this.audioCtx.createAnalyser();
       this.analyser.fftSize = 2048;
-      this.analyser.smoothingTimeConstant = 0.38;
+      this.analyser.smoothingTimeConstant = 0.12;
     } else {
-      this.analyser.smoothingTimeConstant = 0.38;
+      this.analyser.smoothingTimeConstant = 0.12;
     }
 
     const needNewSource = this.boundMediaElement !== el || !this.mediaSourceNode;
@@ -237,7 +237,7 @@ export class TtsVoiceOrbDriver {
 
         let level = this.voiceLevel;
         const attack = 0.94;
-        const release = 0.085;
+        const release = 0.24;
         if (gated > level) {
           level += (gated - level) * attack;
         } else {
@@ -261,9 +261,9 @@ export class TtsVoiceOrbDriver {
             orb?.setRotationSpeed(0.52 + Math.random() * 2.85);
           }
         }
-        this.wordSpike *= 0.58;
+        this.wordSpike *= 0.72;
 
-        const peakDrive = Math.min(1, combined * 0.98 + this.wordSpike * 1.08);
+        const peakDrive = Math.min(1, combined * 1.18 + this.wordSpike * 1.38);
         this.config.getOrb()?.setSpeechEnvelope(level, peakDrive);
 
         let slow = this.slowEnergy;

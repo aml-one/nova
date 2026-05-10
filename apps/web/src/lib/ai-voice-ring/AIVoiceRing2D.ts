@@ -276,12 +276,12 @@ export class AIVoiceRing2D {
     const dt = Math.min((now - this.lastFrameMs) / 1000, 0.05);
     this.lastFrameMs = now;
 
-    const dampRate = this.presentationIdleCalm ? 22 : 10;
-    const dampPeakRate = this.presentationIdleCalm ? 36 : 28;
+    const dampRate = this.presentationIdleCalm ? 22 : 42;
+    const dampPeakRate = this.presentationIdleCalm ? 36 : 86;
     this.dampedSpeak = damp(this.dampedSpeak, this.speechLevel, dampRate, dt);
     this.dampedSpeakPeak = damp(this.dampedSpeakPeak, this.speechPeak, dampPeakRate, dt);
 
-    this.timeSec += dt;
+    this.timeSec += dt * (this.presentationIdleCalm ? 1 : 2.35);
     this.gradientAngle += this.rotationSpeed * dt * 0.35;
 
     this.moodA.r += (this.moodTargetA.r - this.moodA.r) * Math.min(1, dt * 4.2);
@@ -306,8 +306,8 @@ export class AIVoiceRing2D {
     const waveBoost = this.presentationIdleCalm ? idleBreath : e;
 
     const maxInward = Math.max(0, rBase - rHole - rMargin);
-    const ampDesired = half * (0.01 + waveBoost * 0.075);
-    const amp = Math.min(ampDesired, maxInward * 0.55);
+    const ampDesired = half * (0.03 + waveBoost * 0.225);
+    const amp = Math.min(ampDesired, maxInward * 0.92);
 
     const steps = 400;
     const coronaPts: { x: number; y: number }[] = [];
@@ -333,10 +333,10 @@ export class AIVoiceRing2D {
     // Perfect base circle: this is the stable "sun" orbit. The waves sit on top of it.
     ctx.save();
     ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.34;
-    ctx.lineWidth = 14.4;
-    ctx.shadowBlur = 46 + waveBoost * 28;
-    ctx.shadowColor = "rgba(35, 190, 255, 0.72)";
+    ctx.globalAlpha = 0.42;
+    ctx.lineWidth = 43.2;
+    ctx.shadowBlur = 82 + waveBoost * 62;
+    ctx.shadowColor = "rgba(0, 210, 255, 0.92)";
     ctx.beginPath();
     ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
     ctx.stroke();
@@ -345,9 +345,9 @@ export class AIVoiceRing2D {
     ctx.save();
     ctx.strokeStyle = conic;
     ctx.globalAlpha = 0.95;
-    ctx.lineWidth = 4.4;
-    ctx.shadowBlur = 18 + waveBoost * 13;
-    ctx.shadowColor = "rgba(255,255,255,0.92)";
+    ctx.lineWidth = 13.2;
+    ctx.shadowBlur = 34 + waveBoost * 25;
+    ctx.shadowColor = "rgba(255,255,255,1)";
     ctx.beginPath();
     ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
     ctx.stroke();
@@ -356,7 +356,7 @@ export class AIVoiceRing2D {
     ctx.save();
     ctx.strokeStyle = "rgba(255,255,255,0.82)";
     ctx.globalAlpha = 0.9;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 4.5;
     ctx.beginPath();
     ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
     ctx.stroke();
@@ -366,9 +366,9 @@ export class AIVoiceRing2D {
     ctx.save();
     ctx.strokeStyle = conic;
     ctx.globalAlpha = 0.48 + waveBoost * 0.22;
-    ctx.lineWidth = 5.6;
-    ctx.shadowBlur = 36 + waveBoost * 24;
-    ctx.shadowColor = "rgba(0, 220, 255, 0.72)";
+    ctx.lineWidth = 16.8;
+    ctx.shadowBlur = 68 + waveBoost * 52;
+    ctx.shadowColor = "rgba(0, 220, 255, 0.95)";
     ctx.beginPath();
     this.buildWavyPath(coronaPts);
     ctx.stroke();
@@ -377,9 +377,9 @@ export class AIVoiceRing2D {
     ctx.save();
     ctx.strokeStyle = conic;
     ctx.globalAlpha = 0.88;
-    ctx.lineWidth = 2.1;
-    ctx.shadowBlur = 12 + waveBoost * 12;
-    ctx.shadowColor = "rgba(255,255,255,0.9)";
+    ctx.lineWidth = 6.3;
+    ctx.shadowBlur = 26 + waveBoost * 24;
+    ctx.shadowColor = "rgba(255,255,255,1)";
     ctx.beginPath();
     this.buildWavyPath(coronaPts);
     ctx.stroke();
@@ -389,9 +389,9 @@ export class AIVoiceRing2D {
     ctx.save();
     ctx.strokeStyle = conic;
     ctx.globalAlpha = 0.22 + waveBoost * 0.18;
-    ctx.lineWidth = 1.6;
-    ctx.shadowBlur = 6;
-    ctx.shadowColor = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 4.8;
+    ctx.shadowBlur = 13;
+    ctx.shadowColor = "rgba(255,255,255,0.55)";
     ctx.beginPath();
     this.buildWavyPath(innerPts);
     ctx.stroke();
@@ -399,7 +399,7 @@ export class AIVoiceRing2D {
 
     ctx.save();
     ctx.strokeStyle = rgbStr(255, 255, 255, 0.55 + waveBoost * 0.28);
-    ctx.lineWidth = 1.1;
+    ctx.lineWidth = 3.3;
     ctx.shadowBlur = 0;
     ctx.beginPath();
     this.buildWavyPath(coronaPts);
