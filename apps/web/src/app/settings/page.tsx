@@ -176,6 +176,7 @@ type SettingsState = {
     baseUrl: string;
     apiKey: string;
     voice: string;
+    voiceHungarian: string;
     model: string;
     responseFormat: "mp3" | "wav" | "opus" | "pcm" | "flac";
   };
@@ -348,6 +349,7 @@ const DEFAULT_SETTINGS: SettingsState = {
     baseUrl: "http://127.0.0.1:5005",
     apiKey: "",
     voice: "tara",
+    voiceHungarian: "",
     model: "",
     responseFormat: "wav"
   },
@@ -4072,7 +4074,9 @@ export default function SettingsPage() {
                 <a className="underline" href="https://github.com/Lex-au/Orpheus-FastAPI" rel="noreferrer" target="_blank">
                   Orpheus-FastAPI
                 </a>{" "}
-                exposes <code className="text-xs">POST /v1/audio/speech</code>. Agent-core proxies synthesis for the web UI.
+                exposes <code className="text-xs">POST /v1/audio/speech</code>. Agent-core proxies synthesis for the web UI. Lex-au lists English,
+                French, German, Spanish, Italian, Korean, Hindi, and Mandarin voices — there is no native Hungarian speaker; English voices read HU
+                text with English prosody unless you pick another language voice below.
               </p>
               <label className="flex items-center gap-2">
                 <Checkbox
@@ -4117,6 +4121,14 @@ export default function SettingsPage() {
                   />
                 </label>
               </div>
+              <label className="grid gap-1 text-xs">
+                Voice for Hungarian-like text (optional)
+                <Input
+                  value={settings.orpheusTts.voiceHungarian}
+                  onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, voiceHungarian: e.target.value } }))}
+                  placeholder="e.g. jana (German) — leave empty to always use Voice id"
+                />
+              </label>
               <label className="grid gap-1 text-xs">
                 Response format
                 <Select
@@ -5406,6 +5418,7 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
       baseUrl: value?.orpheusTts?.baseUrl ?? DEFAULT_SETTINGS.orpheusTts.baseUrl,
       apiKey: value?.orpheusTts?.apiKey ?? DEFAULT_SETTINGS.orpheusTts.apiKey,
       voice: value?.orpheusTts?.voice ?? DEFAULT_SETTINGS.orpheusTts.voice,
+      voiceHungarian: value?.orpheusTts?.voiceHungarian ?? DEFAULT_SETTINGS.orpheusTts.voiceHungarian,
       model: value?.orpheusTts?.model ?? DEFAULT_SETTINGS.orpheusTts.model,
       responseFormat:
         value?.orpheusTts?.responseFormat === "mp3" ||

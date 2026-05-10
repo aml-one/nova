@@ -5,7 +5,11 @@ import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import type { EmotionState } from "../emotion/emotion-service.js";
-import { augmentOrpheusSpeechForMood, ensureLexAuHungarianCueFallback } from "./emotion-tts.js";
+import {
+  augmentOrpheusSpeechForMood,
+  ensureLexAuHungarianCueFallback,
+  isHungarianLikeForOrpheusVoice
+} from "./emotion-tts.js";
 import { normalizeOrpheusSpeechCues, prepareChatTextForSpeech } from "./tts-text.js";
 import { prependSilenceToWavPcm } from "./wav-prepend-silence.js";
 
@@ -197,7 +201,10 @@ export class VoiceService {
       input: inputText,
       response_format: tts.responseFormat ?? "wav"
     };
-    const voice = tts.voice.trim();
+    const voicePrimary = (tts.voice ?? "").trim() || "tara";
+    const voiceHu = (tts.voiceHungarian ?? "").trim();
+    const voice =
+      voiceHu && isHungarianLikeForOrpheusVoice(inputText) ? voiceHu.slice(0, 128) : voicePrimary.slice(0, 128);
     if (voice) {
       body.voice = voice;
     }

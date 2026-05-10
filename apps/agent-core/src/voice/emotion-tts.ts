@@ -31,6 +31,15 @@ export function ensureLexAuHungarianCueFallback(text: string): string {
   return t;
 }
 
+/** True when text looks Hungarian-heavy (for optional Orpheus `voiceHungarian`). */
+export function isHungarianLikeForOrpheusVoice(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 8) {
+    return false;
+  }
+  return shouldSkipEnglishHmmFiller(t) || looksLikeLatinProseWithoutEnglishHints(t);
+}
+
 function stableRoll(text: string, salt: number): number {
   let h = 2166136261 >>> 0;
   const payload = `${text}\0${salt}`;

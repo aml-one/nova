@@ -144,6 +144,8 @@ export type AppSettings = {
     baseUrl: string;
     apiKey: string;
     voice: string;
+    /** When set, used for Hungarian-like `input` instead of `voice` (Lex-au has no HU-native speaker). */
+    voiceHungarian: string;
     model: string;
     responseFormat: "mp3" | "wav" | "opus" | "pcm" | "flac";
   };
@@ -463,6 +465,8 @@ export class SettingsRepository {
           apiKey: orpheusTtsApiKey,
           voice:
             (typeof parsed.orpheusTts?.voice === "string" ? parsed.orpheusTts.voice.trim().slice(0, 128) : "") || "tara",
+          voiceHungarian:
+            typeof parsed.orpheusTts?.voiceHungarian === "string" ? parsed.orpheusTts.voiceHungarian.trim().slice(0, 128) : "",
           model: typeof parsed.orpheusTts?.model === "string" ? parsed.orpheusTts.model.trim().slice(0, 128) : "",
           responseFormat: normalizeOrpheusFormat(parsed.orpheusTts?.responseFormat)
         },

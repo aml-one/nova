@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { augmentOrpheusSpeechForMood, countOrpheusNonverbTags, ensureLexAuHungarianCueFallback } from "./emotion-tts.js";
+import {
+  augmentOrpheusSpeechForMood,
+  countOrpheusNonverbTags,
+  ensureLexAuHungarianCueFallback,
+  isHungarianLikeForOrpheusVoice
+} from "./emotion-tts.js";
+
+describe("isHungarianLikeForOrpheusVoice", () => {
+  it("detects diacritic-heavy Hungarian", () => {
+    expect(isHungarianLikeForOrpheusVoice("A csend néha kényelmes.")).toBe(true);
+  });
+
+  it("detects Latin-only HU-like prose without English hints", () => {
+    expect(isHungarianLikeForOrpheusVoice("csak itt vagyok")).toBe(true);
+  });
+
+  it("is false for plain English", () => {
+    expect(isHungarianLikeForOrpheusVoice("Hello from Nova. This is a test.")).toBe(false);
+  });
+});
 
 describe("ensureLexAuHungarianCueFallback", () => {
   it("prefixes chuckle for HU-heavy text without cues (diacritics)", () => {
