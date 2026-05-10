@@ -23,11 +23,17 @@ type Props = {
 };
 
 /**
- * 2D neon voice ring: wavy inner/outer edge (inner clamped to a clear center hole), driven by TTS levels.
+ * 2D “sun corona” voice ring: thin stroked wavy circle on a fixed base radius (no filled donut), transparent.
  * Mount must have non-zero width/height before construction.
  */
 export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props>(function NovaThreeSpeakingOrb(
-  { className, baseColor = "#ff3d26", preset = "speaking", transparentBackground, presentationIdleCalm },
+  {
+    className,
+    baseColor = "#ff3d26",
+    preset = "speaking",
+    transparentBackground = true,
+    presentationIdleCalm
+  },
   ref
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -59,7 +65,7 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
     if (!el) return;
     const orb = new AIVoiceRing2D(el, {
       baseColor,
-      transparentBackground: transparentBackground === true
+      transparentBackground
     });
     orbRef.current = orb;
     return () => {

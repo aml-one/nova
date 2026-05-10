@@ -3075,7 +3075,7 @@ export default function HomePage() {
         >
           <div
             ref={novaTtsOrbMeterRef}
-            className="h-[377px] w-[377px] shrink-0 origin-center overflow-hidden rounded-full bg-[#0c0218] shadow-[0_0_40px_rgba(255,45,25,0.2),0_0_72px_rgba(0,100,255,0.12)] ring-1 ring-white/10"
+            className="h-[377px] w-[377px] shrink-0 origin-center overflow-visible rounded-full bg-transparent"
           >
             <NovaThreeSpeakingOrb ref={novaThreeSpeakingOrbRef} className="h-full w-full" preset="speaking" baseColor="#ff4420" />
           </div>

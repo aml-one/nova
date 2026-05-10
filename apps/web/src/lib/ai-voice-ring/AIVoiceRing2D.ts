@@ -39,8 +39,8 @@ export interface VoiceRing2DOptions {
   baseColor?: string;
   transparentBackground?: boolean;
   /**
-   * Hard inner limit (the “red circle”): inner wavy edge never crosses inside this radius.
-   * Expressed as a fraction of half the shorter canvas side (0–1).
+   * Hard inner limit: the wavy stroke never crosses inside this radius (clear center, “red circle”).
+   * Fraction of half the shorter canvas side (0–1).
    */
   innerHoleRadiusNorm?: number;
 }
@@ -79,8 +79,8 @@ function lerpRgb(
 }
 
 /**
- * 2D neon ring: wavy inner/outer boundaries, fixed overall extent, no whole-object scale pulse.
- * Inner edge is clamped so it never crosses `innerHoleRadiusNorm` (clear center).
+ * Thin “sun corona”: one wavy circle (fixed mean radius), stroked only — no filled donut, no purple plate.
+ * Colors sweep around the ring via conic gradient; glow from layered strokes + light shadows only.
  */
 export class AIVoiceRing2D {
   private readonly canvas: HTMLCanvasElement;
@@ -109,12 +109,13 @@ export class AIVoiceRing2D {
     private readonly mount: HTMLElement,
     options: VoiceRing2DOptions = {}
   ) {
-    this.innerHoleNorm = options.innerHoleRadiusNorm ?? 0.4;
+    this.innerHoleNorm = options.innerHoleRadiusNorm ?? 0.38;
     this.canvas = document.createElement("canvas");
     this.canvas.style.display = "block";
     this.canvas.style.width = "100%";
     this.canvas.style.height = "100%";
-    if (options.transparentBackground === true) {
+    const transparent = options.transparentBackground !== false;
+    if (transparent) {
       this.canvas.style.background = "transparent";
     }
     const c = this.canvas.getContext("2d", { alpha: true });
@@ -123,6 +124,7 @@ export class AIVoiceRing2D {
     }
     this.ctx = c;
     this.mount.style.position = "relative";
+    this.mount.style.background = "transparent";
     this.mount.appendChild(this.canvas);
 
     if (options.baseColor) {
@@ -137,7 +139,6 @@ export class AIVoiceRing2D {
 
   setBaseColor(hex: string): void {
     const accent = parseHex(hex);
-    // Anchor to reference art: electric cyan (BL) ↔ hot orange (TR), accent only nudges hue.
     const warmAnchor = parseHex("#ff2e12");
     const coolAnchor = parseHex("#00dcff");
     const warm = lerpRgb(warmAnchor, accent, 0.22);
@@ -230,36 +231,40 @@ export class AIVoiceRing2D {
     return clamp01(this.dampedSpeak * 0.55 + this.dampedSpeakPeak * 0.42);
   }
 
-  private sampleWaves(theta: number): { inner: number; outer: number } {
+  /** Single radial undulation on the base circle (−1…1), smooth “plasma” silhouette. */
+  private sampleRadialWave(theta: number): number {
     const t = this.timeSec;
     const k = this.noiseSeed;
-    // Lower high-frequency weight → smoother, more “liquid” silhouette (closer to reference).
     const s0 = Math.sin(theta * 3 + t * 0.95 + k);
     const s1 = Math.sin(theta * 6 - t * 0.58 + k * 1.2);
     const s2 = Math.sin(theta * 9 + t * 1.05 + k * 0.35);
-    const inner = s0 * 0.52 + s1 * 0.32 + s2 * 0.16;
-
-    const o0 = Math.cos(theta * 4 + t * 0.72 + k * 0.65);
-    const o1 = Math.cos(theta * 10 - t * 0.44 + k);
-    const o2 = Math.sin(theta * 14 + t * 0.5);
-    const outer = o0 * 0.54 + o1 * 0.32 + o2 * 0.14;
-    return { inner, outer };
+    return s0 * 0.52 + s1 * 0.32 + s2 * 0.16;
   }
 
-  private ringPath(ctx: CanvasRenderingContext2D, outerPts: { x: number; y: number }[], innerPts: { x: number; y: number }[]): void {
-    const p0 = outerPts[0]!;
-    ctx.moveTo(p0.x, p0.y);
-    for (let i = 1; i < outerPts.length; i++) {
-      const p = outerPts[i]!;
-      ctx.lineTo(p.x, p.y);
+  /** Conic sweep: cyan → white → orange around the ring (reference poster). */
+  private createConic(cx: number, cy: number): CanvasGradient {
+    const g = this.ctx.createConicGradient(-Math.PI / 2 + this.gradientAngle, cx, cy);
+    const B = this.moodB;
+    const A = this.moodA;
+    g.addColorStop(0, rgbStr(B.r, B.g, B.b, 1));
+    g.addColorStop(0.14, rgbStr(lerp(B.r, 255, 0.45), lerp(B.g, 255, 0.45), lerp(B.b, 255, 0.38), 1));
+    g.addColorStop(0.28, rgbStr(lerp(B.r, 255, 0.78), lerp(B.g, 255, 0.78), lerp(B.b, 255, 0.72), 1));
+    g.addColorStop(0.42, rgbStr(255, 255, 255, 1));
+    g.addColorStop(0.52, rgbStr(255, 252, 248, 1));
+    g.addColorStop(0.64, rgbStr(lerp(255, A.r, 0.22), lerp(255, A.g, 0.18), lerp(255, A.b, 0.12), 1));
+    g.addColorStop(0.8, rgbStr(A.r, A.g, A.b, 1));
+    g.addColorStop(1, rgbStr(B.r, B.g, B.b, 1));
+    return g;
+  }
+
+  private buildWavyPath(pts: { x: number; y: number }[]): void {
+    const p0 = pts[0]!;
+    this.ctx.moveTo(p0.x, p0.y);
+    for (let i = 1; i < pts.length; i++) {
+      const p = pts[i]!;
+      this.ctx.lineTo(p.x, p.y);
     }
-    ctx.closePath();
-    ctx.moveTo(innerPts[innerPts.length - 1]!.x, innerPts[innerPts.length - 1]!.y);
-    for (let i = innerPts.length - 2; i >= 0; i--) {
-      const p = innerPts[i]!;
-      ctx.lineTo(p.x, p.y);
-    }
-    ctx.closePath();
+    this.ctx.closePath();
   }
 
   private animate = (): void => {
@@ -274,7 +279,7 @@ export class AIVoiceRing2D {
     this.dampedSpeakPeak = damp(this.dampedSpeakPeak, this.speechPeak, dampPeakRate, dt);
 
     this.timeSec += dt;
-    this.gradientAngle += this.rotationSpeed * dt;
+    this.gradientAngle += this.rotationSpeed * dt * 0.35;
 
     this.moodA.r += (this.moodTargetA.r - this.moodA.r) * Math.min(1, dt * 4.2);
     this.moodA.g += (this.moodTargetA.g - this.moodA.g) * Math.min(1, dt * 4.2);
@@ -289,109 +294,84 @@ export class AIVoiceRing2D {
     const cy = h * 0.5;
     const half = Math.min(w, h) * 0.5;
     const rHole = half * this.innerHoleNorm;
-    // Narrow band (~10–12% of radius): reads like the thin neon tube in the reference, not a thick donut.
-    const rOuterMean = half * 0.845;
-    const bandWidth = half * 0.108;
-    const rInnerMean = Math.max(rHole + half * 0.014, rOuterMean - bandWidth);
+    const rMargin = half * 0.006;
+    // Mean orbit (“base circle”) sits outside the hard hole; waves ride on this radius only.
+    const rBase = half * Math.min(0.66, this.innerHoleNorm + 0.2);
 
     const e = this.energy();
-    const idleBreath = this.presentationIdleCalm ? 0.12 + Math.sin(this.timeSec * 0.85) * 0.08 : 0;
+    const idleBreath = this.presentationIdleCalm ? 0.14 + Math.sin(this.timeSec * 0.82) * 0.1 : 0;
     const waveBoost = this.presentationIdleCalm ? idleBreath : e;
 
-    const band = Math.max(rOuterMean - rInnerMean, half * 0.04);
-    const innerAmp = band * (0.14 + waveBoost * 0.55);
-    const outerAmp = band * (0.2 + waveBoost * 0.72);
-    const minWall = half * 0.006;
+    const maxInward = Math.max(0, rBase - rHole - rMargin);
+    const ampDesired = half * (0.012 + waveBoost * 0.038);
+    const amp = Math.min(ampDesired, maxInward * 0.92);
 
-    const steps = 360;
-    const outerPts: { x: number; y: number }[] = [];
-    const innerPts: { x: number; y: number }[] = [];
-
+    const steps = 400;
+    const pts: { x: number; y: number }[] = [];
     for (let i = 0; i <= steps; i++) {
       const theta = (i / steps) * Math.PI * 2;
-      const { inner, outer } = this.sampleWaves(theta);
-
-      let ri = rInnerMean + inner * innerAmp;
-      ri = Math.max(rHole, ri);
-
-      let ro = rOuterMean + outer * outerAmp;
-      if (ro < ri + minWall) {
-        ro = ri + minWall;
-      }
-
-      outerPts.push({ x: cx + Math.cos(theta) * ro, y: cy + Math.sin(theta) * ro });
-      innerPts.push({ x: cx + Math.cos(theta) * ri, y: cy + Math.sin(theta) * ri });
+      const wv = this.sampleRadialWave(theta);
+      let r = rBase + wv * amp;
+      r = Math.max(rHole + rMargin, r);
+      pts.push({ x: cx + Math.cos(theta) * r, y: cy + Math.sin(theta) * r });
     }
 
     const ctx = this.ctx;
     ctx.clearRect(0, 0, w, h);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
 
-    const cos = Math.cos(this.gradientAngle);
-    const sin = Math.sin(this.gradientAngle);
-    // Bottom-left → top-right (reference “organic sphere” poster).
-    const x0 = cx - cos * half - sin * half;
-    const y0 = cy - sin * half + cos * half;
-    const x1 = cx + cos * half + sin * half;
-    const y1 = cy + sin * half - cos * half;
+    const conic = this.createConic(cx, cy);
 
-    const B = this.moodB;
-    const A = this.moodA;
-    const g = ctx.createLinearGradient(x0, y0, x1, y1);
-    g.addColorStop(0, rgbStr(B.r, B.g, B.b, 1));
-    g.addColorStop(0.28, rgbStr(lerp(B.r, 255, 0.55), lerp(B.g, 255, 0.55), lerp(B.b, 255, 0.45), 1));
-    g.addColorStop(0.42, rgbStr(lerp(B.r, 255, 0.82), lerp(B.g, 255, 0.82), lerp(B.b, 255, 0.78), 1));
-    g.addColorStop(0.52, rgbStr(255, 255, 255, 1));
-    g.addColorStop(0.62, rgbStr(255, lerp(255, A.g, 0.12), lerp(255, A.b, 0.08), 1));
-    g.addColorStop(0.78, rgbStr(lerp(255, A.r, 0.35), lerp(255, A.g, 0.25), lerp(255, A.b, 0.2), 1));
-    g.addColorStop(1, rgbStr(A.r, A.g, A.b, 1));
-
-    // Wide bloom (soft halo) — slightly transparent so the second pass defines the crisp tube.
+    // Faint perfect base circle (mean radius) — “sun” reference orbit, not a filled disk.
     ctx.save();
-    ctx.globalAlpha = 0.78;
-    ctx.shadowBlur = 44 + waveBoost * 36;
-    ctx.shadowColor = rgbStr(lerp(B.r, A.r, 0.5), lerp(B.g, A.g, 0.5), lerp(B.b, A.b, 0.55), 0.52);
+    ctx.strokeStyle = "rgba(255,255,255,0.055)";
+    ctx.lineWidth = 0.9;
     ctx.beginPath();
-    this.ringPath(ctx, outerPts, innerPts);
-    ctx.fillStyle = g;
-    ctx.fill("evenodd");
+    ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.restore();
 
+    // Outer corona: wide, soft, light-tinted shadow only (no dark purple fill).
     ctx.save();
-    ctx.globalAlpha = 1;
-    ctx.shadowBlur = 14 + waveBoost * 20;
-    ctx.shadowColor = rgbStr(255, 252, 255, 0.48);
+    ctx.strokeStyle = conic;
+    ctx.globalAlpha = 0.42;
+    ctx.lineWidth = 5.2;
+    ctx.shadowBlur = 32 + waveBoost * 26;
+    ctx.shadowColor = "rgba(200, 235, 255, 0.55)";
     ctx.beginPath();
-    this.ringPath(ctx, outerPts, innerPts);
-    ctx.fillStyle = g;
-    ctx.fill("evenodd");
-    ctx.restore();
-
-    // Crisp outer highlight (white plasma edge).
-    ctx.save();
-    ctx.strokeStyle = rgbStr(255, 255, 255, 0.38 + waveBoost * 0.32);
-    ctx.lineWidth = 1.15;
-    ctx.shadowBlur = 10;
-    ctx.shadowColor = "rgba(255,255,255,0.55)";
-    ctx.beginPath();
-    for (let i = 0; i < outerPts.length; i++) {
-      const p = outerPts[i]!;
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    }
-    ctx.closePath();
+    this.buildWavyPath(pts);
     ctx.stroke();
     ctx.restore();
 
     ctx.save();
-    ctx.strokeStyle = rgbStr(255, 255, 255, 0.14 + waveBoost * 0.22);
-    ctx.lineWidth = 0.85;
+    ctx.strokeStyle = conic;
+    ctx.globalAlpha = 0.72;
+    ctx.lineWidth = 2.6;
+    ctx.shadowBlur = 14 + waveBoost * 16;
+    ctx.shadowColor = "rgba(255, 250, 255, 0.5)";
     ctx.beginPath();
-    for (let i = 0; i < innerPts.length; i++) {
-      const p = innerPts[i]!;
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    }
-    ctx.closePath();
+    this.buildWavyPath(pts);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = conic;
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1.15;
+    ctx.shadowBlur = 5 + waveBoost * 8;
+    ctx.shadowColor = "rgba(255,255,255,0.65)";
+    ctx.beginPath();
+    this.buildWavyPath(pts);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = rgbStr(255, 255, 255, 0.55 + waveBoost * 0.28);
+    ctx.lineWidth = 0.65;
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    this.buildWavyPath(pts);
     ctx.stroke();
     ctx.restore();
   };
