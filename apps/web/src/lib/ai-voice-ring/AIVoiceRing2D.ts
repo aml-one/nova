@@ -231,7 +231,7 @@ export class AIVoiceRing2D {
     if (this.presentationIdleCalm) {
       return 0;
     }
-    return clamp01(this.dampedSpeak * 0.55 + this.dampedSpeakPeak * 0.42);
+    return clamp01(this.dampedSpeak * 0.85 + this.dampedSpeakPeak * 0.7);
   }
 
   /** Radial corona modulation around a fixed base circle (−1…1), smooth “plasma” silhouette. */
@@ -244,19 +244,25 @@ export class AIVoiceRing2D {
     return s0 * 0.5 + s1 * 0.34 + s2 * 0.16;
   }
 
-  /** Conic sweep: cyan → white → orange around the ring (reference poster). */
+  /**
+   * Localized conic gradient: orange concentrated at the top, blue at the bottom, white on the sides.
+   * No rotation so the colors stay anchored like the reference poster.
+   */
   private createConic(cx: number, cy: number): CanvasGradient {
-    const g = this.ctx.createConicGradient(-Math.PI / 2 + this.gradientAngle, cx, cy);
-    const B = this.moodB;
+    const g = this.ctx.createConicGradient(-Math.PI / 2, cx, cy);
     const A = this.moodA;
-    g.addColorStop(0, rgbStr(B.r, B.g, B.b, 1));
-    g.addColorStop(0.16, rgbStr(0, 120, 255, 1));
-    g.addColorStop(0.28, rgbStr(0, 235, 255, 1));
-    g.addColorStop(0.4, rgbStr(255, 255, 255, 1));
-    g.addColorStop(0.56, rgbStr(255, 255, 245, 1));
-    g.addColorStop(0.7, rgbStr(255, 72, 24, 1));
-    g.addColorStop(0.84, rgbStr(A.r, A.g, A.b, 1));
-    g.addColorStop(1, rgbStr(B.r, B.g, B.b, 1));
+    const B = this.moodB;
+    g.addColorStop(0.0, rgbStr(A.r, A.g, A.b, 1));
+    g.addColorStop(0.06, rgbStr(255, 170, 130, 1));
+    g.addColorStop(0.18, rgbStr(255, 255, 255, 1));
+    g.addColorStop(0.36, rgbStr(255, 255, 255, 1));
+    g.addColorStop(0.46, rgbStr(160, 220, 255, 1));
+    g.addColorStop(0.5, rgbStr(B.r, B.g, B.b, 1));
+    g.addColorStop(0.54, rgbStr(160, 220, 255, 1));
+    g.addColorStop(0.66, rgbStr(255, 255, 255, 1));
+    g.addColorStop(0.84, rgbStr(255, 255, 255, 1));
+    g.addColorStop(0.94, rgbStr(255, 170, 130, 1));
+    g.addColorStop(1.0, rgbStr(A.r, A.g, A.b, 1));
     return g;
   }
 
@@ -282,7 +288,7 @@ export class AIVoiceRing2D {
     this.dampedSpeakPeak = damp(this.dampedSpeakPeak, this.speechPeak, dampPeakRate, dt);
 
     this.timeSec += dt * (this.presentationIdleCalm ? 1 : 2.35);
-    this.gradientAngle += this.rotationSpeed * dt * 0.35;
+    // Gradient stays anchored: orange up, blue down. No rotation.
 
     this.moodA.r += (this.moodTargetA.r - this.moodA.r) * Math.min(1, dt * 4.2);
     this.moodA.g += (this.moodTargetA.g - this.moodA.g) * Math.min(1, dt * 4.2);
@@ -297,30 +303,25 @@ export class AIVoiceRing2D {
     const cy = h * 0.5;
     const half = Math.min(w, h) * 0.5;
     const rHole = half * this.innerHoleNorm;
-    const rMargin = half * 0.008;
-    // The sample reads as a large, fixed circle. Waves ride on this radius; they do not define the circle.
-    const rBase = half * 0.79;
+    const rMargin = half * 0.01;
+    // Leave outer headroom inside the canvas so glow never gets clipped to a hard square.
+    const rBase = half * 0.52;
 
     const e = this.energy();
     const idleBreath = this.presentationIdleCalm ? 0.14 + Math.sin(this.timeSec * 0.82) * 0.1 : 0;
     const waveBoost = this.presentationIdleCalm ? idleBreath : e;
 
     const maxInward = Math.max(0, rBase - rHole - rMargin);
-    const ampDesired = half * (0.03 + waveBoost * 0.225);
-    const amp = Math.min(ampDesired, maxInward * 0.92);
+    const ampDesired = half * (0.022 + waveBoost * 0.34);
+    const amp = Math.min(ampDesired, maxInward * 0.95);
 
     const steps = 400;
-    const coronaPts: { x: number; y: number }[] = [];
-    const innerPts: { x: number; y: number }[] = [];
+    const wavePts: { x: number; y: number }[] = [];
     for (let i = 0; i <= steps; i++) {
       const theta = (i / steps) * Math.PI * 2;
       const wv = this.sampleRadialWave(theta);
-      const outward = Math.max(0, wv);
-      const inward = Math.max(0, -wv);
-      const ro = rBase + outward * amp;
-      const ri = Math.max(rHole + rMargin, rBase - inward * amp * 0.42);
-      coronaPts.push({ x: cx + Math.cos(theta) * ro, y: cy + Math.sin(theta) * ro });
-      innerPts.push({ x: cx + Math.cos(theta) * ri, y: cy + Math.sin(theta) * ri });
+      const r = Math.max(rHole + rMargin, rBase + wv * amp);
+      wavePts.push({ x: cx + Math.cos(theta) * r, y: cy + Math.sin(theta) * r });
     }
 
     const ctx = this.ctx;
@@ -330,80 +331,45 @@ export class AIVoiceRing2D {
 
     const conic = this.createConic(cx, cy);
 
-    // Perfect base circle: this is the stable "sun" orbit. The waves sit on top of it.
+    // Real neon: additive blending so overlapping strokes pile up to white instead of muddy grey.
     ctx.save();
-    ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.42;
-    ctx.lineWidth = 43.2;
-    ctx.shadowBlur = 82 + waveBoost * 62;
-    ctx.shadowColor = "rgba(0, 210, 255, 0.92)";
-    ctx.beginPath();
-    ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
+    ctx.globalCompositeOperation = "lighter";
 
-    ctx.save();
+    // Wide colored aura. Modest shadow so the soft halo stays inside the canvas.
     ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.95;
-    ctx.lineWidth = 13.2;
-    ctx.shadowBlur = 34 + waveBoost * 25;
+    ctx.lineWidth = 26;
+    ctx.shadowBlur = 18;
+    ctx.shadowColor = "rgba(150, 210, 255, 0.95)";
+    ctx.beginPath();
+    this.buildWavyPath(wavePts);
+    ctx.stroke();
+
+    // Mid colored neon body. Conic keeps orange at the top and blue at the bottom.
+    ctx.strokeStyle = conic;
+    ctx.lineWidth = 14;
+    ctx.shadowBlur = 12;
+    ctx.shadowColor = "rgba(255, 255, 255, 0.95)";
+    ctx.beginPath();
+    this.buildWavyPath(wavePts);
+    ctx.stroke();
+
+    // Bright white inner glow.
+    ctx.strokeStyle = "rgba(255,255,255,1)";
+    ctx.lineWidth = 6;
+    ctx.shadowBlur = 6;
     ctx.shadowColor = "rgba(255,255,255,1)";
     ctx.beginPath();
-    ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
+    this.buildWavyPath(wavePts);
     ctx.stroke();
-    ctx.restore();
 
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.82)";
-    ctx.globalAlpha = 0.9;
-    ctx.lineWidth = 4.5;
-    ctx.beginPath();
-    ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.restore();
-
-    // Thin outer corona waves. They are glow strokes, not a second thick body.
-    ctx.save();
-    ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.48 + waveBoost * 0.22;
-    ctx.lineWidth = 16.8;
-    ctx.shadowBlur = 68 + waveBoost * 52;
-    ctx.shadowColor = "rgba(0, 220, 255, 0.95)";
-    ctx.beginPath();
-    this.buildWavyPath(coronaPts);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.save();
-    ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.88;
-    ctx.lineWidth = 6.3;
-    ctx.shadowBlur = 26 + waveBoost * 24;
-    ctx.shadowColor = "rgba(255,255,255,1)";
-    ctx.beginPath();
-    this.buildWavyPath(coronaPts);
-    ctx.stroke();
-    ctx.restore();
-
-    // A very subtle inner shimmer so the wave feels attached to the circle without becoming thick.
-    ctx.save();
-    ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.22 + waveBoost * 0.18;
-    ctx.lineWidth = 4.8;
-    ctx.shadowBlur = 13;
-    ctx.shadowColor = "rgba(255,255,255,0.55)";
-    ctx.beginPath();
-    this.buildWavyPath(innerPts);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.save();
-    ctx.strokeStyle = rgbStr(255, 255, 255, 0.55 + waveBoost * 0.28);
-    ctx.lineWidth = 3.3;
+    // Sharp white core, no blur. Reads as the actual neon tube.
+    ctx.strokeStyle = "rgba(255,255,255,1)";
+    ctx.lineWidth = 2.4;
     ctx.shadowBlur = 0;
     ctx.beginPath();
-    this.buildWavyPath(coronaPts);
+    this.buildWavyPath(wavePts);
     ctx.stroke();
+
     ctx.restore();
   };
 }
