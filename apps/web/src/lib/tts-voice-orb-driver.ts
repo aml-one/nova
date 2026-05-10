@@ -49,7 +49,6 @@ export class TtsVoiceOrbDriver {
   private wordSpike = 0;
   private lastFlipAt = 0;
   private slowEnergy = 0;
-  private displayScale = 1;
   private freqBuf: Uint8Array<ArrayBuffer> | null = null;
   private timeDomainBuf = new Float32Array(0);
 
@@ -80,7 +79,6 @@ export class TtsVoiceOrbDriver {
     this.wordSpike = 0;
     this.lastFlipAt = 0;
     this.slowEnergy = 0;
-    this.displayScale = 1;
 
     this.config.getOrb()?.setSpeechEnvelope(0, 0);
     if (this.config.enableMoodFromEmotion) {
@@ -95,10 +93,7 @@ export class TtsVoiceOrbDriver {
         // Orb can be mid-dispose.
       }
     }
-    const meter = this.config.getMeter();
-    if (meter) {
-      meter.style.removeProperty("transform");
-    }
+    this.config.getMeter()?.style.removeProperty("transform");
   }
 
   /** Full teardown (e.g. route unmount): release MediaElementAudioSource and AudioContext. */
@@ -150,7 +145,6 @@ export class TtsVoiceOrbDriver {
     this.wordSpike = 0;
     this.voiceLevel = 0;
     this.slowEnergy = 0;
-    this.displayScale = 1;
 
     const win = typeof window !== "undefined" ? window : undefined;
     const AudioCtx = win?.AudioContext ?? (win as unknown as { webkitAudioContext?: typeof AudioContext } | undefined)?.webkitAudioContext;
@@ -276,21 +270,8 @@ export class TtsVoiceOrbDriver {
         slow = Math.max(combined, slow * (combined < 0.018 ? 0.87 : 0.993));
         this.slowEnergy = slow;
 
-        const meter = this.config.getMeter();
-        if (meter) {
-          let targetScale = 1.0;
-          if (slow < 0.052 && combined < 0.065) {
-            targetScale = 0.7;
-          } else if (combined > 0.122 || (slow > 0.045 && combined > slow * 1.4)) {
-            targetScale =
-              1.0 + Math.min(0.52, (combined - 0.108) * 2.05 + Math.max(0, combined - slow * 1.22) * 1.32);
-          }
-          let ds = this.displayScale;
-          ds += (targetScale - ds) * (targetScale > ds ? 0.19 : 0.088);
-          this.displayScale = ds;
-          meter.style.transformOrigin = "center center";
-          meter.style.transform = `scale(${ds})`;
-        }
+        // The 2D ring has a fixed frame. Voice energy changes wave height, not container size.
+        this.config.getMeter()?.style.removeProperty("transform");
 
         if (this.config.enableMoodFromEmotion) {
           const basePal = orbMoodPaletteForEmotionLabel(this.config.getEmotionLabel());

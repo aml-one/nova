@@ -170,11 +170,13 @@ export class AIVoiceRing2D {
   }
 
   setMoodPalette(colorA: string, colorB: string, _shellRgb: string, _glowHex: string): void {
+    void colorA;
+    void colorB;
     void _shellRgb;
     void _glowHex;
-    // Keep the reference look vivid. Emotion colors can be pastel, so they only nudge the anchors.
-    this.moodTargetA = lerpRgb(parseHex("#ff2e12"), parseHex(colorA), 0.14);
-    this.moodTargetB = lerpRgb(parseHex("#00dcff"), parseHex(colorB), 0.1);
+    // Keep this art direction locked to the vivid reference. Emotion palettes tend to pastel this ring.
+    this.moodTargetA = parseHex("#ff2e12");
+    this.moodTargetB = parseHex("#00dcff");
   }
 
   setRotationSpeed(speed: number): void {
@@ -304,7 +306,7 @@ export class AIVoiceRing2D {
     const waveBoost = this.presentationIdleCalm ? idleBreath : e;
 
     const maxInward = Math.max(0, rBase - rHole - rMargin);
-    const ampDesired = half * (0.006 + waveBoost * 0.026);
+    const ampDesired = half * (0.01 + waveBoost * 0.075);
     const amp = Math.min(ampDesired, maxInward * 0.55);
 
     const steps = 400;
@@ -331,10 +333,10 @@ export class AIVoiceRing2D {
     // Perfect base circle: this is the stable "sun" orbit. The waves sit on top of it.
     ctx.save();
     ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.26;
-    ctx.lineWidth = 7.2;
-    ctx.shadowBlur = 30 + waveBoost * 18;
-    ctx.shadowColor = "rgba(130, 210, 255, 0.5)";
+    ctx.globalAlpha = 0.34;
+    ctx.lineWidth = 14.4;
+    ctx.shadowBlur = 46 + waveBoost * 28;
+    ctx.shadowColor = "rgba(35, 190, 255, 0.72)";
     ctx.beginPath();
     ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
     ctx.stroke();
@@ -343,9 +345,9 @@ export class AIVoiceRing2D {
     ctx.save();
     ctx.strokeStyle = conic;
     ctx.globalAlpha = 0.95;
-    ctx.lineWidth = 2.2;
-    ctx.shadowBlur = 9 + waveBoost * 8;
-    ctx.shadowColor = "rgba(255,255,255,0.75)";
+    ctx.lineWidth = 4.4;
+    ctx.shadowBlur = 18 + waveBoost * 13;
+    ctx.shadowColor = "rgba(255,255,255,0.92)";
     ctx.beginPath();
     ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
     ctx.stroke();
@@ -354,7 +356,7 @@ export class AIVoiceRing2D {
     ctx.save();
     ctx.strokeStyle = "rgba(255,255,255,0.82)";
     ctx.globalAlpha = 0.9;
-    ctx.lineWidth = 0.75;
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
     ctx.stroke();
@@ -364,9 +366,9 @@ export class AIVoiceRing2D {
     ctx.save();
     ctx.strokeStyle = conic;
     ctx.globalAlpha = 0.48 + waveBoost * 0.22;
-    ctx.lineWidth = 2.8;
-    ctx.shadowBlur = 22 + waveBoost * 16;
-    ctx.shadowColor = "rgba(210, 235, 255, 0.58)";
+    ctx.lineWidth = 5.6;
+    ctx.shadowBlur = 36 + waveBoost * 24;
+    ctx.shadowColor = "rgba(0, 220, 255, 0.72)";
     ctx.beginPath();
     this.buildWavyPath(coronaPts);
     ctx.stroke();
@@ -375,9 +377,9 @@ export class AIVoiceRing2D {
     ctx.save();
     ctx.strokeStyle = conic;
     ctx.globalAlpha = 0.88;
-    ctx.lineWidth = 1.05;
-    ctx.shadowBlur = 6 + waveBoost * 7;
-    ctx.shadowColor = "rgba(255,255,255,0.7)";
+    ctx.lineWidth = 2.1;
+    ctx.shadowBlur = 12 + waveBoost * 12;
+    ctx.shadowColor = "rgba(255,255,255,0.9)";
     ctx.beginPath();
     this.buildWavyPath(coronaPts);
     ctx.stroke();
@@ -387,8 +389,8 @@ export class AIVoiceRing2D {
     ctx.save();
     ctx.strokeStyle = conic;
     ctx.globalAlpha = 0.22 + waveBoost * 0.18;
-    ctx.lineWidth = 0.8;
-    ctx.shadowBlur = 3;
+    ctx.lineWidth = 1.6;
+    ctx.shadowBlur = 6;
     ctx.shadowColor = "rgba(255,255,255,0.35)";
     ctx.beginPath();
     this.buildWavyPath(innerPts);
@@ -397,7 +399,7 @@ export class AIVoiceRing2D {
 
     ctx.save();
     ctx.strokeStyle = rgbStr(255, 255, 255, 0.55 + waveBoost * 0.28);
-    ctx.lineWidth = 0.55;
+    ctx.lineWidth = 1.1;
     ctx.shadowBlur = 0;
     ctx.beginPath();
     this.buildWavyPath(coronaPts);
