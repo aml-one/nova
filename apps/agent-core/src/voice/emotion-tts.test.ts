@@ -72,6 +72,18 @@ describe("augmentOrpheusSpeechForMood", () => {
     expect(found).toBe(true);
   });
 
+  it("does not prefix English Hmm for Hungarian-heavy text (Tara HU prosody)", () => {
+    const text =
+      "Persze, szívesen! Itt vagyok neked, hogy segítsek a feladataidban, válaszoljak a kérdéseidre, vagy csak egy kis kikapcsolódást nyújtsak.";
+    const out = augmentOrpheusSpeechForMood(text, {
+      label: "neutral",
+      valence: 0.19,
+      arousal: 0.25
+    });
+    expect(out.toLowerCase().startsWith("hmm,")).toBe(false);
+    expect(out).toBe(text.trim());
+  });
+
   it("may prefix gasp for anxious surprise wording", () => {
     const mood = { label: "anxious" as const, valence: -0.08, arousal: 0.52 };
     let found = false;

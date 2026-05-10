@@ -40,6 +40,15 @@ function alreadyHmmPrefixed(text: string): boolean {
   return /^hm+m?[,.!\s]/i.test(text);
 }
 
+/**
+ * Hungarian-heavy Latin (áéíóöőúüű): English mood fillers like "Hmm," often make Tara HU sound
+ * like it is reading the whole paragraph with English prosody.
+ */
+function shouldSkipEnglishHmmFiller(text: string): boolean {
+  const diacCount = (text.match(/[áéíóöőúüűÁÉÍÓÖŐÚÜŰ]/g) ?? []).length;
+  return diacCount >= (text.length < 96 ? 2 : 4);
+}
+
 /** True when synthesis already starts with a non-speech tag (avoid stacking prefixes). */
 function hasLeadingNonverbPrefix(text: string): boolean {
   return /^\s*<(?:groan|sigh|sniffle|gasp|cough)\b[^>]*>/i.test(text);
@@ -89,7 +98,7 @@ export function augmentOrpheusSpeechForMood(
     !alreadyHmmPrefixed(result) &&
     stableRoll(trimmed, 53) < 0.14;
 
-  if (hmmThinking || hmmJoyfulWarm) {
+  if ((hmmThinking || hmmJoyfulWarm) && !shouldSkipEnglishHmmFiller(result)) {
     result = `Hmm, ${result}`;
   }
 
