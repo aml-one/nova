@@ -5,7 +5,7 @@ import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import type { EmotionState } from "../emotion/emotion-service.js";
-import { augmentOrpheusSpeechForMood } from "./emotion-tts.js";
+import { augmentOrpheusSpeechForMood, ensureLexAuHungarianCueFallback } from "./emotion-tts.js";
 import { normalizeOrpheusSpeechCues, prepareChatTextForSpeech } from "./tts-text.js";
 import { prependSilenceToWavPcm } from "./wav-prepend-silence.js";
 
@@ -177,7 +177,7 @@ export class VoiceService {
     } catch {
       /* keep prepared */
     }
-    return normalizeOrpheusSpeechCues(preparedText);
+    return normalizeOrpheusSpeechCues(ensureLexAuHungarianCueFallback(preparedText));
   }
 
   private async synthesizeOrpheusBufferInternal(preparedOrRawText: string): Promise<Buffer> {

@@ -12,6 +12,25 @@ export function countOrpheusNonverbTags(text: string): number {
   return (text.match(NONVERB_TAG_RE) ?? []).length;
 }
 
+/**
+ * Lex-au often returns near-silent WAVs for Hungarian-heavy text with no `<chuckle>` / `<laugh>` / …
+ * (HTTP 200, ~9KB body). Prefix one `<chuckle>` when there are no cues yet and HU diacritics suggest
+ * {@link shouldSkipEnglishHmmFiller} territory.
+ */
+export function ensureLexAuHungarianCueFallback(text: string): string {
+  const t = text.trim();
+  if (!t || t.length < 8) {
+    return t;
+  }
+  if (countOrpheusNonverbTags(t) > 0) {
+    return t;
+  }
+  if (shouldSkipEnglishHmmFiller(t) || looksLikeLatinProseWithoutEnglishHints(t)) {
+    return `<chuckle> ${t}`;
+  }
+  return t;
+}
+
 function stableRoll(text: string, salt: number): number {
   let h = 2166136261 >>> 0;
   const payload = `${text}\0${salt}`;
@@ -49,6 +68,20 @@ function shouldSkipEnglishHmmFiller(text: string): boolean {
   return diacCount >= (text.length < 96 ? 2 : 4);
 }
 
+/** Short Latin prose with no common English function/content words — Lex-au often needs a cue like HU diacritics. */
+function looksLikeLatinProseWithoutEnglishHints(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 10 || t.length > 480) {
+    return false;
+  }
+  const englishHits = (
+    t.match(
+      /\b(the|and|what|with|your|this|that|have|from|here|hello|about|please|thanks|thank you|good|nice|great|will|can|not|just|only|very|really)\b/gi
+    ) ?? []
+  ).length;
+  return englishHits === 0;
+}
+
 /** True when synthesis already starts with a non-speech tag (avoid stacking prefixes). */
 function hasLeadingNonverbPrefix(text: string): boolean {
   return /^\s*<(?:groan|sigh|sniffle|gasp|cough)\b[^>]*>/i.test(text);
@@ -74,6 +107,8 @@ export function augmentOrpheusSpeechForMood(
   if (countOrpheusNonverbTags(result) >= 5) {
     return result;
   }
+
+  result = ensureLexAuHungarianCueFallback(result);
 
   const thinkingCue =
     /\b(let me think|let's think|consider|therefore|perhaps|probably|might mean|not sure yet|good question)\b/i.test(

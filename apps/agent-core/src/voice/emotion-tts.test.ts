@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { augmentOrpheusSpeechForMood, countOrpheusNonverbTags } from "./emotion-tts.js";
+import { augmentOrpheusSpeechForMood, countOrpheusNonverbTags, ensureLexAuHungarianCueFallback } from "./emotion-tts.js";
+
+describe("ensureLexAuHungarianCueFallback", () => {
+  it("prefixes chuckle for HU-heavy text without cues (diacritics)", () => {
+    const out = ensureLexAuHungarianCueFallback("újra itt vagyok");
+    expect(out.toLowerCase().startsWith("<chuckle>")).toBe(true);
+    expect(out).toContain("újra itt vagyok");
+  });
+
+  it("prefixes chuckle for Latin-only HU-like prose without cues (Lex-au silent-WAV case)", () => {
+    const out = ensureLexAuHungarianCueFallback("csak itt vagyok");
+    expect(out.toLowerCase().startsWith("<chuckle>")).toBe(true);
+    expect(out).toContain("csak itt vagyok");
+  });
+
+  it("does not change text that already has a cue", () => {
+    const raw = "Szia! <chuckle> Újra itt vagyok.";
+    expect(ensureLexAuHungarianCueFallback(raw)).toBe(raw);
+  });
+});
 
 describe("countOrpheusNonverbTags", () => {
   it("detects standard Lex-au tags", () => {
@@ -81,7 +100,9 @@ describe("augmentOrpheusSpeechForMood", () => {
       arousal: 0.25
     });
     expect(out.toLowerCase().startsWith("hmm,")).toBe(false);
-    expect(out).toBe(text.trim());
+    // Lex-au often returns near-silent audio for HU prose without any cue; we add `<chuckle>` once.
+    expect(out.toLowerCase().startsWith("<chuckle>")).toBe(true);
+    expect(out).toContain("Itt vagyok");
   });
 
   it("may prefix gasp for anxious surprise wording", () => {
