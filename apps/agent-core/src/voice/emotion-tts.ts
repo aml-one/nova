@@ -13,19 +13,18 @@ export function countOrpheusNonverbTags(text: string): number {
 }
 
 /**
- * Some **stock** Lex-au / Orpheus stacks return near-silent WAVs for Hungarian-heavy text with no
- * `<chuckle>` / `<laugh>` / … (HTTP 200, tiny body). Prefix one `<chuckle>` when there are no cues yet
- * and {@link shouldSkipEnglishHmmFiller} / {@link looksLikeLatinProseWithoutEnglishHints} match.
+ * **Opt-in only** (stock Lex-au): some stacks return near-silent WAVs for Hungarian-heavy text with no
+ * `<chuckle>` / `<laugh>` / … (HTTP 200, tiny body). When `NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE=1` on
+ * agent-core, prefix one `<chuckle>` if there are no cues yet and HU-like heuristics match.
  *
- * **Custom bilingual models** (e.g. fine-tuned Tara for EN+HU) usually do not need this; a leading
- * non-speech cue can even skew prosody. Set `NOVA_ORPHEUS_TTS_DISABLE_HU_SILENCE_CUE=1` on agent-core
- * to skip this prefix entirely.
+ * Default is **no** automatic prefix — fine for custom bilingual Orpheus (e.g. Tara EN+HU). Orpheus fetch
+ * may still retry once without leading cues if the first WAV response is suspiciously small.
  */
 export function ensureLexAuHungarianCueFallback(text: string): string {
-  const disable =
-    process.env.NOVA_ORPHEUS_TTS_DISABLE_HU_SILENCE_CUE === "1" ||
-    process.env.NOVA_ORPHEUS_TTS_DISABLE_HU_SILENCE_CUE === "true";
-  if (disable) {
+  const enabled =
+    process.env.NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE === "1" ||
+    process.env.NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE === "true";
+  if (!enabled) {
     return text.trim();
   }
   const t = text.trim();

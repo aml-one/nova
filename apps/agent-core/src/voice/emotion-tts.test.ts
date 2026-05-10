@@ -21,29 +21,37 @@ describe("isHungarianLikeForOrpheusVoice", () => {
 });
 
 describe("ensureLexAuHungarianCueFallback", () => {
-  it("prefixes chuckle for HU-heavy text without cues (diacritics)", () => {
-    const out = ensureLexAuHungarianCueFallback("újra itt vagyok");
-    expect(out.toLowerCase().startsWith("<chuckle>")).toBe(true);
-    expect(out).toContain("újra itt vagyok");
+  it("does not prefix chuckle by default (custom / bilingual Orpheus)", () => {
+    expect(ensureLexAuHungarianCueFallback("újra itt vagyok")).toBe("újra itt vagyok");
+    expect(ensureLexAuHungarianCueFallback("csak itt vagyok")).toBe("csak itt vagyok");
   });
 
-  it("prefixes chuckle for Latin-only HU-like prose without cues (Lex-au silent-WAV case)", () => {
-    const out = ensureLexAuHungarianCueFallback("csak itt vagyok");
-    expect(out.toLowerCase().startsWith("<chuckle>")).toBe(true);
-    expect(out).toContain("csak itt vagyok");
-  });
-
-  it("does not change text that already has a cue", () => {
-    const raw = "Szia! <chuckle> Újra itt vagyok.";
-    expect(ensureLexAuHungarianCueFallback(raw)).toBe(raw);
-  });
-
-  it("skips leading chuckle when NOVA_ORPHEUS_TTS_DISABLE_HU_SILENCE_CUE is set (custom bilingual GGUF)", () => {
-    const k = "NOVA_ORPHEUS_TTS_DISABLE_HU_SILENCE_CUE";
+  it("prefixes chuckle when NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE is set (stock Lex-au)", () => {
+    const k = "NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE";
     const prev = process.env[k];
     process.env[k] = "1";
     try {
-      expect(ensureLexAuHungarianCueFallback("újra itt vagyok")).toBe("újra itt vagyok");
+      const out = ensureLexAuHungarianCueFallback("újra itt vagyok");
+      expect(out.toLowerCase().startsWith("<chuckle>")).toBe(true);
+      expect(out).toContain("újra itt vagyok");
+      const out2 = ensureLexAuHungarianCueFallback("csak itt vagyok");
+      expect(out2.toLowerCase().startsWith("<chuckle>")).toBe(true);
+    } finally {
+      if (prev === undefined) {
+        delete process.env[k];
+      } else {
+        process.env[k] = prev;
+      }
+    }
+  });
+
+  it("does not change text that already has a cue when Lex-au mode is on", () => {
+    const k = "NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE";
+    const prev = process.env[k];
+    process.env[k] = "1";
+    try {
+      const raw = "Szia! <chuckle> Újra itt vagyok.";
+      expect(ensureLexAuHungarianCueFallback(raw)).toBe(raw);
     } finally {
       if (prev === undefined) {
         delete process.env[k];
@@ -125,7 +133,7 @@ describe("augmentOrpheusSpeechForMood", () => {
     expect(found).toBe(true);
   });
 
-  it("does not prefix English Hmm for Hungarian-heavy text (Tara HU prosody)", () => {
+  it("does not prefix English Hmm or Lex-au chuckle for Hungarian-heavy neutral text", () => {
     const text =
       "Persze, szívesen! Itt vagyok neked, hogy segítsek a feladataidban, válaszoljak a kérdéseidre, vagy csak egy kis kikapcsolódást nyújtsak.";
     const out = augmentOrpheusSpeechForMood(text, {
@@ -134,8 +142,7 @@ describe("augmentOrpheusSpeechForMood", () => {
       arousal: 0.25
     });
     expect(out.toLowerCase().startsWith("hmm,")).toBe(false);
-    // Lex-au often returns near-silent audio for HU prose without any cue; we add `<chuckle>` once.
-    expect(out.toLowerCase().startsWith("<chuckle>")).toBe(true);
+    expect(out.toLowerCase().startsWith("<chuckle>")).toBe(false);
     expect(out).toContain("Itt vagyok");
   });
 

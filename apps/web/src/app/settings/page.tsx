@@ -4077,8 +4077,9 @@ export default function SettingsPage() {
                 exposes <code className="text-xs">POST /v1/audio/speech</code>. Agent-core proxies synthesis for the web UI. Upstream Lex-au documents
                 stock voices for several languages; Nova does not assume your inference GGUF — if you run a custom bilingual speaker (e.g. Tara
                 trained for English and Hungarian), use that voice id in <strong>Voice id</strong> and leave the Hungarian alternate field empty unless
-                your server maps a different id for HU. On the agent host, <code className="text-[10px]">NOVA_ORPHEUS_TTS_DISABLE_HU_SILENCE_CUE=1</code>{" "}
-                skips Nova&apos;s optional leading <code className="text-[10px]">&lt;chuckle&gt;</code> workaround for tiny WAVs on some stock stacks.
+                your server maps a different id for HU. Stock Lex-au sometimes needs a leading <code className="text-[10px]">&lt;chuckle&gt;</code> on HU-heavy
+                lines to avoid near-silent WAVs — enable that only with <code className="text-[10px]">NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE=1</code> on agent-core
+                (off by default for custom bilingual models).
               </p>
               <label className="flex items-center gap-2">
                 <Checkbox
