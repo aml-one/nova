@@ -22,7 +22,7 @@ type Props = {
  * Mount must have non-zero width/height before construction.
  */
 export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props>(function NovaThreeSpeakingOrb(
-  { className, baseColor = "#42b9ff", preset = "speaking" },
+  { className, baseColor = "#ff3d26", preset = "speaking" },
   ref
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);

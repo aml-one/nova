@@ -259,7 +259,9 @@ void main()
   vec3 color = vec3(0.0);
   color = mix(color, uLightAColor, lightAIntensity * fresnel);
   color = mix(color, uLightBColor, lightBIntensity * fresnel);
-  color = mix(color, vec3(1.0), clamp(pow(max(0.0, fresnel - 0.8), 3.0), 0.0, 1.0));
+  // Thin specular rim only — full white mix + bloom was washing the sphere to a flat blob.
+  float rim = clamp(pow(max(0.0, fresnel - 0.76), 4.5), 0.0, 1.0);
+  color = mix(color, vec3(1.0), rim * 0.14);
 
   vColor = color;
 }
@@ -274,7 +276,8 @@ void main()
 }
 `;
 
-const ORGANIC_CLEAR = 0x010101;
+/** Deep violet-black (reference organic-sphere promos), not grey. */
+const ORGANIC_CLEAR = 0x0c0218;
 const BLOOM_TINT_FRAGMENT = `
 varying vec2 vUv;
 uniform sampler2D blurTexture1;
@@ -337,13 +340,13 @@ export class AIVoiceOrb {
   private speechPeak = 0.2;
 
   private readonly moodTarget = {
-    colorA: new THREE.Color("#ff3e00"),
-    colorB: new THREE.Color("#0063ff")
+    colorA: new THREE.Color("#ff2a08"),
+    colorB: new THREE.Color("#0090ff")
   };
 
   private readonly moodCurrent = {
-    colorA: new THREE.Color("#ff3e00"),
-    colorB: new THREE.Color("#0063ff")
+    colorA: new THREE.Color("#ff2a08"),
+    colorB: new THREE.Color("#0090ff")
   };
 
   private rafId = 0;
@@ -381,14 +384,15 @@ export class AIVoiceOrb {
   private readonly offsetDirection = new THREE.Vector3();
   private timeFrequency = 0.0003;
 
+  /** Warm key ≈ top-right on screen, cool fill ≈ bottom-left (reference art). */
   private readonly lights = {
     a: {
-      intensity: 1.85,
-      spherical: new THREE.Spherical(1, 0.615, 2.049)
+      intensity: 2.05,
+      spherical: new THREE.Spherical(1, 0.52, 0.55)
     },
     b: {
-      intensity: 1.4,
-      spherical: new THREE.Spherical(1, 2.561, -1.844)
+      intensity: 1.65,
+      spherical: new THREE.Spherical(1, 2.15, -2.35)
     }
   };
 
@@ -419,9 +423,9 @@ export class AIVoiceOrb {
 
     this.renderPass = new RenderPass(this.scene, this.camera, null, new THREE.Color(ORGANIC_CLEAR), 1);
 
-    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.8, 0.315, 0);
-    this.bloomPass.compositeMaterial.uniforms.uTintColor = { value: new THREE.Color("#7f00ff") };
-    this.bloomPass.compositeMaterial.uniforms.uTintStrength = { value: 0.15 };
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.42, 0.55, 0.82);
+    this.bloomPass.compositeMaterial.uniforms.uTintColor = { value: new THREE.Color("#4a0a6e") };
+    this.bloomPass.compositeMaterial.uniforms.uTintStrength = { value: 0.09 };
     this.bloomPass.compositeMaterial.fragmentShader = BLOOM_TINT_FRAGMENT;
     this.bloomPass.compositeMaterial.needsUpdate = true;
 
@@ -446,13 +450,13 @@ export class AIVoiceOrb {
       uLightBIntensity: { value: this.lights.b.intensity },
       uSubdivision: { value: new THREE.Vector2(geometry.parameters.widthSegments, geometry.parameters.heightSegments) },
       uOffset: { value: new THREE.Vector3(0, 0, 0) },
-      uDistortionFrequency: { value: 1.5 },
-      uDistortionStrength: { value: 0.65 },
-      uDisplacementFrequency: { value: 2.12 },
-      uDisplacementStrength: { value: 0.152 },
-      uFresnelOffset: { value: -1.609 },
-      uFresnelMultiplier: { value: 3.587 },
-      uFresnelPower: { value: 1.793 },
+      uDistortionFrequency: { value: 1.35 },
+      uDistortionStrength: { value: 0.52 },
+      uDisplacementFrequency: { value: 1.95 },
+      uDisplacementStrength: { value: 0.14 },
+      uFresnelOffset: { value: -1.45 },
+      uFresnelMultiplier: { value: 2.85 },
+      uFresnelPower: { value: 1.95 },
       uTime: { value: 0 }
     };
 
@@ -480,11 +484,16 @@ export class AIVoiceOrb {
   }
 
   setBaseColor(hex: string): void {
-    const c = new THREE.Color(hex);
-    this.moodTarget.colorA.copy(c).offsetHSL(0.02, 0.06, 0.04);
-    this.moodTarget.colorB.copy(c).offsetHSL(-0.04, 0.02, 0.12);
-    this.moodCurrent.colorA.copy(this.moodTarget.colorA);
-    this.moodCurrent.colorB.copy(this.moodTarget.colorB);
+    const accent = new THREE.Color(hex);
+    // Single accent was driving both lights to the same hue → flat white bloom. Anchor warm/cool like reference art.
+    const warm = new THREE.Color("#ff2200").lerp(accent, 0.26);
+    const cool = new THREE.Color("#0088ff").lerp(accent, 0.32);
+    warm.offsetHSL(0, 0.06, 0.03);
+    cool.offsetHSL(-0.02, 0.04, -0.04);
+    this.moodTarget.colorA.copy(warm);
+    this.moodTarget.colorB.copy(cool);
+    this.moodCurrent.colorA.copy(warm);
+    this.moodCurrent.colorB.copy(cool);
     this.syncLightUniforms();
   }
 
@@ -582,13 +591,13 @@ export class AIVoiceOrb {
     low += 0.0001;
     this.variations.lowLevel.target = Math.max(0, low);
 
-    let med = (level1 || 0) * 2;
-    med += 3.587;
-    this.variations.mediumLevel.target = Math.max(3.587, med);
+    let med = (level1 || 0) * 1.35;
+    med += 3.35;
+    this.variations.mediumLevel.target = THREE.MathUtils.clamp(Math.max(3.35, med), 3.2, 4.05);
 
-    let high = (level2 || 0) * 5;
-    high += 0.5;
-    this.variations.highLevel.target = Math.max(0.5, high);
+    let high = (level2 || 0) * 2.85;
+    high += 0.52;
+    this.variations.highLevel.target = THREE.MathUtils.clamp(Math.max(0.52, high), 0.5, 2.25);
   }
 
   /** organic-sphere uses `time.delta` in milliseconds (~16), not seconds. */

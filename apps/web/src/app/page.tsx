@@ -108,11 +108,11 @@ const NOVA_CHAT_STT_NO_SPEECH_STOP_MS = 8000;
 const NOVA_CHAT_STT_SERVER_HINT =
   "Server speech-to-text is not configured on the agent (set OPENAI_API_KEY or NOVA_STT_COMMAND). Use Chrome or Edge for in-browser dictation, or configure the agent.";
 
-/** Default TTS orb palette (restored on detach). */
-const NOVA_ORB_MOOD_DEFAULT_A = "#5ec8ff";
-const NOVA_ORB_MOOD_DEFAULT_B = "#c8f4ff";
-const NOVA_ORB_MOOD_DEFAULT_SHELL = "#3d8cc4";
-const NOVA_ORB_MOOD_DEFAULT_GLOW = "#3ab8f0";
+/** Default TTS orb palette (restored on detach) — warm / cool split like organic-sphere reference art. */
+const NOVA_ORB_MOOD_DEFAULT_A = "#ff3310";
+const NOVA_ORB_MOOD_DEFAULT_B = "#0096ff";
+const NOVA_ORB_MOOD_DEFAULT_SHELL = "#12041c";
+const NOVA_ORB_MOOD_DEFAULT_GLOW = "#5c1d8c";
 
 function hexToRgbChannels(hex: string): [number, number, number] {
   const h = hex.trim().replace("#", "");
@@ -1345,11 +1345,11 @@ export default function HomePage() {
         m.style.transform = `scale(${ds})`;
 
         const basePal = orbMoodPaletteForEmotionLabel(chatTtsOrbEmotionLabelRef.current);
-        const gloss = Math.min(0.14, combined * 0.11);
-        const colorA = lerpHexColor(basePal.a, "#ffffff", gloss);
-        const colorB = lerpHexColor(basePal.b, "#ffffff", gloss * 0.85);
-        const shell = lerpHexColor(basePal.shell, "#ffffff", gloss * 0.55);
-        const glow = lerpHexColor(basePal.glow, "#ffffff", gloss * 0.6);
+        const gloss = Math.min(0.07, combined * 0.055);
+        const colorA = lerpHexColor(basePal.a, "#fff0eb", gloss);
+        const colorB = lerpHexColor(basePal.b, "#e8f6ff", gloss * 0.82);
+        const shell = lerpHexColor(basePal.shell, "#f0f0ff", gloss * 0.35);
+        const glow = lerpHexColor(basePal.glow, "#f5e8ff", gloss * 0.45);
         try {
           novaThreeSpeakingOrbRef.current?.setMoodPalette(colorA, colorB, shell, glow);
         } catch {
@@ -3387,9 +3387,9 @@ export default function HomePage() {
         >
           <div
             ref={novaTtsOrbMeterRef}
-            className="h-[377px] w-[377px] shrink-0 origin-center drop-shadow-[0_0_36px_rgba(56,189,248,0.3)]"
+            className="h-[377px] w-[377px] shrink-0 origin-center overflow-hidden rounded-full bg-[#0c0218] shadow-[0_0_40px_rgba(255,45,25,0.2),0_0_72px_rgba(0,100,255,0.12)] ring-1 ring-white/10"
           >
-            <NovaThreeSpeakingOrb ref={novaThreeSpeakingOrbRef} className="h-full w-full" preset="speaking" baseColor="#5ec8ff" />
+            <NovaThreeSpeakingOrb ref={novaThreeSpeakingOrbRef} className="h-full w-full" preset="speaking" baseColor="#ff4420" />
           </div>
         </div>
       ) : null}

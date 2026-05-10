@@ -198,8 +198,8 @@ export default function KioskPage() {
   return (
     <div className="flex h-[100dvh] flex-col bg-surface pt-14 text-text sm:pt-16">
       <div className="flex h-[33vh] min-h-[140px] shrink-0 flex-col items-center justify-center px-4">
-        <div className="h-full w-full max-w-[min(52vw,420px)]">
-          <NovaThreeSpeakingOrb ref={orbRef} className="h-full w-full" preset="speaking" baseColor="#5ec8ff" />
+        <div className="h-full w-full max-w-[min(52vw,420px)] overflow-hidden rounded-full bg-[#0c0218] shadow-[0_0_36px_rgba(255,45,25,0.18),0_0_64px_rgba(0,100,255,0.1)] ring-1 ring-white/10">
+          <NovaThreeSpeakingOrb ref={orbRef} className="h-full w-full" preset="speaking" baseColor="#ff4420" />
         </div>
       </div>
 
