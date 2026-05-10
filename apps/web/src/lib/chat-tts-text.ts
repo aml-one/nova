@@ -7,6 +7,24 @@ export const CHAT_TTS_CHUNK_HARD_MAX = 340;
 const ORPHEUS_SPEECH_CUE_NAMES = "laugh|sigh|chuckles|chuckle|cough|sniffle|groan|gasp";
 const ORPHEUS_WELLFORMED_TAG_RE = new RegExp(`<\\s*(?:${ORPHEUS_SPEECH_CUE_NAMES})\\b[^>]*>`, "gi");
 
+/**
+ * Removes `[nova:tone]…[/nova]` hints (inner wording kept).
+ * Handles model mistakes: second `[nova:…]` instead of `[/nova]`, and stray opens.
+ * Keep in sync with `stripNovaToneMarkup` in `apps/agent-core/src/voice/tts-text.ts`.
+ */
+export function stripNovaToneMarkup(text: string): string {
+  if (!text) return text;
+  let t = text.replace(/\[nova:[^\]]+\]([\s\S]*?)\[\/nova\]/gi, "$1");
+  for (let i = 0; i < 24; i++) {
+    const next = t.replace(/\[nova:[^\]]+\]([\s\S]*?)\[nova:[^\]]+\]/gi, "$1");
+    if (next === t) break;
+    t = next;
+  }
+  t = t.replace(/\[nova:[^\]]+\]/gi, "");
+  t = t.replace(/\[\/nova\]/gi, " ");
+  return t.replace(/\s{2,}/g, " ").trim();
+}
+
 export function stripMarkdownForTts(raw: string): string {
   let visible = raw;
   for (const pattern of [
@@ -18,8 +36,7 @@ export function stripMarkdownForTts(raw: string): string {
   }
   visible = visible.trim();
   visible = visible.replace(/```[\s\S]*?```/g, " ");
-  visible = visible.replace(/\[nova:[^\]]+\]([\s\S]*?)\[\/nova\]/gi, "$1");
-  visible = visible.replace(/\[\/nova\]/gi, " ");
+  visible = stripNovaToneMarkup(visible);
   visible = visible.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
   visible = visible.replace(/\r\n?/g, "\n");
   visible = visible.replace(/[\uFEFF\u200B-\u200D]/g, "");

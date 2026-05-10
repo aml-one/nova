@@ -132,15 +132,20 @@ export function unshieldOrpheusSpeechCueTags(masked: string, tokens: string[]): 
  */
 /**
  * Removes `[nova:tone]…[/nova]` display/TTS hints (inner wording is kept).
+ * Models sometimes close with a second `[nova:…]` instead of `[/nova]` — strip that too.
  * Use for channel bubbles, memory, run history, and speech prep.
  */
 export function stripNovaToneMarkup(text: string): string {
   if (!text) return text;
-  return text
-    .replace(/\[nova:[^\]]+\]([\s\S]*?)\[\/nova\]/gi, "$1")
-    .replace(/\[\/nova\]/gi, " ")
-    .replace(/\s{2,}/g, " ")
-    .trim();
+  let t = text.replace(/\[nova:[^\]]+\]([\s\S]*?)\[\/nova\]/gi, "$1");
+  for (let i = 0; i < 24; i++) {
+    const next = t.replace(/\[nova:[^\]]+\]([\s\S]*?)\[nova:[^\]]+\]/gi, "$1");
+    if (next === t) break;
+    t = next;
+  }
+  t = t.replace(/\[nova:[^\]]+\]/gi, "");
+  t = t.replace(/\[\/nova\]/gi, " ");
+  return t.replace(/\s{2,}/g, " ").trim();
 }
 
 export function stripOrpheusSpeechCues(text: string): string {

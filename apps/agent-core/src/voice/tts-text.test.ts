@@ -15,6 +15,18 @@ describe("stripNovaToneMarkup", () => {
     expect(stripNovaToneMarkup("Hello [nova:soft]aside[/nova] there.")).toBe("Hello aside there.");
     expect(stripNovaToneMarkup("[nova:strong]key[/nova]")).toBe("key");
   });
+
+  it("unwraps when the model repeats [nova:…] instead of [/nova]", () => {
+    const raw =
+      "Round two! Let's see if we can find the perfect rhythm for this voice. [nova:strong]How is the pacing?[nova:strong]";
+    expect(stripNovaToneMarkup(raw)).toBe(
+      "Round two! Let's see if we can find the perfect rhythm for this voice. How is the pacing?"
+    );
+  });
+
+  it("strips orphan [nova:…] opens", () => {
+    expect(stripNovaToneMarkup("Hi [nova:strong]there")).toBe("Hi there");
+  });
 });
 
 describe("ensureOrpheusCueTagsClosed", () => {
@@ -152,5 +164,13 @@ describe("prepareChatTextForSpeech", () => {
     const out = prepareChatTextForSpeech("Szia! <chuckle> Újra itt vagy! Miben segíthetek?");
     expect(out).toMatch(/<chuckle>\s*Újra/);
     expect(out).not.toMatch(/<chuckle\s+Ú/);
+  });
+
+  it("strips nova tone markup including duplicate [nova:…] closers", () => {
+    const raw =
+      "Round two! Let's see if we can find the perfect rhythm for this voice. [nova:strong]How is the pacing?[nova:strong]";
+    const out = prepareChatTextForSpeech(raw);
+    expect(out).not.toMatch(/\[nova:/);
+    expect(out).toContain("How is the pacing?");
   });
 });

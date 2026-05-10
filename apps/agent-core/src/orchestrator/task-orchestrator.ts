@@ -279,6 +279,7 @@ const WEB_CHAT_TONE_MARKDOWN_HINT =
   "[nova:strong]key phrase[/nova], " +
   "[nova:soft]gentle aside[/nova], " +
   "[nova:heading]short in-reply label[/nova]. " +
+  "Every wrapper must end with [/nova] exactly—never repeat [nova:…] as a fake closer. " +
   "Do not put these markers inside fenced code blocks. Avoid lists or long multi-paragraph sections inside a marker—short phrases or a single line work best. " +
   "The UI derives readable shades from the user’s assistant text and bubble colors (same family, lighter/darker) in light and dark mode—no rainbow or arbitrary colors. " +
   "Use sparingly (a handful per message; plain markdown for structure).";

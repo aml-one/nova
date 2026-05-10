@@ -23,6 +23,13 @@ describe("stripMarkdownForTts", () => {
     expect(out).toMatch(/<chuckle>\s*Újra/);
     expect(out).not.toMatch(/<chuckle\s+Ú/);
   });
+
+  it("drops malformed nova tone tags (duplicate [nova:…] closer)", () => {
+    const raw =
+      "Round two! [nova:strong]How is the pacing?[nova:strong]";
+    expect(stripMarkdownForTts(raw)).not.toMatch(/\[nova:/);
+    expect(stripMarkdownForTts(raw)).toContain("How is the pacing?");
+  });
 });
 
 describe("splitTextForTts", () => {

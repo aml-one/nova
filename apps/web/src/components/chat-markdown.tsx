@@ -7,6 +7,7 @@ import type { Components } from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { cn } from "../lib/cn";
+import { stripNovaToneMarkup } from "../lib/chat-tts-text";
 import { Button } from "./ui/button";
 
 const NOVA_TONES = new Set(["muted", "strong", "soft", "heading"]);
@@ -82,6 +83,20 @@ function splitPreservingCodeFences(source: string): FencePiece[] {
   return out;
 }
 
+/** Model sometimes closes with `[nova:strong]…[nova:strong]` — normalize so tone split + styling work. */
+function normalizeDuplicateNovaToneCloser(prose: string): string {
+  let t = prose;
+  for (let i = 0; i < 16; i++) {
+    const next = t.replace(
+      /\[nova:(muted|strong|soft|heading)\]([\s\S]*?)\[nova:\1\]/gi,
+      "[nova:$1]$2[/nova]"
+    );
+    if (next === t) break;
+    t = next;
+  }
+  return t;
+}
+
 function splitTonesInProse(segment: string): Array<{ kind: "md"; text: string } | { kind: "tone"; tone: NovaChatTone; text: string }> {
   const re = /\[nova:(muted|strong|soft|heading)\]([\s\S]*?)\[\/nova\]/g;
   const parts: Array<{ kind: "md"; text: string } | { kind: "tone"; tone: NovaChatTone; text: string }> = [];
@@ -116,9 +131,13 @@ function buildRenderUnits(source: string): RenderUnit[] {
       units.push({ kind: "fence", text: piece.text });
       continue;
     }
-    for (const chunk of splitTonesInProse(piece.text)) {
+    for (const chunk of splitTonesInProse(normalizeDuplicateNovaToneCloser(piece.text))) {
       if (chunk.kind === "md" && chunk.text.length === 0) continue;
-      units.push(chunk.kind === "md" ? { kind: "md", text: chunk.text } : { kind: "tone", tone: chunk.tone, text: chunk.text });
+      units.push(
+        chunk.kind === "md"
+          ? { kind: "md", text: stripNovaToneMarkup(chunk.text) }
+          : { kind: "tone", tone: chunk.tone, text: stripNovaToneMarkup(chunk.text) }
+      );
     }
   }
   if (units.length === 0) {
@@ -152,17 +171,18 @@ const markdownComponents: Components = {
 };
 
 export function ChatMarkdown({ content, toneSeed }: ChatMarkdownProps) {
-  const displayContent = useMemo(() => stripOrpheusCueTagsForDisplay(content), [content]);
+  const withoutOrpheusCues = useMemo(() => stripOrpheusCueTagsForDisplay(content), [content]);
+  const plainMarkdownSource = useMemo(() => stripNovaToneMarkup(withoutOrpheusCues), [withoutOrpheusCues]);
 
   if (!toneSeed) {
     return (
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-        {displayContent}
+        {plainMarkdownSource}
       </ReactMarkdown>
     );
   }
 
-  const units = useMemo(() => buildRenderUnits(displayContent), [displayContent]);
+  const units = useMemo(() => buildRenderUnits(withoutOrpheusCues), [withoutOrpheusCues]);
 
   const body = (
     <>
