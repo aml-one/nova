@@ -9,6 +9,7 @@ import {
 
 export type TtsVoiceOrbDriverTarget = {
   setSpeechEnvelope: (smooth: number, peak: number) => void;
+  setSpectrum?: (freqBytes: Uint8Array<ArrayBuffer>) => void;
   randomizeDirection: () => void;
   setRotationSpeed: (speed: number) => void;
   setMoodPalette: (colorA: string, colorB: string, shellRgb: string, glowHex: string) => void;
@@ -224,6 +225,11 @@ export class TtsVoiceOrbDriver {
           this.freqBuf = freqBuf;
         }
         analyser.getByteFrequencyData(freqBuf);
+        try {
+          this.config.getOrb()?.setSpectrum?.(freqBuf);
+        } catch {
+          /* orb mid-dispose */
+        }
         const binW = nyquist / Math.max(1, binCount);
         const lo = Math.max(0, Math.floor(280 / binW));
         const hi = Math.min(binCount - 1, Math.ceil(3400 / binW));

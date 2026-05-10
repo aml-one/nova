@@ -1,11 +1,13 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { AIVoiceRing2D, type VoiceOrbPresetName } from "../lib/ai-voice-ring/AIVoiceRing2D";
+import { NovaReactiveOrb2D, type VoiceOrbPresetName } from "../lib/nova-reactive-orb/NovaReactiveOrb2D";
 
 export type NovaThreeSpeakingOrbHandle = {
   setSpeechLevel: (level: number) => void;
   setSpeechEnvelope: (smooth: number, peak: number) => void;
+  /** Live FFT snapshot from `AnalyserNode` (TTS); drives per-angle displacement like standalone Nova_Orb. */
+  setSpectrum: (freqBytes: Uint8Array<ArrayBuffer>) => void;
   setRotationSpeed: (speed: number) => void;
   randomizeDirection: () => void;
   setMoodPalette: (colorA: string, colorB: string, shellRgb: string, glowHex: string) => void;
@@ -23,7 +25,7 @@ type Props = {
 };
 
 /**
- * 2D “sun corona” voice ring: thin stroked wavy circle on a fixed base radius (no filled donut), transparent.
+ * 2D reactive voice ring (Nova_Orb-style): spectrum-driven displacements, warm/cool gradient, transparent.
  * Mount must have non-zero width/height before construction.
  */
 export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props>(function NovaThreeSpeakingOrb(
@@ -37,7 +39,7 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
   ref
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const orbRef = useRef<AIVoiceRing2D | null>(null);
+  const orbRef = useRef<NovaReactiveOrb2D | null>(null);
 
   useImperativeHandle(ref, () => ({
     setSpeechLevel: (level: number) => {
@@ -45,6 +47,9 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
     },
     setSpeechEnvelope: (smooth: number, peak: number) => {
       orbRef.current?.setSpeechEnvelope(smooth, peak);
+    },
+    setSpectrum: (freqBytes: Uint8Array<ArrayBuffer>) => {
+      orbRef.current?.setSpectrum(freqBytes);
     },
     setRotationSpeed: (speed: number) => {
       orbRef.current?.setRotationSpeed(speed);
@@ -63,7 +68,7 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
   useEffect(() => {
     const el = hostRef.current;
     if (!el) return;
-    const orb = new AIVoiceRing2D(el, {
+    const orb = new NovaReactiveOrb2D(el, {
       baseColor,
       transparentBackground
     });

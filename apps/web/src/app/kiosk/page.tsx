@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FaMicrophone } from "react-icons/fa6";
 import { ChatMarkdown } from "../../components/chat-markdown";
 import { NovaThreeSpeakingOrb, type NovaThreeSpeakingOrbHandle } from "../../components/NovaThreeSpeakingOrb";
-import type { VoiceOrbPresetName } from "../../lib/ai-voice-ring/AIVoiceRing2D";
+import type { VoiceOrbPresetName } from "../../lib/nova-reactive-orb/NovaReactiveOrb2D";
 import { apiFetch } from "../../lib/api-fetch";
 import { splitTextForTts, stripMarkdownForTts } from "../../lib/chat-tts-text";
 import { loadAudioElementThenPlay } from "../../lib/audio-play";
