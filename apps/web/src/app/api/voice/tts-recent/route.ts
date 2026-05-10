@@ -5,7 +5,10 @@ import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
 export async function GET(request: Request): Promise<Response> {
   const url = new URL(request.url);
   const limit = url.searchParams.get("limit") ?? "20";
-  const agentUrl = `${getAgentBaseUrl(request)}/v1/voice/tts-recent?limit=${encodeURIComponent(limit)}`;
+  const corr = url.searchParams.get("correlationId");
+  const q = new URLSearchParams({ limit });
+  if (corr?.trim()) q.set("correlationId", corr.trim());
+  const agentUrl = `${getAgentBaseUrl(request)}/v1/voice/tts-recent?${q.toString()}`;
   let agentResponse: Response;
   try {
     agentResponse = await fetch(agentUrl, { headers: getAgentHeaders(request, false), cache: "no-store" });

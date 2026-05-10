@@ -120,7 +120,7 @@ export function shieldOrpheusSpeechCueTags(text: string): { masked: string; toke
 
 export function unshieldOrpheusSpeechCueTags(masked: string, tokens: string[]): string {
   return masked.replace(/\uE000(\d+)\uE001/g, (_, idx) => {
-    const i = Number(idx, 10);
+    const i = Number.parseInt(idx, 10);
     return Number.isFinite(i) && tokens[i] !== undefined ? tokens[i]! : "";
   });
 }

@@ -47,7 +47,12 @@ export function recordTtsSpeakResult(
 }
 
 /** Newest first */
-export function getRecentTtsEntries(limit: number): TtsRecentEntry[] {
+export function getRecentTtsEntries(limit: number, correlationId?: string): TtsRecentEntry[] {
   const n = Math.min(Math.max(1, limit), MAX_ENTRIES);
-  return ring.slice(-n).reverse();
+  let rows = ring.slice(-n).reverse();
+  const want = correlationId?.trim();
+  if (want) {
+    rows = rows.filter((e) => e.correlationId === want);
+  }
+  return rows;
 }

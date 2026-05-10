@@ -31,7 +31,7 @@ export function stripMarkdownForTts(raw: string): string {
   });
   visible = visible.replace(/[#*_>`]+/g, " ");
   visible = visible.replace(/\uE000(\d+)\uE001/g, (_, idx) => {
-    const i = Number(idx, 10);
+    const i = Number.parseInt(idx, 10);
     return Number.isFinite(i) && cueTokens[i] !== undefined ? cueTokens[i]! : "";
   });
 

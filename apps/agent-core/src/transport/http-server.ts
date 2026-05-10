@@ -2169,12 +2169,14 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
       if (request.method === "GET" && parsedUrl.pathname === "/v1/voice/tts-recent") {
         const lim = Number(parsedUrl.searchParams.get("limit") ?? "20");
         const limit = Number.isFinite(lim) ? Math.min(50, Math.max(1, lim)) : 20;
+        const filterCorr = parsedUrl.searchParams.get("correlationId")?.trim();
         return sendJson(response, 200, {
           correlationId,
           limit,
-          entries: getRecentTtsEntries(limit),
+          filterCorrelationId: filterCorr || undefined,
+          entries: getRecentTtsEntries(limit, filterCorr),
           note:
-            "Each row matches chat read-aloud / POST /v1/voice/speak-audio: raw request → preparedForSpeech → sentToOrpheus (Orpheus input). Compare sentToOrpheus when debugging repeats or audio glitches."
+            "Each row matches chat read-aloud / POST /v1/voice/speak-audio: raw request → preparedForSpeech → sentToOrpheus (Orpheus input). Compare sentToOrpheus when debugging repeats or audio glitches. Optional query: correlationId=… filters to that request. Agent stderr also logs speak-audio failures (and tiny-WAV warnings)."
         });
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/voice/speak-audio") {
@@ -2186,28 +2188,56 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         }
         try {
           const body = await voice.synthesizeOrpheusBufferFromSentInput(trace.sentToOrpheus);
+          const mime = voice.mimeTypeForCurrentFormat();
+          const tinyWav = mime.includes("wav") && body.length < 800;
+          if (tinyWav) {
+            logger.error("speak-audio: suspiciously small WAV payload (browser may play silence or fail)", {
+              correlationId,
+              audioBytes: body.length,
+              responseMime: mime,
+              sentToOrpheusChars: trace.sentToOrpheus.length,
+              hint: "Check Orpheus-FastAPI / Lex-au logs; verify voice/model and that the server is not returning an error page as binary."
+            });
+          } else if (process.env.NOVA_TTS_DEBUG?.trim() === "1") {
+            logger.info("speak-audio: ok", {
+              correlationId,
+              audioBytes: body.length,
+              responseMime: mime,
+              sentToOrpheusChars: trace.sentToOrpheus.length
+            });
+          }
           recordTtsSpeakResult({
             ...trace,
             correlationId,
             ok: true,
-            responseMime: voice.mimeTypeForCurrentFormat(),
+            responseMime: mime,
             audioBytes: body.length
           });
           response.writeHead(200, {
-            "content-type": voice.mimeTypeForCurrentFormat(),
+            "content-type": mime,
             "x-correlation-id": correlationId,
             "cache-control": "no-store"
           });
           response.end(body);
         } catch (error) {
+          const ttsCfg = options.settings.get().orpheusTts;
+          const errMsg = error instanceof Error ? error.message : "tts failed";
+          logger.error("speak-audio: synthesis failed", {
+            correlationId,
+            error: errMsg,
+            orpheusEnabled: ttsCfg?.enabled !== false,
+            orpheusBaseUrl: String(ttsCfg?.baseUrl ?? "").trim().replace(/\/+$/, "") || "(empty)",
+            sentToOrpheusChars: trace.sentToOrpheus.length,
+            ttsRecentHint: "GET /v1/voice/tts-recent on agent-core (or Web GET /api/voice/tts-recent) lists last attempts with ok/error."
+          });
           recordTtsSpeakResult({
             ...trace,
             correlationId,
             ok: false,
-            error: error instanceof Error ? error.message : "tts failed"
+            error: errMsg
           });
           return sendJson(response, 502, {
-            error: error instanceof Error ? error.message : "tts failed",
+            error: errMsg,
             correlationId
           });
         }

@@ -225,8 +225,18 @@ export class VoiceService {
       const errText = await response.text().catch(() => "");
       throw new Error(`TTS HTTP ${response.status}: ${errText.slice(0, 400)}`);
     }
+    const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+    if (contentType.includes("application/json")) {
+      const errText = await response.text().catch(() => "");
+      throw new Error(
+        `TTS upstream returned JSON (${contentType || "no content-type"}) instead of audio: ${errText.slice(0, 500)}`
+      );
+    }
     const arrayBuf = await response.arrayBuffer();
     let buf: Buffer = Buffer.from(arrayBuf);
+    if (buf.length === 0) {
+      throw new Error("TTS upstream returned an empty body (0 bytes) while HTTP status was OK");
+    }
     const rf = tts.responseFormat ?? "wav";
     if (rf === "wav") {
       const raw = process.env.NOVA_TTS_LEADING_SILENCE_MS?.trim();
