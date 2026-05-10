@@ -244,19 +244,25 @@ export class AIVoiceRing2D {
     return s0 * 0.5 + s1 * 0.34 + s2 * 0.16;
   }
 
-  /** Conic sweep: cyan → white → orange around the ring (reference poster). */
-  private createConic(cx: number, cy: number): CanvasGradient {
-    const g = this.ctx.createConicGradient(-Math.PI / 2 + this.gradientAngle, cx, cy);
-    const B = this.moodB;
-    const A = this.moodA;
-    g.addColorStop(0, rgbStr(B.r, B.g, B.b, 1));
-    g.addColorStop(0.16, rgbStr(0, 120, 255, 1));
-    g.addColorStop(0.28, rgbStr(0, 235, 255, 1));
-    g.addColorStop(0.4, rgbStr(255, 255, 255, 1));
-    g.addColorStop(0.56, rgbStr(255, 255, 245, 1));
-    g.addColorStop(0.7, rgbStr(255, 72, 24, 1));
-    g.addColorStop(0.84, rgbStr(A.r, A.g, A.b, 1));
-    g.addColorStop(1, rgbStr(B.r, B.g, B.b, 1));
+  /**
+   * Organic-sphere body gradient: vivid red-orange dominating the top half,
+   * deep cobalt blue dominating the bottom half. Mid-band is purposely darker
+   * so the body reads as a 3D sphere with depth (warm light from above,
+   * cool shadow below).
+   */
+  private createBodyGradient(cy: number, rOuter: number): CanvasGradient {
+    const A = this.moodA; // warm
+    const B = this.moodB; // cool
+    const top = cy - rOuter * 1.05;
+    const bot = cy + rOuter * 1.05;
+    const g = this.ctx.createLinearGradient(0, top, 0, bot);
+    g.addColorStop(0.0, rgbStr(255, 110, 60, 0.95));
+    g.addColorStop(0.18, rgbStr(A.r, A.g, A.b, 0.92));
+    g.addColorStop(0.38, rgbStr(150, 30, 70, 0.7));
+    g.addColorStop(0.52, rgbStr(40, 25, 80, 0.55));
+    g.addColorStop(0.68, rgbStr(40, 80, 200, 0.78));
+    g.addColorStop(0.86, rgbStr(B.r, B.g, B.b, 0.92));
+    g.addColorStop(1.0, rgbStr(60, 150, 255, 0.95));
     return g;
   }
 
@@ -296,31 +302,28 @@ export class AIVoiceRing2D {
     const cx = w * 0.5;
     const cy = h * 0.5;
     const half = Math.min(w, h) * 0.5;
-    const rHole = half * this.innerHoleNorm;
-    const rMargin = half * 0.008;
-    // The sample reads as a large, fixed circle. Waves ride on this radius; they do not define the circle.
-    const rBase = half * 0.79;
 
     const e = this.energy();
-    const idleBreath = this.presentationIdleCalm ? 0.14 + Math.sin(this.timeSec * 0.82) * 0.1 : 0;
+    // Idle = perfectly fixed circle. Waves only appear when audio energy comes in.
+    const idleBreath = this.presentationIdleCalm
+      ? 0.04 + Math.sin(this.timeSec * 0.7) * 0.025
+      : 0;
     const waveBoost = this.presentationIdleCalm ? idleBreath : e;
 
-    const maxInward = Math.max(0, rBase - rHole - rMargin);
-    const ampDesired = half * (0.03 + waveBoost * 0.225);
-    const amp = Math.min(ampDesired, maxInward * 0.92);
+    // Geometry: large fixed sphere silhouette. Glow + offset + max wave amp must fit
+    // inside `half` so the bloom never gets squared off by the canvas edge.
+    // Budget on a 377px mount (half≈188): rBase 98 + amp 16 + halo blur 50 + offset 10 ≈ 174 ✓
+    const rBase = half * 0.52;
+    const ampMax = half * 0.085;
+    const amp = ampMax * waveBoost; // 0 when silent ⇒ true fixed circle
 
-    const steps = 400;
-    const coronaPts: { x: number; y: number }[] = [];
-    const innerPts: { x: number; y: number }[] = [];
+    const steps = 280;
+    const pts: { x: number; y: number }[] = new Array(steps + 1);
     for (let i = 0; i <= steps; i++) {
       const theta = (i / steps) * Math.PI * 2;
       const wv = this.sampleRadialWave(theta);
-      const outward = Math.max(0, wv);
-      const inward = Math.max(0, -wv);
-      const ro = rBase + outward * amp;
-      const ri = Math.max(rHole + rMargin, rBase - inward * amp * 0.42);
-      coronaPts.push({ x: cx + Math.cos(theta) * ro, y: cy + Math.sin(theta) * ro });
-      innerPts.push({ x: cx + Math.cos(theta) * ri, y: cy + Math.sin(theta) * ri });
+      const r = rBase + wv * amp;
+      pts[i] = { x: cx + Math.cos(theta) * r, y: cy + Math.sin(theta) * r };
     }
 
     const ctx = this.ctx;
@@ -328,81 +331,108 @@ export class AIVoiceRing2D {
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
 
-    const conic = this.createConic(cx, cy);
-
-    // Perfect base circle: this is the stable "sun" orbit. The waves sit on top of it.
+    // 1. Outer halo: warm bloom on top, cool bloom on bottom (additive).
+    //    Shadow blur and offset are kept small enough that the bloom never reaches
+    //    the canvas edge (would otherwise show as a square clip).
     ctx.save();
-    ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.42;
-    ctx.lineWidth = 43.2;
-    ctx.shadowBlur = 82 + waveBoost * 62;
-    ctx.shadowColor = "rgba(0, 210, 255, 0.92)";
+    ctx.globalCompositeOperation = "lighter";
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgba(0,0,0,0)"; // transparent — only the shadow blooms
+    ctx.shadowBlur = 30 + waveBoost * 20;
+    ctx.shadowColor = "rgba(255, 90, 35, 0.6)";
+    ctx.shadowOffsetY = -rBase * 0.1;
     ctx.beginPath();
-    ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
+    this.buildWavyPath(pts);
+    ctx.stroke();
+    ctx.shadowColor = "rgba(40, 110, 255, 0.6)";
+    ctx.shadowOffsetY = rBase * 0.1;
+    ctx.beginPath();
+    this.buildWavyPath(pts);
     ctx.stroke();
     ctx.restore();
 
+    // 2. Body fill: vertical red-top → blue-bottom gradient, with the wavy silhouette.
+    const body = this.createBodyGradient(cy, rBase);
     ctx.save();
-    ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.95;
-    ctx.lineWidth = 13.2;
-    ctx.shadowBlur = 34 + waveBoost * 25;
-    ctx.shadowColor = "rgba(255,255,255,1)";
+    ctx.fillStyle = body;
     ctx.beginPath();
-    ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
+    this.buildWavyPath(pts);
+    ctx.fill();
+    ctx.restore();
+
+    // 3. Surface ridges: 5 concentric wavy strokes scaled inward, each with a slight
+    //    angular phase so they don't perfectly overlap. Gives the 3D "folded sphere" look.
+    const ridges = 5;
+    for (let layer = 1; layer <= ridges; layer++) {
+      const scale = 1 - layer * 0.13;
+      const phase = layer * 0.11;
+      const ridgeAlpha = 0.12 + waveBoost * 0.07;
+      ctx.save();
+      ctx.globalCompositeOperation = "lighter";
+      ctx.strokeStyle = `rgba(255,255,255,${ridgeAlpha})`;
+      ctx.lineWidth = 1.4;
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      for (let i = 0; i <= steps; i++) {
+        const theta = (i / steps) * Math.PI * 2 + phase;
+        const wv = this.sampleRadialWave(theta);
+        const r = (rBase + wv * amp * 0.65) * scale;
+        const x = cx + Math.cos(theta) * r;
+        const y = cy + Math.sin(theta) * r;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // 4. Crisp wavy outer edge — bright white, the defining silhouette of the sphere.
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = "rgba(255,255,255,0.92)";
+    ctx.lineWidth = 2.6;
+    ctx.shadowBlur = 14;
+    ctx.shadowColor = "rgba(255,255,255,0.85)";
+    ctx.beginPath();
+    this.buildWavyPath(pts);
     ctx.stroke();
     ctx.restore();
 
+    // 5. Warm rim-light on the upper arc (specular highlight from above-light).
+    //    Theta 3π/2 is the top in canvas coords (y+ is down), so step ratio 0.75 = top.
     ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.82)";
-    ctx.globalAlpha = 0.9;
-    ctx.lineWidth = 4.5;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = "rgba(255, 215, 180, 0.7)";
+    ctx.lineWidth = 4.6;
+    ctx.shadowBlur = 24;
+    ctx.shadowColor = "rgba(255, 110, 50, 0.95)";
     ctx.beginPath();
-    ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
+    const topI0 = Math.floor(steps * 0.58);
+    const topI1 = Math.floor(steps * 0.92);
+    for (let i = topI0; i <= topI1; i++) {
+      const p = pts[i]!;
+      if (i === topI0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    }
     ctx.stroke();
     ctx.restore();
 
-    // Thin outer corona waves. They are glow strokes, not a second thick body.
+    // 6. Cool rim-light on the lower arc.
     ctx.save();
-    ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.48 + waveBoost * 0.22;
-    ctx.lineWidth = 16.8;
-    ctx.shadowBlur = 68 + waveBoost * 52;
-    ctx.shadowColor = "rgba(0, 220, 255, 0.95)";
+    ctx.globalCompositeOperation = "lighter";
+    ctx.strokeStyle = "rgba(180, 215, 255, 0.6)";
+    ctx.lineWidth = 4.2;
+    ctx.shadowBlur = 22;
+    ctx.shadowColor = "rgba(40, 130, 255, 0.95)";
     ctx.beginPath();
-    this.buildWavyPath(coronaPts);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.save();
-    ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.88;
-    ctx.lineWidth = 6.3;
-    ctx.shadowBlur = 26 + waveBoost * 24;
-    ctx.shadowColor = "rgba(255,255,255,1)";
-    ctx.beginPath();
-    this.buildWavyPath(coronaPts);
-    ctx.stroke();
-    ctx.restore();
-
-    // A very subtle inner shimmer so the wave feels attached to the circle without becoming thick.
-    ctx.save();
-    ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.22 + waveBoost * 0.18;
-    ctx.lineWidth = 4.8;
-    ctx.shadowBlur = 13;
-    ctx.shadowColor = "rgba(255,255,255,0.55)";
-    ctx.beginPath();
-    this.buildWavyPath(innerPts);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.save();
-    ctx.strokeStyle = rgbStr(255, 255, 255, 0.55 + waveBoost * 0.28);
-    ctx.lineWidth = 3.3;
-    ctx.shadowBlur = 0;
-    ctx.beginPath();
-    this.buildWavyPath(coronaPts);
+    const botI0 = Math.floor(steps * 0.08);
+    const botI1 = Math.floor(steps * 0.42);
+    for (let i = botI0; i <= botI1; i++) {
+      const p = pts[i]!;
+      if (i === botI0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    }
     ctx.stroke();
     ctx.restore();
   };
