@@ -18,7 +18,7 @@ type Props = {
 };
 
 /**
- * WebGL speaking orb from `~/source/Animation` (Three.js + shader sphere).
+ * WebGL speaking orb: organic Perlin sphere (after brunosimon/organic-sphere), driven by TTS levels.
  * Mount must have non-zero width/height before construction.
  */
 export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props>(function NovaThreeSpeakingOrb(
