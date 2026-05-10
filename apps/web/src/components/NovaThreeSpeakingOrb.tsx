@@ -1,7 +1,15 @@
 "use client";
 
+import { Bebas_Neue } from "next/font/google";
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { NovaReactiveOrb2D, type VoiceOrbPresetName } from "../lib/nova-reactive-orb/NovaReactiveOrb2D";
+
+/** Matches `Nova_Orb` / `style.css` title (Bebas Neue, centered “NOVA”). */
+const novaOrbTitle = Bebas_Neue({
+  weight: "400",
+  subsets: ["latin"],
+  display: "swap"
+});
 
 export type NovaThreeSpeakingOrbHandle = {
   setSpeechLevel: (level: number) => void;
@@ -18,10 +26,12 @@ type Props = {
   className?: string;
   baseColor?: string;
   preset?: VoiceOrbPresetName;
-  /** WebGL clears to transparent so the host background shows through. */
+  /** Canvas clears to transparent so the host background shows through. */
   transparentBackground?: boolean;
   /** Near-static surface + slow scale pulse (e.g. kiosk when not speaking). */
   presentationIdleCalm?: boolean;
+  /** Same as standalone Nova_Orb sample: centered title inside the ring. */
+  showNovaTitle?: boolean;
 };
 
 /**
@@ -34,7 +44,8 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
     baseColor = "#ff3d26",
     preset = "speaking",
     transparentBackground = true,
-    presentationIdleCalm
+    presentationIdleCalm,
+    showNovaTitle = true
   },
   ref
 ) {
@@ -90,7 +101,38 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
     orb.applyPreset(preset);
   }, [preset, presentationIdleCalm, baseColor, transparentBackground]);
 
-  return <div ref={hostRef} className={className} style={{ width: "100%", height: "100%", minHeight: "120px" }} />;
+  return (
+    <div
+      ref={hostRef}
+      className={className}
+      style={{ position: "relative", width: "100%", height: "100%", minHeight: "120px" }}
+    >
+      {showNovaTitle ? (
+        <div
+          className="pointer-events-none absolute inset-0 z-[1] grid place-items-center"
+          aria-hidden
+        >
+          <span
+            className={novaOrbTitle.className}
+            style={{
+              margin: 0,
+              padding: 0,
+              fontSize: "clamp(2.2rem, 18vw, 5.5rem)",
+              letterSpacing: "clamp(0.24rem, 1.3vw, 1.1rem)",
+              lineHeight: 1,
+              color: "rgba(255, 255, 255, 0.92)",
+              textAlign: "center",
+              textShadow:
+                "0 0 4px rgba(255, 255, 255, 0.35), 0 0 26px rgba(255, 255, 255, 0.08)",
+              mixBlendMode: "screen"
+            }}
+          >
+            NOVA
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
 });
 
 NovaThreeSpeakingOrb.displayName = "NovaThreeSpeakingOrb";

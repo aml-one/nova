@@ -52,14 +52,6 @@ function clamp01(v: number): number {
   return Math.max(0, Math.min(1, v));
 }
 
-function parseHex(hex: string): { r: number; g: number; b: number } {
-  const h = hex.trim().replace("#", "");
-  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
-  const n = parseInt(full, 16);
-  if (!Number.isFinite(n)) return { r: 255, g: 126, b: 0 };
-  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
-}
-
 /**
  * Feeds the orb either live AnalyserNode frequency bytes (TTS) or synthetic spectrum from
  * `setSpeechEnvelope` when no FFT is available (kiosk presets).
@@ -71,11 +63,9 @@ class OrbAudioFeed {
   private mid = 0;
   private high = 0;
   energy = 0;
-  private envSmooth = 0;
-  private envPeak = 0;
-  private phase = 0;
 
-  private static readonly SPECTRUM_TTL_MS = 72;
+  /** Slightly longer than one frame so TTS FFT gaps don’t flash “mic idle”. */
+  private static readonly SPECTRUM_TTL_MS = 120;
 
   setSpectrum(data: Uint8Array<ArrayBuffer>): void {
     if (this.frequencies.length !== data.length) {
@@ -85,13 +75,13 @@ class OrbAudioFeed {
     this.lastSpectrumMs = typeof performance !== "undefined" ? performance.now() : 0;
   }
 
-  setEnvelope(smooth: number, peak: number): void {
-    this.envSmooth = clamp01(smooth);
-    this.envPeak = clamp01(peak);
+  setEnvelope(_smooth: number, _peak: number): void {
+    void _smooth;
+    void _peak;
   }
 
   randomizePhase(): void {
-    this.phase += Math.PI * (1.6 + Math.random() * 4.2);
+    /* Standalone orb jitters phase via spectrum; kept for driver API parity. */
   }
 
   get ready(): boolean {
@@ -101,13 +91,12 @@ class OrbAudioFeed {
   }
 
   update(dt: number): void {
+    // Match standalone Nova_Orb `AudioInput` whenAnalyser isn’t feeding (no mic / no fresh FFT).
     if (!this.ready || this.frequencies.length === 0) {
+      this.energy = lerp(this.energy, 0, 0.08 * dt);
       this.low = lerp(this.low, 0, 0.12 * dt);
       this.mid = lerp(this.mid, 0, 0.12 * dt);
       this.high = lerp(this.high, 0, 0.12 * dt);
-      const targetE = clamp01(this.envSmooth * 0.82 + this.envPeak * 0.18);
-      const eAlpha = targetE > this.energy ? 0.22 * dt : 0.14 * dt;
-      this.energy = lerp(this.energy, targetE, eAlpha);
       return;
     }
 
@@ -127,12 +116,7 @@ class OrbAudioFeed {
 
   getFrequencyAt(normalizedPosition: number): number {
     if (!this.ready || this.frequencies.length === 0) {
-      const t = clamp(normalizedPosition, 0, 1);
-      const wobble =
-        Math.sin(t * Math.PI * 14 + this.phase) * 0.5 +
-        Math.sin(t * Math.PI * 23 - this.phase * 0.7) * 0.35;
-      const base = 0.22 + 0.78 * (wobble * 0.5 + 0.5);
-      return clamp01(this.envSmooth * base * (0.55 + this.envPeak * 0.85));
+      return 0;
     }
 
     const pos = clamp(normalizedPosition, 0, 1);
@@ -165,11 +149,7 @@ class ReactiveOrbCore {
   private centerY = 0;
   private baseRadius = 120;
   private time = 0;
-  private rotationSpeed = 0.5;
   private presentationIdleCalm = false;
-
-  private warmColor = { r: 255, g: 126, b: 0 };
-  private coolColor = { r: 20, g: 122, b: 255 };
 
   private rafId = 0;
   private resizeObserver: ResizeObserver | null = null;
@@ -196,17 +176,12 @@ class ReactiveOrbCore {
     this.rafId = requestAnimationFrame(this.tick);
   }
 
-  setRotationSpeed(speed: number): void {
-    this.rotationSpeed = Math.max(0, speed);
+  setRotationSpeed(_speed: number): void {
+    void _speed;
   }
 
   setPresentationIdleCalm(calm: boolean): void {
     this.presentationIdleCalm = calm;
-  }
-
-  setMoodColors(warm: { r: number; g: number; b: number }, cool: { r: number; g: number; b: number }): void {
-    this.warmColor = { ...warm };
-    this.coolColor = { ...cool };
   }
 
   dispose(): void {
@@ -220,7 +195,8 @@ class ReactiveOrbCore {
     this.rafId = requestAnimationFrame(this.tick);
     const dt = clamp((now - this.lastFrameMs) / 16.6667, 0.25, 2.2);
     this.lastFrameMs = now;
-    this.time += dt * 0.045 * (0.35 + this.rotationSpeed * 0.35);
+    // Same progression as `C:\Users\ambru\source\Nova_Orb\src\main.ts` ReactiveOrb.start()
+    this.time += now * 0.0000012;
 
     this.audio.update(dt);
     this.updateDisplacements(dt);
@@ -229,11 +205,11 @@ class ReactiveOrbCore {
 
   private updateDisplacements(dt: number): void {
     const maxSpike = Math.min(this.width, this.height) * 0.1;
-    const calmMul = this.presentationIdleCalm ? 0.28 : 1;
+    const calmMul = this.presentationIdleCalm ? 0.35 : 1;
     const live = this.audio.ready;
-    const intensity = live ? (0.18 + this.audio.energy * 2.4) * calmMul : 0.12 * calmMul;
-    const attack = live ? 0.42 : 0.16;
-    const decay = live ? 0.28 : 0.14;
+    const intensity = (live ? 0.18 + this.audio.energy * 2.4 : 0.15) * calmMul;
+    const attack = live ? 0.42 : 0.18;
+    const decay = live ? 0.28 : 0.16;
 
     for (let i = 0; i < this.pointCount; i += 1) {
       const t = i / this.pointCount;
@@ -419,8 +395,9 @@ class ReactiveOrbCore {
   }
 
   private getRingColor(angle: number, alpha: number): { stroke: string; glow: string } {
-    const coolColor = this.coolColor;
-    const warmColor = this.warmColor;
+    // Locked to Nova_Orb sample (`main.ts` getRingColor) — do not pastel via chat mood.
+    const coolColor = { r: 20, g: 122, b: 255 };
+    const warmColor = { r: 255, g: 126, b: 0 };
 
     const baseMix = (Math.sin(angle - Math.PI * 0.35) + 1) * 0.5;
     const warp =
@@ -476,8 +453,12 @@ export class NovaReactiveOrb2D {
     this.feed = new OrbAudioFeed();
     this.canvas = document.createElement("canvas");
     this.canvas.style.display = "block";
+    this.canvas.style.position = "absolute";
+    this.canvas.style.left = "0";
+    this.canvas.style.top = "0";
     this.canvas.style.width = "100%";
     this.canvas.style.height = "100%";
+    this.canvas.style.zIndex = "0";
     if (options.transparentBackground !== false) {
       this.canvas.style.background = "transparent";
     }
@@ -487,26 +468,11 @@ export class NovaReactiveOrb2D {
 
     this.core = new ReactiveOrbCore(this.mount, this.canvas, this.feed);
 
-    if (options.baseColor) {
-      this.setBaseColor(options.baseColor);
-    }
+    void options.baseColor;
   }
 
-  setBaseColor(hex: string): void {
-    const accent = parseHex(hex);
-    const warmAnchor = parseHex("#ff7e00");
-    const coolAnchor = parseHex("#147aff");
-    const warm = {
-      r: lerp(warmAnchor.r, accent.r, 0.2),
-      g: lerp(warmAnchor.g, accent.g, 0.2),
-      b: lerp(warmAnchor.b, accent.b, 0.2)
-    };
-    const cool = {
-      r: lerp(coolAnchor.r, accent.r, 0.15),
-      g: lerp(coolAnchor.g, accent.g, 0.15),
-      b: lerp(coolAnchor.b, accent.b, 0.15)
-    };
-    this.core?.setMoodColors(warm, cool);
+  setBaseColor(_hex: string): void {
+    void _hex;
   }
 
   setSpectrum(data: Uint8Array<ArrayBuffer>): void {
@@ -530,12 +496,11 @@ export class NovaReactiveOrb2D {
     this.setSpeechEnvelope(v, v);
   }
 
-  setMoodPalette(colorA: string, colorB: string, _shellRgb: string, _glowHex: string): void {
+  setMoodPalette(_colorA: string, _colorB: string, _shellRgb: string, _glowHex: string): void {
+    void _colorA;
+    void _colorB;
     void _shellRgb;
     void _glowHex;
-    const warm = parseHex(colorA);
-    const cool = parseHex(colorB);
-    this.core?.setMoodColors(warm, cool);
   }
 
   setRotationSpeed(speed: number): void {
