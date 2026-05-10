@@ -12,7 +12,7 @@ enum NovaVoiceOrbPreset { calm, thinking, speaking, excited }
 /// Drives [NovaVoiceOrb] — match `NovaThreeSpeakingOrbHandle` / `AIVoiceOrb` control surface.
 class NovaVoiceOrbController extends ChangeNotifier {
   NovaVoiceOrbController() {
-    applyPreset(NovaVoiceOrbPreset.speaking);
+    applyPreset(NovaVoiceOrbPreset.calm);
   }
 
   double targetSpeechLevel = 0.2;
@@ -75,8 +75,9 @@ class NovaVoiceOrbController extends ChangeNotifier {
   void applyPreset(NovaVoiceOrbPreset name) {
     switch (name) {
       case NovaVoiceOrbPreset.calm:
-        targetSpeechLevel = 0.14;
-        rotationSpeed = 0.34;
+        targetSpeechLevel = 0;
+        targetSpeechPeak = 0;
+        rotationSpeed = 0.24;
         targetDirection = vm.Vector3(0.15, 1.0, 0.1);
       case NovaVoiceOrbPreset.thinking:
         targetSpeechLevel = 0.3;
@@ -117,7 +118,7 @@ class NovaVoiceOrb extends StatefulWidget {
   const NovaVoiceOrb({
     super.key,
     this.controller,
-    this.preset = NovaVoiceOrbPreset.speaking,
+    this.preset = NovaVoiceOrbPreset.calm,
     this.baseColor,
     this.size = 140,
   });
@@ -196,15 +197,18 @@ class _NovaVoiceOrbState extends State<NovaVoiceOrb> with SingleTickerProviderSt
 
 class _AivoiceOrbEngine {
   static const double radius = 1.85;
+  final math.Random _rng = math.Random();
   double elapsed = 0;
-  double uSpeak = 0.2;
-  double uSpeakPeak = 0.2;
+  double uSpeak = 0;
+  double uSpeakPeak = 0;
   vm.Vector3 rotationDirection = vm.Vector3(0.2, 1.0, 0.4);
   vm.Quaternion orientation = vm.Quaternion.identity();
   Color moodA = const Color(0xFF39B9FF);
   Color moodB = const Color(0xFF94F0FF);
   Color moodShell = const Color(0xFF3DB8FF);
   Color moodGlow = const Color(0xFF2EA8FF);
+  double _calmWanderIn = 0;
+  double _calmWanderNext = 6;
 
   void applyPreset(NovaVoiceOrbPreset p, NovaVoiceOrbController c) {
     c.applyPreset(p);
@@ -234,6 +238,19 @@ class _AivoiceOrbEngine {
       rotationDirection.normalize();
     }
 
+    final act = math.max(c.targetSpeechLevel, c.targetSpeechPeak);
+    if (act < 0.07) {
+      _calmWanderIn += dt;
+      if (_calmWanderIn >= _calmWanderNext) {
+        _calmWanderIn = 0;
+        _calmWanderNext = 6 + _rng.nextDouble() * 9;
+        c.randomizeDirection();
+        c.setRotationSpeed(0.16 + _rng.nextDouble() * 0.2);
+      }
+    } else {
+      _calmWanderIn = 0;
+    }
+
     final step = c.rotationSpeed * dt;
     final dq = vm.Quaternion.axisAngle(rotationDirection, step);
     orientation = (dq * orientation).normalized();
@@ -246,7 +263,9 @@ class _AivoiceOrbEngine {
 
   double get breathing {
     final spk = math.max(uSpeak, uSpeakPeak * 0.85);
-    return 1 + math.sin(elapsed * 1.7) * 0.02 * (1 + spk * 2.2);
+    final act = _NovaOrbMeshPainter._surfaceActivity(uSpeak, uSpeakPeak);
+    final mag = 0.02 * (1 + spk * 2.2) * act + 0.0035 * (1 - act);
+    return 1 + math.sin(elapsed * 1.7) * mag;
   }
 
   double get shellBreathingExtra => 1 + (breathing - 1) * 1.2;
@@ -293,33 +312,46 @@ class _NovaOrbMeshPainter extends CustomPainter {
     _triIndices = idx;
   }
 
+  /// 0 = smooth sphere (no spikes), 1 = full WebUI displacement strength.
+  static double _surfaceActivity(double uSpeak, double uSpeakPeak) {
+    final m = math.max(uSpeak, uSpeakPeak);
+    return _smoothstep(0.02, 0.13, m);
+  }
+
   static vm.Vector3 _displaceCore(vm.Vector3 position, double uTime, double uSpeak, double uSpeakPeak) {
     final normal = position.normalized();
+    final act = _surfaceActivity(uSpeak, uSpeakPeak);
+    if (act < 1e-4) {
+      return position;
+    }
     final spk = uSpeak + (uSpeakPeak - uSpeak) * 0.78;
     final wave1 = math.sin(position.y * 5.0 + uTime * 1.8) * 0.06;
     final wave2 = math.sin(position.x * 7.5 - uTime * 2.4) * 0.05;
     final wave3 = math.sin((position.z + position.x) * 9.0 + uTime * 2.0) * 0.035;
-    final pulse = (wave1 + wave2 + wave3) * (0.42 + uSpeak * 1.15 + uSpeakPeak * 1.85);
-    final spike = math.sin(position.y * 16.0 + uTime * 11.0) * spk * 0.11 +
-        math.sin(position.x * 14.0 - uTime * 9.0) * spk * 0.095 +
-        math.sin((position.z * 1.7 + position.y) * 18.0 + uTime * 13.0) * spk * 0.072;
+    final pulse = (wave1 + wave2 + wave3) * (0.42 + uSpeak * 1.15 + uSpeakPeak * 1.85) * act;
+    final spike = (math.sin(position.y * 16.0 + uTime * 11.0) * spk * 0.11 +
+            math.sin(position.x * 14.0 - uTime * 9.0) * spk * 0.095 +
+            math.sin((position.z * 1.7 + position.y) * 18.0 + uTime * 13.0) * spk * 0.072) *
+        act;
     return position + normal * (pulse + spike);
   }
 
   static vm.Vector3 _displaceShell(vm.Vector3 position, double uTime, double uSpeak, double uSpeakPeak) {
     final normal = position.normalized();
+    final act = _surfaceActivity(uSpeak, uSpeakPeak);
     final spk = uSpeak + (uSpeakPeak - uSpeak) * 0.65;
-    final shellWave = math.sin(position.y * 3.0 + uTime * 1.2) * 0.08 * (1.0 + spk * 1.4);
+    final shellWave = math.sin(position.y * 3.0 + uTime * 1.2) * 0.08 * (1.0 + spk * 1.4) * act;
     return position + normal * (0.32 + shellWave);
   }
 
   static Color _coreFragment(vm.Vector3 vNormal, vm.Vector3 vPos, double uTime, double uSpeak, double uSpeakPeak, Color uA, Color uB) {
     final vn = vNormal.normalized();
+    final act = _surfaceActivity(uSpeak, uSpeakPeak);
     final fresnel = math.pow(1.0 - (vn.z).abs(), 2.6).toDouble();
     var ribbons = math.sin((vPos.y + vPos.x) * 8.0 + uTime * 2.8) * 0.5 + 0.5;
     ribbons += math.sin((vPos.y - vPos.z) * 11.0 - uTime * 2.2) * 0.5 + 0.5;
     ribbons *= 0.5;
-    final vib = 0.45 + uSpeak * 0.85 + uSpeakPeak * 1.05;
+    final vib = (0.45 + uSpeak * 0.85 + uSpeakPeak * 1.05) * (0.28 + 0.72 * act);
     final alpha = _smoothstep(0.18, 1.0, ribbons) * (0.3 + fresnel * 0.95) * vib;
     final t = (ribbons + fresnel * 0.4).clamp(0.0, 1.0);
     final col = Color.lerp(uA, uB, t)!;
@@ -328,10 +360,11 @@ class _NovaOrbMeshPainter extends CustomPainter {
 
   static Color _shellFragment(vm.Vector3 vNormal, double uTime, double uSpeak, double uSpeakPeak, Color shell) {
     final vn = vNormal.normalized();
+    final act = _surfaceActivity(uSpeak, uSpeakPeak);
     final edge = math.pow(1.0 - (vn.z).abs(), 2.0).toDouble();
     final ripple = math.sin(vn.y * 9.0 + uTime * 2.0) * 0.5 + 0.5;
     final spk = uSpeak + (uSpeakPeak - uSpeak) * 0.55;
-    final alpha = edge * (0.18 + ripple * 0.18) * (0.5 + spk * 1.15);
+    final alpha = edge * (0.18 + ripple * 0.18) * (0.5 + spk * 1.15) * (0.22 + 0.78 * act);
     return shell.withValues(alpha: alpha.clamp(0.0, 1.0) * 0.85);
   }
 
@@ -348,6 +381,7 @@ class _NovaOrbMeshPainter extends CustomPainter {
     final uTime = engine.elapsed;
     final uSpeak = engine.uSpeak;
     final uSpeakPeak = engine.uSpeakPeak;
+    final glowAct = 0.38 + 0.62 * _NovaOrbMeshPainter._surfaceActivity(uSpeak, uSpeakPeak);
     final aspect = size.width / math.max(size.height, 1.0);
     final near = 0.1;
     final far = 100.0;
@@ -375,8 +409,8 @@ class _NovaOrbMeshPainter extends CustomPainter {
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 20)
       ..shader = RadialGradient(
         colors: [
-          glowColor.withValues(alpha: 0.55),
-          glowColor.withValues(alpha: 0.12),
+          glowColor.withValues(alpha: 0.55 * glowAct),
+          glowColor.withValues(alpha: 0.12 * glowAct),
           Colors.transparent,
         ],
         stops: const [0.0, 0.35, 1.0],

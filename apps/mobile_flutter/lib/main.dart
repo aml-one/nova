@@ -246,7 +246,6 @@ class _HomeShellState extends State<HomeShell> {
       ThoughtsPage(api: widget.api),
     ];
     return Scaffold(
-      extendBody: true,
       appBar: AppBar(
         title: const Text("Nova"),
         actions: [
@@ -297,7 +296,7 @@ class _DashboardPageState extends State<DashboardPage> {
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: [
           Card(
             elevation: 0,
@@ -357,7 +356,7 @@ class _ApprovalsPageState extends State<ApprovalsPage> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: _items.map((item) {
           final id = (item["id"] ?? "").toString();
           return Padding(
@@ -415,7 +414,7 @@ class _ThoughtsPageState extends State<ThoughtsPage> {
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
         children: _items.take(80).map((item) {
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),

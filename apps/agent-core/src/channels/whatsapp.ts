@@ -170,6 +170,9 @@ export class WhatsAppChannelAdapter {
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
+      if (process.env.NOVA_WA_DEBUG?.trim() === "1") {
+        console.warn(`[whatsapp] mark read failed: ${response.status} ${body.slice(0, 400)}`);
+      }
       throw new Error(`whatsapp mark read failed (${response.status}): ${body.slice(0, 300)}`);
     }
   }

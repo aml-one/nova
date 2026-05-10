@@ -260,6 +260,9 @@ class WhatsAppWebBridge {
           const from = await resolveWhatsAppInboundSenderJid(msg, sock);
           if (!from) continue;
           await this.inboundHandler?.({ from, text: text.trim() });
+          await sock.readMessages([msg.key]).catch(() => {
+            /* blue ticks best-effort */
+          });
         } catch {
           // Keep bridge alive even if orchestration fails.
         }

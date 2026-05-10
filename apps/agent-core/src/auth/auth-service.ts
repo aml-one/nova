@@ -50,6 +50,11 @@ export class AuthService {
     return Boolean(first && first === id);
   }
 
+  /** First configured WebUI user (primary admin) — used to protect their People row from delete/block. */
+  getPrimaryAdminUserId(): string | undefined {
+    return this.repo.getFirstUserId();
+  }
+
   login(email: string, password: string): { token: string; user: AuthUser; expiresAt: string } {
     const normalizedEmail = normalizeEmail(email);
     const user = this.repo.getUserByEmail(normalizedEmail);

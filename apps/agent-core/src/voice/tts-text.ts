@@ -81,6 +81,19 @@ export function normalizeOrpheusSpeechCues(text: string): string {
  * shown as a transcript / chat body without the TTS hints leaking into the visible message. The
  * audio path keeps the original cues — only callers that surface the text to humans should strip.
  */
+/**
+ * Removes `[nova:tone]…[/nova]` display/TTS hints (inner wording is kept).
+ * Use for channel bubbles, memory, run history, and speech prep.
+ */
+export function stripNovaToneMarkup(text: string): string {
+  if (!text) return text;
+  return text
+    .replace(/\[nova:[^\]]+\]([\s\S]*?)\[\/nova\]/gi, "$1")
+    .replace(/\[\/nova\]/gi, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 export function stripOrpheusSpeechCues(text: string): string {
   if (!text) return text;
   // First normalize so the tags are well-formed, then drop them. Handles `<chuckle>`, `<chuckle  >`,
@@ -169,8 +182,7 @@ export function prepareChatTextForSpeech(raw: string, maxChars = 8000): string {
   }
   visible = visible.trim();
   visible = visible.replace(/```[\s\S]*?```/g, " ");
-  visible = visible.replace(/\[nova:[^\]]+\]([\s\S]*?)\[\/nova\]/gi, "$1");
-  visible = visible.replace(/\[\/nova\]/gi, " ");
+  visible = stripNovaToneMarkup(visible);
   visible = visible.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
   visible = visible.replace(/[\uFEFF\u200B-\u200D]/g, "");
   visible = visible.replace(/[\u2013\u2014]/g, ", ");

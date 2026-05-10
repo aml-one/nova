@@ -181,7 +181,8 @@ export class VoiceService {
   }
 
   private async synthesizeOrpheusBufferInternal(preparedOrRawText: string): Promise<Buffer> {
-    const sent = this.getSentToOrpheusInput(preparedOrRawText);
+    const prepared = prepareChatTextForSpeech(preparedOrRawText);
+    const sent = this.getSentToOrpheusInput(prepared);
     return this.fetchOrpheusAudio(sent);
   }
 

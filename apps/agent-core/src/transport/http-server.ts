@@ -48,6 +48,7 @@ import { PersonaLoader } from "../persona/persona-loader.js";
 import { appendUploadChunk, completeChunkedUpload, getUploadFile, initChunkedUpload, saveUpload } from "../media/media-storage.js";
 import { SettingsService } from "../settings/settings-service.js";
 import { AuthService } from "../auth/auth-service.js";
+import { isPrimaryAdminPerson } from "../admin/person-admin-guard.js";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import { ModelRouter } from "../providers/router.js";
 import { SelfImprovementLoop } from "../improvement/self-improvement-loop.js";
@@ -536,6 +537,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
               lockedFields,
               channelState: { web: stateWeb, signal: stateSignal, whatsapp: stateWhatsApp },
               events: recentEvents,
+              isProtectedAdmin: isPrimaryAdminPerson(id, identities, options.auth),
               correlationId
             });
           }
@@ -566,6 +568,12 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           const current = people.getById(id);
           if (!current) return sendJson(response, 404, { error: "not found", correlationId });
           const patch = payload.patch ?? {};
+          if (isPrimaryAdminPerson(id, identities, options.auth) && (patch.blocked === true || patch.optedOut === true)) {
+            return sendJson(response, 400, {
+              error: "Cannot block or opt-out the primary WebUI admin person",
+              correlationId
+            });
+          }
           const next = {
             ...current,
             displayName: patch.displayName === null ? undefined : typeof patch.displayName === "string" ? patch.displayName : current.displayName,
@@ -596,6 +604,9 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         if (request.method === "DELETE" && parsedUrl.pathname === "/v1/admin/people") {
           const id = (parsedUrl.searchParams.get("id") ?? "").trim();
           if (!id) return sendJson(response, 400, { error: "id query parameter is required", correlationId });
+          if (isPrimaryAdminPerson(id, identities, options.auth)) {
+            return sendJson(response, 400, { error: "Cannot delete the primary WebUI admin person", correlationId });
+          }
           const ok = people.deleteCascadeById(id);
           if (!ok) return sendJson(response, 404, { error: "not found or cannot delete", correlationId });
           return sendJson(response, 200, { ok: true, correlationId });

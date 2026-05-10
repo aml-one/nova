@@ -5,8 +5,16 @@ import {
   normalizeOrpheusSpeechCues,
   prepareChatTextForSpeech,
   stripChannelAssistantScratchpad,
+  stripNovaToneMarkup,
   stripOrpheusSpeechCues
 } from "./tts-text.js";
+
+describe("stripNovaToneMarkup", () => {
+  it("unwraps tone segments and drops stray closers", () => {
+    expect(stripNovaToneMarkup("Hello [nova:soft]aside[/nova] there.")).toBe("Hello aside there.");
+    expect(stripNovaToneMarkup("[nova:strong]key[/nova]")).toBe("key");
+  });
+});
 
 describe("ensureOrpheusCueTagsClosed", () => {
   it("closes missing > before dialogue after cue name", () => {

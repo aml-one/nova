@@ -56,14 +56,14 @@ import { ThoughtRepository } from "../storage/repositories/thought-repository.js
 import { getDatabase } from "../storage/sqlite.js";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
-import { PeopleRepository } from "../storage/repositories/people-repository.js";
+import { PeopleRepository, type PersonRecord } from "../storage/repositories/people-repository.js";
 import { PersonIdentitiesRepository, type PersonIdentityKind } from "../storage/repositories/person-identities-repository.js";
 import { IdentityRepository } from "../storage/repositories/identity-repository.js";
 import { PersonFieldLocksRepository } from "../storage/repositories/person-field-locks-repository.js";
 import { PersonChannelStateRepository, type PersonChannel } from "../storage/repositories/person-channel-state-repository.js";
 import { PersonProfileEventsRepository } from "../storage/repositories/person-profile-events-repository.js";
 import { PersonRelationshipsRepository } from "../storage/repositories/person-relationships-repository.js";
-import { stripChannelAssistantScratchpad, stripOrpheusSpeechCues } from "../voice/tts-text.js";
+import { stripChannelAssistantScratchpad, stripNovaToneMarkup, stripOrpheusSpeechCues } from "../voice/tts-text.js";
 
 const MAX_HOST_DIAG_APPENDIX_CHARS = 12_000;
 
@@ -756,13 +756,13 @@ export class TaskOrchestrator {
         memoryContext,
         cognitiveCoreBlock
       });
-      let multiOut = multi.trim();
-      if (input.channel !== "web") {
-        const s = stripOrpheusSpeechCues(stripChannelAssistantScratchpad(multiOut)).trim();
-        if (s) multiOut = s;
-      }
-      this.rememberAssistantTurn(userId, input.channel, input.text, multiOut, runtimeSettings.emotions);
-      return multiOut;
+      const rawMulti = multi.trim();
+      const memMulti =
+        stripOrpheusSpeechCues(stripNovaToneMarkup(stripChannelAssistantScratchpad(rawMulti))).trim() ||
+        stripNovaToneMarkup(rawMulti).trim() ||
+        rawMulti;
+      this.rememberAssistantTurn(userId, input.channel, input.text, memMulti, runtimeSettings.emotions);
+      return input.channel === "web" ? rawMulti : memMulti;
     }
 
     if (detectSkillAuthoringIntent(input.text, { skillAuthoringDisabled: runtimeSettings.skills.skillAuthoringDisabled })) {
@@ -1230,6 +1230,8 @@ export class TaskOrchestrator {
       return visionResult.blockedReply;
     }
     const visionExtras = visionResult.extras;
+    const personForPrompt = this.people.getById(userId);
+    const personDirectoryBlock = this.buildPersonDirectoryContextBlock(personForPrompt, userId, input.channel);
     const buildPromptMessages = (userContent: string): ChatMessage[] => [
       { role: "system", content: persona.systemPrompt },
       { role: "system", content: NOVA_IDENTITY_GUARD },
@@ -1249,6 +1251,9 @@ export class TaskOrchestrator {
           ] as const)
         : []),
       ...memoryContext,
+      ...(personDirectoryBlock.trim()
+        ? ([{ role: "system" as const, content: personDirectoryBlock.trim() }] as const)
+        : []),
       ...(cognitiveCoreBlock.trim()
         ? ([{ role: "system" as const, content: cognitiveCoreBlock.trim() }] as const)
         : []),
@@ -1445,20 +1450,25 @@ export class TaskOrchestrator {
       }
     }
 
+    const rawAssistant = result.content;
+    const forMemoryAndHistory =
+      stripOrpheusSpeechCues(stripNovaToneMarkup(stripChannelAssistantScratchpad(rawAssistant))).trim() ||
+      stripNovaToneMarkup(rawAssistant).trim() ||
+      rawAssistant.trim();
+
     if (input.channel !== "web") {
-      const cleaned = stripOrpheusSpeechCues(stripChannelAssistantScratchpad(result.content)).trim();
-      if (cleaned) {
-        result = { ...result, content: cleaned };
+      if (forMemoryAndHistory) {
+        result = { ...result, content: forMemoryAndHistory };
       }
     }
 
-    this.rememberAssistantTurn(userId, input.channel, input.text, result.content, runtimeSettings.emotions);
+    this.rememberAssistantTurn(userId, input.channel, input.text, forMemoryAndHistory, runtimeSettings.emotions);
     this.recordRunHistory({
       runId,
       userId,
       channel: input.channel,
       inputText: input.text,
-      outputText: result.content,
+      outputText: forMemoryAndHistory,
       success: true,
       correlationId,
       latencyMs: Date.now() - startedAt,
@@ -1467,10 +1477,10 @@ export class TaskOrchestrator {
       tokenInCount: estimateTokens(
         [persona.systemPrompt, ...memoryContext.map((m) => m.content), userMessageForModel].join(" ")
       ),
-      tokenOutCount: estimateTokens(result.content),
+      tokenOutCount: estimateTokens(forMemoryAndHistory),
       firstTokenMs: result.firstTokenMs,
-      tokensPerSecond: computeTokensPerSecond(result.content, Date.now() - startedAt),
-      costUsd: estimateCostUsd(result.provider, estimateTokens(result.content), runtimeSettings.costGovernor),
+      tokensPerSecond: computeTokensPerSecond(forMemoryAndHistory, Date.now() - startedAt),
+      costUsd: estimateCostUsd(result.provider, estimateTokens(forMemoryAndHistory), runtimeSettings.costGovernor),
       toolTimingsMs: mergeToolTimings(hostDiagnosticsMs, implicitShellMs) ?? {}
     });
     this.deps.improvement.recordOutcome({
@@ -1482,11 +1492,11 @@ export class TaskOrchestrator {
     this.thoughtLog.append({
       category: "chat",
       title: "Response generated",
-      content: result.content.slice(0, 280),
+      content: (input.channel === "web" ? rawAssistant : result.content).slice(0, 280),
       metadata: { provider: result.provider, latencyMs: Date.now() - startedAt }
     });
 
-    return result.content;
+    return input.channel === "web" ? rawAssistant : result.content;
     } finally {
       this.inFlightCount = Math.max(0, this.inFlightCount - 1);
       this.lastActivityAt = Date.now();
@@ -1782,6 +1792,50 @@ export class TaskOrchestrator {
       content: result.reply.slice(0, 280)
     });
     return result.reply;
+  }
+
+  /**
+   * Grounds the model in linked channels (Signal/WhatsApp/Web) so it does not deny cross-app reachability.
+   */
+  private buildPersonDirectoryContextBlock(
+    person: PersonRecord | undefined,
+    personId: string,
+    activeChannel: "web" | "whatsapp" | "signal"
+  ): string {
+    if (!person) {
+      return "";
+    }
+    const rows = this.personIdentities.listIdentitiesForPerson(personId);
+    const kinds = new Set(rows.map((r) => r.kind));
+    const lines: string[] = [
+      "People directory (authoritative for this person—use these facts; do not deny a linked channel such as Signal or WhatsApp if it appears below):",
+      `- Conversation channel for this message: ${activeChannel}`
+    ];
+    if (person.preferredChannel) {
+      lines.push(`- Preferred outbound channel when Nova has a choice: ${person.preferredChannel}`);
+    }
+    if (kinds.has("signal_uuid")) {
+      lines.push("- Signal: linked in Nova (this person can use Signal when they message from that app).");
+    }
+    if (kinds.has("whatsapp_phone_e164")) {
+      lines.push("- WhatsApp: linked in Nova.");
+    }
+    if (kinds.has("phone_e164")) {
+      lines.push("- Phone (E.164): linked.");
+    }
+    if (kinds.has("web_user_id")) {
+      lines.push("- WebUI login: linked.");
+    }
+    if (person.aboutNotes?.trim()) {
+      lines.push(`- About / notes: ${person.aboutNotes.trim().slice(0, 1000)}`);
+    }
+    if (person.topics?.length) {
+      lines.push(`- Topic tags (from chats): ${person.topics.slice(0, 24).join(", ")}`);
+    }
+    lines.push(
+      "If they ask to move to another linked channel (e.g. Signal while on WhatsApp), acknowledge Nova can reach them there—do not claim you only exist in the current app or lack other channels."
+    );
+    return lines.join("\n");
   }
 
   private rememberAssistantTurn(

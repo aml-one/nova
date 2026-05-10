@@ -29,7 +29,6 @@ class _VoiceSessionPageState extends State<VoiceSessionPage> {
   final NovaAudioPlayer _player = NovaAudioPlayer();
   final NovaVoiceOrbController _orb = NovaVoiceOrbController();
   StreamSubscription<Amplitude>? _ampSub;
-  Timer? _playOrbTimer;
   bool _recording = false;
   bool _busy = false;
   String _status = "Hold the button to speak, release to send to Nova.";
@@ -38,7 +37,6 @@ class _VoiceSessionPageState extends State<VoiceSessionPage> {
   @override
   void dispose() {
     _ampSub?.cancel();
-    _playOrbTimer?.cancel();
     _orb.dispose();
     unawaited(_player.stop());
     unawaited(() async {
@@ -52,16 +50,6 @@ class _VoiceSessionPageState extends State<VoiceSessionPage> {
 
   double _dbToLevel(double db) => ((db + 55) / 55).clamp(0.0, 1.0);
 
-  void _pulseOrbForPlayback() {
-    _playOrbTimer?.cancel();
-    var t = 0.0;
-    _playOrbTimer = Timer.periodic(const Duration(milliseconds: 55), (_) {
-      t += 0.2;
-      final s = 0.38 + 0.48 * (0.5 + 0.5 * math.sin(t));
-      _orb.setSpeechEnvelope(s, (s + 0.2).clamp(0.0, 1.0));
-    });
-  }
-
   Future<bool> _ensureMic() async {
     final st = await Permission.microphone.request();
     return st.isGranted;
@@ -72,16 +60,17 @@ class _VoiceSessionPageState extends State<VoiceSessionPage> {
       return;
     }
     try {
-      _pulseOrbForPlayback();
       final audio = await widget.api.speakAudio(text);
-      await _player.playSpeakResult(audio);
+      await _player.playSpeakResult(audio, orb: _orb);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("TTS failed: $e")));
       }
     } finally {
-      _playOrbTimer?.cancel();
-      _orb.applyPreset(NovaVoiceOrbPreset.speaking);
+      if (!_player.isPlaying) {
+        _orb.setSpeechEnvelope(0, 0);
+        _orb.applyPreset(NovaVoiceOrbPreset.calm);
+      }
     }
   }
 
@@ -172,7 +161,8 @@ class _VoiceSessionPageState extends State<VoiceSessionPage> {
       final text = await widget.api.transcribeAudioBytes(bytes, mimeType: mime);
       if (text.trim().isEmpty) {
         setState(() => _status = "No speech detected — try again.");
-        _orb.applyPreset(NovaVoiceOrbPreset.speaking);
+        _orb.setSpeechEnvelope(0, 0);
+        _orb.applyPreset(NovaVoiceOrbPreset.calm);
         return;
       }
       setState(() => _status = "Nova is thinking…");
@@ -181,7 +171,6 @@ class _VoiceSessionPageState extends State<VoiceSessionPage> {
         _lastReply = reply;
         _status = "Playing Nova's reply…";
       });
-      _orb.applyPreset(NovaVoiceOrbPreset.speaking);
       await _playReplyTts(reply);
       setState(() => _status = "Hold to speak again.");
     } catch (e) {
@@ -221,7 +210,7 @@ class _VoiceSessionPageState extends State<VoiceSessionPage> {
             const SizedBox(height: 8),
             DecoratedBox(
               decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: NovaTheme.softGlow(NovaTheme.accent)),
-              child: NovaVoiceOrb(controller: _orb, size: 220, preset: NovaVoiceOrbPreset.speaking, baseColor: NovaTheme.accent),
+              child: NovaVoiceOrb(controller: _orb, size: 220, preset: NovaVoiceOrbPreset.calm, baseColor: NovaTheme.accent),
             ),
             const SizedBox(height: 22),
             Padding(

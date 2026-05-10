@@ -2,6 +2,7 @@ import "dart:async";
 import "dart:convert";
 
 import "package:flutter/material.dart";
+import "package:flutter/services.dart";
 import "package:flutter_webrtc/flutter_webrtc.dart";
 import "package:web_socket_channel/web_socket_channel.dart";
 
@@ -209,7 +210,12 @@ class _WebrtcCallPageState extends State<WebrtcCallPage> {
 
       ws.sink.add(jsonEncode({"type": "auth", "token": token}));
       await completer.future.timeout(const Duration(seconds: 45));
-      await Helper.setSpeakerphoneOn(true);
+      try {
+        await Helper.setSpeakerphoneOn(true);
+      } on MissingPluginException {
+        // Windows/Linux: `enableSpeakerphone` is not implemented on FlutterWebRTC.Method.
+        // Call still works; OS uses the default playback device.
+      }
     } catch (e) {
       await _hangup();
       if (mounted) {

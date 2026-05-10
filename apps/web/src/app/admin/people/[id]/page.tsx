@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
+import { FaXmark } from "react-icons/fa6";
 import { Card } from "../../../../components/ui/card";
 import { Button } from "../../../../components/ui/button";
 import { Input } from "../../../../components/ui/input";
@@ -10,6 +11,13 @@ import { Textarea } from "../../../../components/ui/textarea";
 import { Checkbox } from "../../../../components/ui/checkbox";
 import { Select } from "../../../../components/ui/select";
 import { apiFetch } from "../../../../lib/api-fetch";
+
+const IDENTITY_KIND_LABELS: Record<string, string> = {
+  phone_e164: "Phone",
+  whatsapp_phone_e164: "WhatsApp",
+  signal_uuid: "Signal",
+  web_user_id: "Web user"
+};
 
 type PersonRecord = {
   id: string;
@@ -49,6 +57,14 @@ export default function PersonAdminDetailPage() {
     blocked: false
   });
 
+  const [newKind, setNewKind] = useState("phone_e164");
+  const [newValue, setNewValue] = useState("");
+  const [mergeSourceId, setMergeSourceId] = useState("");
+  const [blocking, setBlocking] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [isProtectedAdmin, setIsProtectedAdmin] = useState(false);
+  const [newTopicDraft, setNewTopicDraft] = useState("");
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -58,6 +74,7 @@ export default function PersonAdminDetailPage() {
         item?: PersonRecord;
         identities?: IdentityRecord[];
         lockedFields?: string[];
+        isProtectedAdmin?: boolean;
         error?: string;
       };
       if (!res.ok) {
@@ -69,6 +86,7 @@ export default function PersonAdminDetailPage() {
         setItem(p);
         setIdentities(data.identities ?? []);
         setLockedFields(data.lockedFields ?? []);
+        setIsProtectedAdmin(Boolean(data.isProtectedAdmin));
         if (p) {
           setForm({
             displayName: p.displayName ?? "",
@@ -158,17 +176,13 @@ export default function PersonAdminDetailPage() {
     const refreshed = await apiFetch(`/api/admin/people?id=${encodeURIComponent(id)}`);
     const d2 = (await refreshed.json()) as { identities?: IdentityRecord[]; lockedFields?: string[]; item?: PersonRecord };
     if (refreshed.ok) {
+      const d2full = d2 as { isProtectedAdmin?: boolean };
       setIdentities(d2.identities ?? []);
       setLockedFields(d2.lockedFields ?? []);
       setItem(d2.item ?? item);
+      setIsProtectedAdmin(Boolean(d2full.isProtectedAdmin));
     }
   }
-
-  const [newKind, setNewKind] = useState("phone_e164");
-  const [newValue, setNewValue] = useState("");
-  const [mergeSourceId, setMergeSourceId] = useState("");
-  const [blocking, setBlocking] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
   function normalizeMergePersonId(raw: string): string {
     const t = raw.trim().replace(/^\uFEFF/, "");
@@ -198,9 +212,11 @@ export default function PersonAdminDetailPage() {
     const refreshed = await apiFetch(`/api/admin/people?id=${encodeURIComponent(id)}`);
     const d2 = (await refreshed.json()) as { identities?: IdentityRecord[]; lockedFields?: string[]; item?: PersonRecord };
     if (refreshed.ok) {
+      const d2full = d2 as { isProtectedAdmin?: boolean };
       setIdentities(d2.identities ?? []);
       setLockedFields(d2.lockedFields ?? []);
       setItem(d2.item ?? item);
+      setIsProtectedAdmin(Boolean(d2full.isProtectedAdmin));
     }
   }
 
@@ -258,10 +274,22 @@ export default function PersonAdminDetailPage() {
           <Button tone="neutral">Back</Button>
         </Link>
         <div className="flex items-center gap-2 flex-wrap">
-          <Button type="button" tone="orange" disabled={!item || blocking || form.blocked} onClick={() => void blockPerson()}>
+          <Button
+            type="button"
+            tone="orange"
+            disabled={!item || blocking || form.blocked || isProtectedAdmin}
+            title={isProtectedAdmin ? "Primary WebUI admin cannot be blocked" : undefined}
+            onClick={() => void blockPerson()}
+          >
             {blocking ? "Blocking…" : "Block"}
           </Button>
-          <Button type="button" tone="red" disabled={!item || deleting} onClick={() => void deletePerson()}>
+          <Button
+            type="button"
+            tone="red"
+            disabled={!item || deleting || isProtectedAdmin}
+            title={isProtectedAdmin ? "Primary WebUI admin cannot be deleted" : undefined}
+            onClick={() => void deletePerson()}
+          >
             {deleting ? "Deleting…" : "Delete"}
           </Button>
         </div>
@@ -269,6 +297,12 @@ export default function PersonAdminDetailPage() {
       </div>
 
       {error ? <Card className="p-4 border-red-400/40 text-red-200">{error}</Card> : null}
+
+      {item && isProtectedAdmin ? (
+        <Card className="p-3 border-amber-400/30 text-amber-100/95 text-sm">
+          This person is the primary WebUI admin (first account). They cannot be blocked, opted out, or deleted from People.
+        </Card>
+      ) : null}
 
       {!item ? (
         <Card className="p-4">Loading…</Card>
@@ -318,6 +352,10 @@ export default function PersonAdminDetailPage() {
 
             <div>
               <div className="text-sm mb-1">About / notes</div>
+              <p className="text-xs opacity-60 mb-2 leading-relaxed">
+                Nova does not auto-fill this from chat. Add facts you want the model to see (it is injected into the prompt with
+                linked channels). Topics below are separate — they are short tags harvested from user messages.
+              </p>
               <Textarea value={form.aboutNotes} onChange={(e) => setForm({ ...form, aboutNotes: e.target.value })} rows={4} />
               <div className="mt-2 flex items-center gap-2 text-sm">
                 <Checkbox
@@ -399,8 +437,49 @@ export default function PersonAdminDetailPage() {
             </div>
 
             <div>
-              <div className="text-sm mb-1">Topics (comma-separated)</div>
-              <Input value={form.topicsCsv} onChange={(e) => setForm({ ...form, topicsCsv: e.target.value })} />
+              <div className="text-sm mb-1">Topics</div>
+              <p className="text-xs opacity-60 mb-2">Short tags (one word or phrase each). Used in the model context; remove noise with the × on a chip.</p>
+              <div
+                className="min-h-[300px] max-h-[300px] overflow-y-auto rounded-lg border border-white/10 bg-black/20 p-3 flex flex-wrap content-start gap-2"
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                {topics.map((t) => (
+                  <span
+                    key={t}
+                    className="inline-flex items-center gap-1 rounded-full bg-sky-500/20 border border-sky-400/35 pl-2.5 pr-1 py-0.5 text-sm"
+                  >
+                    <span className="max-w-[220px] truncate">{t}</span>
+                    <button
+                      type="button"
+                      className="rounded-full p-0.5 hover:bg-white/10 text-sky-100/90"
+                      aria-label={`Remove ${t}`}
+                      onClick={() => {
+                        const next = topics.filter((x) => x !== t);
+                        setForm({ ...form, topicsCsv: next.join(", ") });
+                      }}
+                    >
+                      <FaXmark className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+                {topics.length === 0 ? <span className="text-sm opacity-45">No tags yet — add below.</span> : null}
+              </div>
+              <div className="mt-2 flex flex-col sm:flex-row gap-2">
+                <Input
+                  value={newTopicDraft}
+                  onChange={(e) => setNewTopicDraft(e.target.value)}
+                  placeholder="New tag — press Enter"
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    const v = newTopicDraft.trim().replace(/^,+|,+$/g, "");
+                    if (!v) return;
+                    const merged = Array.from(new Set([...topics, v])).slice(0, 200);
+                    setForm({ ...form, topicsCsv: merged.join(", ") });
+                    setNewTopicDraft("");
+                  }}
+                />
+              </div>
               <div className="mt-2 flex items-center gap-2 text-sm">
                 <Checkbox
                   checked={lockedFields.includes("topics")}
@@ -414,11 +493,19 @@ export default function PersonAdminDetailPage() {
 
             <div className="flex items-center gap-4 text-sm">
               <label className="flex items-center gap-2">
-                <Checkbox checked={form.optedOut} onChange={(e) => setForm({ ...form, optedOut: e.target.checked })} />
+                <Checkbox
+                  checked={form.optedOut}
+                  disabled={isProtectedAdmin}
+                  onChange={(e) => setForm({ ...form, optedOut: e.target.checked })}
+                />
                 <span>Opted out</span>
               </label>
               <label className="flex items-center gap-2">
-                <Checkbox checked={form.blocked} onChange={(e) => setForm({ ...form, blocked: e.target.checked })} />
+                <Checkbox
+                  checked={form.blocked}
+                  disabled={isProtectedAdmin}
+                  onChange={(e) => setForm({ ...form, blocked: e.target.checked })}
+                />
                 <span>Blocked</span>
               </label>
             </div>
@@ -437,9 +524,10 @@ export default function PersonAdminDetailPage() {
                 <div className="text-sm opacity-70">No identities yet.</div>
               ) : (
                 identities.map((it) => (
-                  <div key={it.id} className="text-sm flex justify-between gap-3">
-                    <div className="min-w-0 truncate">
-                      <span className="opacity-70">{it.kind}</span> <span className="font-mono">{it.value}</span>
+                  <div key={it.id} className="text-sm flex justify-between gap-3 items-start">
+                    <div className="min-w-0">
+                      <div className="font-medium text-white/90">{IDENTITY_KIND_LABELS[it.kind] ?? it.kind}</div>
+                      <div className="font-mono text-xs opacity-80 break-all">{it.value}</div>
                     </div>
                   </div>
                 ))
@@ -448,10 +536,10 @@ export default function PersonAdminDetailPage() {
 
             <div className="flex gap-2 flex-col md:flex-row">
               <Select value={newKind} onChange={(e) => setNewKind(e.target.value)}>
-                <option value="phone_e164">phone_e164</option>
-                <option value="whatsapp_phone_e164">whatsapp_phone_e164</option>
-                <option value="signal_uuid">signal_uuid</option>
-                <option value="web_user_id">web_user_id</option>
+                <option value="phone_e164">{IDENTITY_KIND_LABELS.phone_e164}</option>
+                <option value="whatsapp_phone_e164">{IDENTITY_KIND_LABELS.whatsapp_phone_e164}</option>
+                <option value="signal_uuid">{IDENTITY_KIND_LABELS.signal_uuid}</option>
+                <option value="web_user_id">{IDENTITY_KIND_LABELS.web_user_id}</option>
               </Select>
               <Input value={newValue} onChange={(e) => setNewValue(e.target.value)} placeholder="value" />
               <Button

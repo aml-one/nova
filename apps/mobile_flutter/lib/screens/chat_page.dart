@@ -39,7 +39,6 @@ class _ChatPageState extends State<ChatPage> {
   final NovaAudioPlayer _tts = NovaAudioPlayer();
   final NovaVoiceOrbController _orb = NovaVoiceOrbController();
   StreamSubscription<Amplitude>? _ampSub;
-  Timer? _ttsOrbTimer;
   bool _streaming = false;
   bool _recording = false;
   bool _autoplayNova = true;
@@ -48,7 +47,6 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     _ampSub?.cancel();
-    _ttsOrbTimer?.cancel();
     _orb.dispose();
     _input.dispose();
     _scroll.dispose();
@@ -77,30 +75,20 @@ class _ChatPageState extends State<ChatPage> {
 
   double _dbToLevel(double db) => ((db + 55) / 55).clamp(0.0, 1.0);
 
-  void _pulseOrbForTts() {
-    _ttsOrbTimer?.cancel();
-    var t = 0.0;
-    _ttsOrbTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
-      t += 0.22;
-      final smooth = 0.35 + 0.45 * (0.5 + 0.5 * math.sin(t));
-      final peak = (smooth + 0.25).clamp(0.0, 1.0);
-      _orb.setSpeechEnvelope(smooth, peak);
-    });
-  }
-
   Future<void> _maybeAutoplay(String reply) async {
     if (!_autoplayNova || reply.trim().isEmpty) {
       return;
     }
     try {
-      _pulseOrbForTts();
       final audio = await widget.api.speakAudio(reply);
-      await _tts.playSpeakResult(audio);
+      await _tts.playSpeakResult(audio, orb: _orb);
     } catch (_) {
       /* TTS optional */
     } finally {
-      _ttsOrbTimer?.cancel();
-      _orb.applyPreset(NovaVoiceOrbPreset.speaking);
+      if (!_tts.isPlaying) {
+        _orb.setSpeechEnvelope(0, 0);
+        _orb.applyPreset(NovaVoiceOrbPreset.calm);
+      }
     }
   }
 
@@ -219,7 +207,8 @@ class _ChatPageState extends State<ChatPage> {
     await _ampSub?.cancel();
     _ampSub = null;
     setState(() => _recording = false);
-    _orb.applyPreset(NovaVoiceOrbPreset.speaking);
+    _orb.setSpeechEnvelope(0, 0);
+    _orb.applyPreset(NovaVoiceOrbPreset.calm);
     try {
       final path = await _recorder.stop();
       if (path == null) {
@@ -263,7 +252,7 @@ class _ChatPageState extends State<ChatPage> {
             children: [
               DecoratedBox(
                 decoration: BoxDecoration(shape: BoxShape.circle, boxShadow: NovaTheme.softGlow(NovaTheme.accent)),
-                child: NovaVoiceOrb(controller: _orb, size: 76, preset: NovaVoiceOrbPreset.speaking, baseColor: NovaTheme.accent),
+                child: NovaVoiceOrb(controller: _orb, size: 76, preset: NovaVoiceOrbPreset.calm, baseColor: NovaTheme.accent),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -352,38 +341,59 @@ class _ChatPageState extends State<ChatPage> {
           ),
         ),
         if (_streaming) const LinearProgressIndicator(minHeight: 2),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(10, 6, 10, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              IconButton.filledTonal(
-                tooltip: _recording ? "Stop & send voice note" : "Record voice note",
-                style: IconButton.styleFrom(backgroundColor: _recording ? Colors.red.withValues(alpha: 0.35) : null),
-                onPressed: _toggleVoiceNote,
-                icon: Icon(_recording ? Icons.stop_rounded : Icons.mic_rounded),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: TextField(
-                  controller: _input,
-                  minLines: 1,
-                  maxLines: 5,
-                  style: const TextStyle(fontSize: 15),
-                  decoration: const InputDecoration(
-                    hintText: "Message Nova…",
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        Material(
+          color: NovaTheme.surface.withValues(alpha: 0.92),
+          child: SafeArea(
+            top: false,
+            minimum: EdgeInsets.zero,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(10, 8, 10, 8 + MediaQuery.viewPaddingOf(context).bottom),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  IconButton.filledTonal(
+                    tooltip: _recording ? "Stop & send voice note" : "Record voice note",
+                    style: IconButton.styleFrom(backgroundColor: _recording ? Colors.red.withValues(alpha: 0.35) : null),
+                    onPressed: _toggleVoiceNote,
+                    icon: Icon(_recording ? Icons.stop_rounded : Icons.mic_rounded),
                   ),
-                  onSubmitted: (_) => _sendText(),
-                ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: _input,
+                      minLines: 1,
+                      maxLines: 5,
+                      style: const TextStyle(fontSize: 15),
+                      decoration: InputDecoration(
+                        hintText: "Message Nova…",
+                        isDense: true,
+                        filled: true,
+                        fillColor: NovaTheme.surface2.withValues(alpha: 0.55),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(22),
+                          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(22),
+                          borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.08)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(22),
+                          borderSide: BorderSide(color: cs.primary.withValues(alpha: 0.55)),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      ),
+                      onSubmitted: (_) => _sendText(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.filled(
+                    onPressed: _streaming ? null : _sendText,
+                    icon: const Icon(Icons.arrow_upward_rounded),
+                  ),
+                ],
               ),
-              const SizedBox(width: 6),
-              IconButton.filled(
-                onPressed: _streaming ? null : _sendText,
-                icon: const Icon(Icons.arrow_upward_rounded),
-              ),
-            ],
+            ),
           ),
         ),
       ],

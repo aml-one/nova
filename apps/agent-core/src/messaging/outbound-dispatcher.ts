@@ -6,7 +6,7 @@ import { WhatsAppChannelAdapter } from "../channels/whatsapp.js";
 import { Logger } from "../observability/logger.js";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import { VoiceService } from "../voice/voice-service.js";
-import { stripOrpheusSpeechCues } from "../voice/tts-text.js";
+import { stripNovaToneMarkup, stripOrpheusSpeechCues } from "../voice/tts-text.js";
 import { OutboundQueueService } from "./outbound-queue.js";
 
 export class OutboundDispatcher {
@@ -98,7 +98,7 @@ export class OutboundDispatcher {
     for (const job of jobs) {
       // Visible body for Signal/WhatsApp + the trace. TTS still gets the original `job.payload`
       // (with `<chuckle>`/`<sigh>` etc.) so the audio keeps the cues.
-      const visiblePayload = stripOrpheusSpeechCues(job.payload);
+      const visiblePayload = stripNovaToneMarkup(stripOrpheusSpeechCues(job.payload));
       try {
         // Anti-spam guard (same body to same number within ~2 s). Applies to BOTH transports so
         // a runaway whatsapp loop is also stopped, and so accidental duplicates from a retry are
