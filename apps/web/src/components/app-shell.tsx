@@ -331,6 +331,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               </span>
               {!navCollapsed ? <span>{settingsLink.label}</span> : null}
             </Link>
+            {/* Icon-height pad so the last nav row can scroll slightly above the bottom fade */}
+            <div className="h-8 shrink-0" aria-hidden />
           </div>
         </nav>
         </div>
