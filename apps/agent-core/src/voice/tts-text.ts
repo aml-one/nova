@@ -1,9 +1,10 @@
 /** Lex-au / Orpheus spoken cues (single source for normalization + emotion augment). */
-export const ORPHEUS_SPEECH_CUE_NAMES = "laugh|sigh|chuckle|cough|sniffle|groan|gasp";
+export const ORPHEUS_SPEECH_CUE_NAMES = "laugh|sigh|chuckles|chuckle|cough|sniffle|groan|gasp";
 
 const ORPHEUS_CUE_NAMES = ORPHEUS_SPEECH_CUE_NAMES;
 
-const ORPHEUS_CUE_NAME_LIST = ORPHEUS_SPEECH_CUE_NAMES.split("|");
+/** Longer cue names first so `chuckles` wins over the `chuckle` prefix. */
+const ORPHEUS_CUE_NAME_LIST = ORPHEUS_SPEECH_CUE_NAMES.split("|").sort((a, b) => b.length - a.length);
 
 /**
  * Ensures known cue opens are always closed with `>` before speech continues.
@@ -70,10 +71,16 @@ export function dedupeAdjacentOrpheusCueTags(text: string): string {
   return out;
 }
 
+/** Orpheus-FastAPI / Lex-au expect `<chuckle>`; models often emit `<chuckles>`. */
+export function canonicalizeChuckleCueForOrpheus(text: string): string {
+  return text.replace(/<\s*chuckles\b[^>]*>/gi, "<chuckle>");
+}
+
 export function normalizeOrpheusSpeechCues(text: string): string {
   let t = ensureOrpheusCueTagsClosed(text);
   t = dedupeAdjacentOrpheusCueTags(t);
-  return t.replace(/\s{2,}/g, " ").trim();
+  t = t.replace(/\s{2,}/g, " ").trim();
+  return canonicalizeChuckleCueForOrpheus(t);
 }
 
 /**

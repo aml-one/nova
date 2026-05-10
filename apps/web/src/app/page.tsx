@@ -34,6 +34,7 @@ import { shouldUseNovaIdentityBufferedChat } from "../lib/nova-identity-chat";
 import { useShellHeaderExtras } from "../components/shell-header-extras";
 import { apiFetch } from "../lib/api-fetch";
 import { stripMarkdownForTts, splitTextForTts } from "../lib/chat-tts-text";
+import { stripOrpheusCuesForChatDisplay } from "../lib/orpheus-chat-display";
 import { NovaThreeSpeakingOrb, type NovaThreeSpeakingOrbHandle } from "../components/NovaThreeSpeakingOrb";
 
 type MediaItem = {
@@ -2903,7 +2904,13 @@ export default function HomePage() {
                   ) : (
                     <>
                       <ChatMarkdown
-                        content={turn.text || (turn.role === "assistant" && loading ? "..." : "")}
+                        content={
+                          turn.role === "assistant"
+                            ? stripOrpheusCuesForChatDisplay(
+                                turn.text || (loading ? "..." : "")
+                              )
+                            : turn.text || ""
+                        }
                         toneSeed={
                           turn.role === "assistant"
                             ? {
@@ -3365,7 +3372,7 @@ export default function HomePage() {
       </div>
       {ttsPlaybackActive && ttsPlayingTurnId !== null && !kioskPresentationActive ? (
         <div
-          className="pointer-events-none absolute left-1/2 top-[40%] z-[35] -translate-x-1/2 -translate-y-1/2"
+          className="pointer-events-none absolute left-1/2 top-[40%] z-[55] -translate-x-1/2 -translate-y-1/2"
           aria-hidden
         >
           <div

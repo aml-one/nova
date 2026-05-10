@@ -54,6 +54,16 @@ describe("dedupeAdjacentOrpheusCueTags", () => {
   });
 });
 
+describe("chuckles synonym", () => {
+  it("normalizes chuckles to chuckle for Orpheus", () => {
+    expect(normalizeOrpheusSpeechCues("Hi <chuckles there")).toContain("<chuckle>");
+  });
+
+  it("strips plural chuckles tag from visible prose", () => {
+    expect(stripOrpheusSpeechCues("Hi <chuckles> there")).toBe("Hi there");
+  });
+});
+
 describe("stripOrpheusSpeechCues", () => {
   it("removes well-formed cues and tightens punctuation spacing", () => {
     expect(
