@@ -37,6 +37,7 @@ type AppSettingsPayload = {
     voiceDictationSilenceSec?: number;
     voiceContinuousConversation?: boolean;
     readAloudMessages?: boolean;
+    kioskVoiceRedirectEnabled?: boolean;
     showThinkingInChat?: boolean;
     textScale?: "normal" | "medium" | "big";
     chatStyle?: {

@@ -125,6 +125,7 @@ type SettingsState = {
     voiceDictationSilenceSec: number;
     voiceContinuousConversation: boolean;
     readAloudMessages: boolean;
+    kioskVoiceRedirectEnabled: boolean;
     showThinkingInChat: boolean;
     textScale: "normal" | "medium" | "big";
     chatStyle: {
@@ -296,6 +297,7 @@ const DEFAULT_SETTINGS: SettingsState = {
     voiceDictationSilenceSec: 2,
     voiceContinuousConversation: false,
     readAloudMessages: false,
+    kioskVoiceRedirectEnabled: false,
     showThinkingInChat: true,
     textScale: "normal",
     chatStyle: {
@@ -4041,6 +4043,27 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
+            <div className="rounded-ui border border-border bg-surface/80 p-3 space-y-2">
+              <h3 className="text-sm font-semibold">Kiosk display</h3>
+              <p className="text-xs text-muted">
+                Open <code className="text-[11px]">/kiosk</code> on a wall tablet or Jetson browser (logged in as the same
+                user). When enabled and the kiosk is pinging (about every 8s), the assistant reply streams there as text
+                while you chat on the main window; read-aloud, the orb, and TTS run only on the kiosk. If the kiosk goes
+                offline, read-aloud and the orb fall back to the main chat window.
+              </p>
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={settings.web.kioskVoiceRedirectEnabled}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      web: { ...p.web, kioskVoiceRedirectEnabled: e.target.checked }
+                    }))
+                  }
+                />
+                Redirect read-aloud, orb, and streaming reply to Kiosk when it is online
+              </label>
+            </div>
             <VoiceWakeWordPanel />
             <VoiceWebRtcGatewayPanel />
             <div className="rounded-ui border border-border bg-surface/80 p-3 space-y-3">
@@ -5289,6 +5312,7 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
       voiceContinuousConversation:
         value?.web?.voiceContinuousConversation ?? DEFAULT_SETTINGS.web.voiceContinuousConversation,
       readAloudMessages: value?.web?.readAloudMessages === true,
+      kioskVoiceRedirectEnabled: value?.web?.kioskVoiceRedirectEnabled === true,
       showThinkingInChat: value?.web?.showThinkingInChat !== false,
       textScale:
         value?.web?.textScale === "medium" || value?.web?.textScale === "big" || value?.web?.textScale === "normal"

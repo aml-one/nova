@@ -51,6 +51,7 @@ const DEFAULT_SETTINGS: AppSettings = {
     voiceDictationSilenceSec: 2,
     voiceContinuousConversation: false,
     readAloudMessages: false,
+    kioskVoiceRedirectEnabled: false,
     showThinkingInChat: true,
     textScale: "normal"
   },
@@ -308,6 +309,10 @@ export class SettingsService {
           typeof update.web?.readAloudMessages === "boolean"
             ? update.web.readAloudMessages
             : current.web.readAloudMessages,
+        kioskVoiceRedirectEnabled:
+          typeof update.web?.kioskVoiceRedirectEnabled === "boolean"
+            ? update.web.kioskVoiceRedirectEnabled
+            : current.web.kioskVoiceRedirectEnabled,
         showThinkingInChat:
           typeof update.web?.showThinkingInChat === "boolean"
             ? update.web.showThinkingInChat
@@ -663,6 +668,7 @@ export class SettingsService {
         ),
         voiceContinuousConversation: settings.web?.voiceContinuousConversation === true,
         readAloudMessages: settings.web?.readAloudMessages === true,
+        kioskVoiceRedirectEnabled: settings.web?.kioskVoiceRedirectEnabled === true,
         showThinkingInChat: settings.web?.showThinkingInChat !== false,
         textScale:
           settings.web?.textScale === "medium" || settings.web?.textScale === "big" || settings.web?.textScale === "normal"

@@ -17,3 +17,8 @@ api_keys/
 !.env.example
 apps/mobile_flutter/android/app/google-services.json
 apps/mobile_flutter/ios/Runner/GoogleService-Info.plist
+
+# .NET Web shell (local builds)
+apps/nova-web-shell/bin/
+apps/nova-web-shell/obj/
+apps/nova-web-shell/publish/

@@ -55,6 +55,11 @@ export type AppSettings = {
     voiceContinuousConversation: boolean;
     /** Chat read-aloud (TTS) default — persisted so it survives browser data loss. */
     readAloudMessages: boolean;
+    /**
+     * When true, read-aloud and the speaking orb are delegated to an open `/kiosk` session (same account)
+     * when that session is sending liveness pings; otherwise playback stays on the main chat window.
+     */
+    kioskVoiceRedirectEnabled: boolean;
     /** Show model thinking / reasoning blocks in the chat thread. */
     showThinkingInChat: boolean;
     /** Global UI text scale (mirrors `data-text-scale` on `<html>`). */
@@ -326,6 +331,7 @@ export class SettingsRepository {
           })(),
           voiceContinuousConversation: parsed.web?.voiceContinuousConversation === true,
           readAloudMessages: parsed.web?.readAloudMessages === true,
+          kioskVoiceRedirectEnabled: parsed.web?.kioskVoiceRedirectEnabled === true,
           showThinkingInChat: parsed.web?.showThinkingInChat !== false,
           textScale:
             parsed.web?.textScale === "medium" || parsed.web?.textScale === "big" || parsed.web?.textScale === "normal"

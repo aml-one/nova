@@ -272,7 +272,16 @@ export function AppShell({ children }: { children: ReactNode }) {
             {navCollapsed ? <FaChevronRight className="h-3 w-3" /> : <FaChevronLeft className="h-3 w-3" />}
           </button>
         </div>
-        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto pb-2">
+        <div className="relative min-h-0 flex-1 overflow-hidden">
+          <div
+            className="pointer-events-none absolute inset-x-0 top-0 z-10 h-5 bg-gradient-to-b from-surface/95 via-surface/50 to-transparent"
+            aria-hidden
+          />
+          <div
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-surface/95 via-surface/50 to-transparent"
+            aria-hidden
+          />
+          <nav className="h-full max-h-full space-y-1 overflow-y-auto overflow-x-hidden pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           {links.map((link, index) => {
             const badgeCount = navBadges[link.href] ?? 0;
             return (
@@ -324,6 +333,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Link>
           </div>
         </nav>
+        </div>
         <div className={cn("mt-auto", navCollapsed ? "" : "")}>
           <div className={cn("mb-1 flex items-center gap-1", navCollapsed ? "justify-center" : "justify-end")}>
             <TextScaleToggle compact={navCollapsed} />

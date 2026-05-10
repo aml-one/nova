@@ -79,6 +79,7 @@ import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 import { expandUserPath, invalidateSentiCoreOrchestrationCache } from "../emotion/senti-core-loader.js";
 import { buildMemoryKnowledgeGraph } from "../knowledge/memory-graph.js";
 import { ReminderTimerDaemon } from "../reminders/reminder-timer-daemon.js";
+import { addKioskSseClient, broadcastKioskEvent, getKioskStatus, recordKioskPing } from "../kiosk/kiosk-hub.js";
 const execAsync = promisify(execCallback);
 
 type HttpServerOptions = {
@@ -1674,6 +1675,63 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         }
         const events = options.improvement.listImprovementProposalEvents(id, limit);
         return sendJson(response, 200, { events, correlationId });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/kiosk/ping") {
+        const uid = sessionUser?.id ?? (!loginEnabled ? "__guest__" : "");
+        if (!uid) {
+          return sendJson(response, 401, { error: "unauthorized", correlationId });
+        }
+        recordKioskPing(uid);
+        return sendJson(response, 200, { ok: true, correlationId });
+      }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/kiosk/status") {
+        const uid = sessionUser?.id ?? (!loginEnabled ? "__guest__" : "");
+        if (!uid) {
+          return sendJson(response, 401, { error: "unauthorized", correlationId });
+        }
+        const st = getKioskStatus(uid);
+        return sendJson(response, 200, {
+          alive: st.alive,
+          lastPingAt: st.lastPingAt,
+          correlationId
+        });
+      }
+      if (request.method === "POST" && parsedUrl.pathname === "/v1/kiosk/publish") {
+        const uid = sessionUser?.id ?? (!loginEnabled ? "__guest__" : "");
+        if (!uid) {
+          return sendJson(response, 401, { error: "unauthorized", correlationId });
+        }
+        const payload = await readJson(request);
+        const delivered = broadcastKioskEvent(uid, payload);
+        return sendJson(response, 200, { ok: true, delivered, correlationId });
+      }
+      if (request.method === "GET" && parsedUrl.pathname === "/v1/kiosk/events") {
+        const uid = sessionUser?.id ?? (!loginEnabled ? "__guest__" : "");
+        if (!uid) {
+          return sendJson(response, 401, { error: "unauthorized", correlationId });
+        }
+        response.statusCode = 200;
+        response.setHeader("content-type", "text/event-stream; charset=utf-8");
+        response.setHeader("cache-control", "no-cache, no-transform");
+        response.setHeader("connection", "keep-alive");
+        response.setHeader("x-correlation-id", correlationId);
+        response.write(": nova kiosk stream\n\n");
+        const detach = addKioskSseClient(uid, response);
+        const keepAlive = setInterval(() => {
+          try {
+            response.write(`: ping ${Date.now()}\n\n`);
+          } catch {
+            clearInterval(keepAlive);
+            detach();
+          }
+        }, 15000);
+        const onClose = () => {
+          clearInterval(keepAlive);
+          detach();
+        };
+        request.on("close", onClose);
+        request.on("aborted", onClose);
+        return;
       }
       if (request.method === "POST" && parsedUrl.pathname === "/v1/chat") {
         const payload = (await readJson(request)) as {

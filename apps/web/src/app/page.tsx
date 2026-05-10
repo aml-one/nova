@@ -33,6 +33,7 @@ import { loadAudioElementThenPlay } from "../lib/audio-play";
 import { shouldUseNovaIdentityBufferedChat } from "../lib/nova-identity-chat";
 import { useShellHeaderExtras } from "../components/shell-header-extras";
 import { apiFetch } from "../lib/api-fetch";
+import { stripMarkdownForTts, splitTextForTts } from "../lib/chat-tts-text";
 import { NovaThreeSpeakingOrb, type NovaThreeSpeakingOrbHandle } from "../components/NovaThreeSpeakingOrb";
 
 type MediaItem = {
@@ -88,57 +89,8 @@ type PendingUpload = {
   error?: string;
 };
 
-function stripMarkdownForTts(raw: string): string {
-  let visible = raw;
-  for (const pattern of [
-    /<thinking>([\s\S]*?)<\/thinking>/gi,
-    /<reasoning>([\s\S]*?)<\/reasoning>/gi,
-    /<think>([\s\S]*?)<\/redacted_thinking>/gi
-  ]) {
-    visible = visible.replace(pattern, () => "");
-  }
-  visible = visible.trim();
-  visible = visible.replace(/```[\s\S]*?```/g, " ");
-  /** Keep inner speech; strip only Nova chat tone wrappers (was deleting wrapped sentences entirely). */
-  visible = visible.replace(/\[nova:[^\]]+\]([\s\S]*?)\[\/nova\]/gi, "$1");
-  visible = visible.replace(/\[\/nova\]/gi, " ");
-  visible = visible.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
-  visible = visible.replace(/\r\n?/g, "\n");
-  visible = visible.replace(/[\uFEFF\u200B-\u200D]/g, "");
-  visible = visible.replace(/[\u2013\u2014]/g, ", ");
-  visible = visible.replace(/[#*_>`]+/g, " ");
-
-  const lines = visible
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-  if (lines.length > 1) {
-    visible = lines
-      .map((line) => {
-        const isBullet = /^[-*•]\s+/.test(line);
-        const isOrdered = /^\d+[\.\)]\s+/.test(line);
-        const isLettered = /^[A-Za-z][\)]\s+/.test(line);
-        const isListLike = isBullet || isOrdered || isLettered;
-        let cleanedLine = line;
-        if (isBullet) {
-          cleanedLine = line.replace(/^[-*•]\s+/, "");
-        }
-        if (isListLike && !/[.!?…:;]$/.test(cleanedLine)) {
-          cleanedLine = `${cleanedLine}.`;
-        }
-        return cleanedLine;
-      })
-      .join(" ");
-  }
-
-  visible = visible.replace(/\s+/g, " ").trim();
-  return visible.slice(0, 8000);
-}
-
 /** Max distinct synthesized clips kept in memory per chat session (replay without calling speak-audio again). */
 const MAX_SESSION_TTS_AUDIO_CACHE = 10;
-const CHAT_TTS_CHUNK_TARGET_CHARS = 190;
-const CHAT_TTS_CHUNK_MIN_CHARS = 120;
 
 /** Skip server transcribe for accidental empty/stop blobs (avoids STT misconfig spam). */
 const NOVA_CHAT_STT_MIN_AUDIO_BYTES = 900;
@@ -252,63 +204,6 @@ function looksLikeNoiseHallucination(text: string): boolean {
   const unique = new Set(words).size;
   const uniqueRatio = unique / words.length;
   return uniqueRatio < 0.38;
-}
-
-function splitTextForTts(raw: string): string[] {
-  const text = raw.trim();
-  if (!text) return [];
-  if (text.length <= CHAT_TTS_CHUNK_TARGET_CHARS + 24) return [text];
-
-  const sentenceLike = text.match(/[^.!?]+[.!?]+(?:["')\]]+)?|[^.!?]+$/g) ?? [text];
-  const parts: string[] = [];
-  let buffer = "";
-
-  const pushBuffer = (): void => {
-    const v = buffer.trim();
-    if (v) parts.push(v);
-    buffer = "";
-  };
-
-  for (const rawPiece of sentenceLike) {
-    const piece = rawPiece.trim();
-    if (!piece) continue;
-    if (!buffer) {
-      buffer = piece;
-      continue;
-    }
-    const joined = `${buffer} ${piece}`;
-    if (joined.length <= CHAT_TTS_CHUNK_TARGET_CHARS) {
-      buffer = joined;
-      continue;
-    }
-    if (buffer.length >= CHAT_TTS_CHUNK_MIN_CHARS) {
-      pushBuffer();
-      buffer = piece;
-    } else {
-      buffer = joined;
-      if (buffer.length >= CHAT_TTS_CHUNK_TARGET_CHARS + 80) {
-        pushBuffer();
-      }
-    }
-  }
-  pushBuffer();
-
-  if (parts.length <= 1) return [text];
-
-  const merged: string[] = [];
-  for (const part of parts) {
-    if (!merged.length) {
-      merged.push(part);
-      continue;
-    }
-    const prev = merged[merged.length - 1]!;
-    if (prev.length < CHAT_TTS_CHUNK_MIN_CHARS) {
-      merged[merged.length - 1] = `${prev} ${part}`;
-    } else {
-      merged.push(part);
-    }
-  }
-  return merged;
 }
 
 function getMicCapabilityError(): string | null {
@@ -630,6 +525,12 @@ export default function HomePage() {
   const [voiceDictationSilenceSec, setVoiceDictationSilenceSec] = useState(2);
   const [readAloudMessages, setReadAloudMessages] = useState(false);
   const readAloudRef = useRef(readAloudMessages);
+  const [kioskVoiceRedirectEnabled, setKioskVoiceRedirectEnabled] = useState(false);
+  const kioskVoiceRedirectRef = useRef(false);
+  const kioskClientOnlineRef = useRef(false);
+  /** Drives UI (orb visibility) when the kiosk is reachable; refs stay hot for handlers inside `onSubmit`. */
+  const [kioskClientOnline, setKioskClientOnline] = useState(false);
+  const kioskStreamDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ttsPlayingTurnId, setTtsPlayingTurnId] = useState<string | null>(null);
   const [ttsGeneratingTurnId, setTtsGeneratingTurnId] = useState<string | null>(null);
   /** True only while the chat audio element is in `playing` (not during fetch/generate). */
@@ -742,6 +643,8 @@ export default function HomePage() {
     ? chatStyle.assistantActionIconColor
     : chatStyle.assistantActionIconColorLight;
   const statsTextColorForTheme = isDarkTheme ? chatStyle.statsTextColor : chatStyle.statsTextColorLight;
+
+  const kioskPresentationActive = kioskVoiceRedirectEnabled && kioskClientOnline;
 
   const uploadedMedia = useMemo(
     () =>
@@ -876,6 +779,7 @@ export default function HomePage() {
               voiceDictationSilenceSec?: number;
               voiceContinuousConversation?: boolean;
               readAloudMessages?: boolean;
+              kioskVoiceRedirectEnabled?: boolean;
               showThinkingInChat?: boolean;
               textScale?: "normal" | "medium" | "big";
               chatStyle?: {
@@ -958,6 +862,7 @@ export default function HomePage() {
             showNames: data.settings?.web?.chatStyle?.showNames ?? prev.showNames
           }));
           setReadAloudMessages(data.settings?.web?.readAloudMessages === true);
+          setKioskVoiceRedirectEnabled(data.settings?.web?.kioskVoiceRedirectEnabled === true);
           setShowThinkingInChat(data.settings?.web?.showThinkingInChat !== false);
           {
             const ts = data.settings?.web?.textScale;
@@ -1118,6 +1023,41 @@ export default function HomePage() {
   useEffect(() => {
     readAloudRef.current = readAloudMessages;
   }, [readAloudMessages]);
+
+  useEffect(() => {
+    kioskVoiceRedirectRef.current = kioskVoiceRedirectEnabled;
+  }, [kioskVoiceRedirectEnabled]);
+
+  useEffect(() => {
+    if (!kioskVoiceRedirectEnabled) {
+      kioskClientOnlineRef.current = false;
+      setKioskClientOnline(false);
+      return;
+    }
+    let cancelled = false;
+    const poll = async (): Promise<void> => {
+      try {
+        const r = await apiFetch("/api/kiosk/status");
+        const d = (await r.json().catch(() => ({}))) as { alive?: boolean };
+        if (!cancelled) {
+          const online = r.ok && d.alive === true;
+          kioskClientOnlineRef.current = online;
+          setKioskClientOnline(online);
+        }
+      } catch {
+        if (!cancelled) {
+          kioskClientOnlineRef.current = false;
+          setKioskClientOnline(false);
+        }
+      }
+    };
+    void poll();
+    const id = setInterval(() => void poll(), 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [kioskVoiceRedirectEnabled]);
 
   useEffect(() => {
     const pull = async (): Promise<void> => {
@@ -1819,6 +1759,56 @@ export default function HomePage() {
     [stopChatTtsPlayback, attachTtsVoiceOrbDriver]
   );
 
+  const playChatTtsOrKiosk = useCallback(
+    async (turnId: string, visible: string): Promise<void> => {
+      if (kioskVoiceRedirectRef.current && kioskClientOnlineRef.current) {
+        const cleaned = stripMarkdownForTts(visible);
+        const response = await apiFetch("/api/kiosk/publish", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            type: "assistant_output",
+            turnId,
+            markdown: visible,
+            ttsText: cleaned.trim() ? cleaned : ""
+          })
+        });
+        if (response.ok) {
+          const data = (await response.json().catch(() => ({}))) as { delivered?: number };
+          if ((data.delivered ?? 0) > 0) {
+            return;
+          }
+        }
+      }
+      await playChatTts(turnId, visible);
+    },
+    [playChatTts]
+  );
+
+  const clearKioskAssistantMarkdownSchedule = useCallback((): void => {
+    if (kioskStreamDebounceRef.current) {
+      clearTimeout(kioskStreamDebounceRef.current);
+      kioskStreamDebounceRef.current = null;
+    }
+  }, []);
+
+  const scheduleKioskAssistantMarkdown = useCallback((markdown: string): void => {
+    if (!kioskVoiceRedirectRef.current || !kioskClientOnlineRef.current) {
+      return;
+    }
+    if (kioskStreamDebounceRef.current) {
+      clearTimeout(kioskStreamDebounceRef.current);
+    }
+    kioskStreamDebounceRef.current = setTimeout(() => {
+      kioskStreamDebounceRef.current = null;
+      void apiFetch("/api/kiosk/publish", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "assistant_delta", markdown })
+      });
+    }, 110);
+  }, []);
+
   const downloadChatTtsForTurn = useCallback(async (turnId: string, rawText: string): Promise<void> => {
     const cleaned = stripMarkdownForTts(rawText);
     if (!cleaned.trim()) return;
@@ -1876,6 +1866,7 @@ export default function HomePage() {
   }, []);
 
   function stopGeneration(): void {
+    clearKioskAssistantMarkdownSchedule();
     streamAbortRef.current?.abort();
     stopChatTtsPlayback();
   }
@@ -2236,6 +2227,7 @@ export default function HomePage() {
     stopMicTranscription();
     const trimmed = message.trim();
     if (!trimmed || loading) return;
+    clearKioskAssistantMarkdownSchedule();
     messageDraftHasVoiceInputRef.current = false;
     const streamAbort = new AbortController();
     streamAbortRef.current = streamAbort;
@@ -2320,13 +2312,20 @@ export default function HomePage() {
         setTurns((prev) => prev.map((turn) => (turn.id === userTurn.id ? { ...turn, isPending: false } : turn)));
         setUploads([]);
         dispatchNovaEmotionRefresh();
+        if (kioskVoiceRedirectRef.current && kioskClientOnlineRef.current && visible.trim().length > 0) {
+          void apiFetch("/api/kiosk/publish", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ type: "assistant_delta", markdown: visible })
+          });
+        }
         if (
           readAloudRef.current &&
           visible.trim().length > 0 &&
           !visible.includes("_Stopped._") &&
           !/\/Stopped\./i.test(visible)
         ) {
-          void playChatTts(assistantId, visible);
+          void playChatTtsOrKiosk(assistantId, visible);
         }
       } else {
         const startedAt = Date.now();
@@ -2382,6 +2381,7 @@ export default function HomePage() {
                 : turn
             )
           );
+          scheduleKioskAssistantMarkdown(visible);
         };
 
         const streamResult = await readSseStream(
@@ -2442,13 +2442,21 @@ export default function HomePage() {
         setTurns((prev) => prev.map((turn) => (turn.id === userTurn.id ? { ...turn, isPending: false } : turn)));
         setUploads([]);
         dispatchNovaEmotionRefresh();
+        clearKioskAssistantMarkdownSchedule();
+        if (kioskVoiceRedirectRef.current && kioskClientOnlineRef.current && visible.trim().length > 0) {
+          void apiFetch("/api/kiosk/publish", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ type: "assistant_delta", markdown: visible })
+          });
+        }
         if (
           readAloudRef.current &&
           visible.trim().length > 0 &&
           !visible.includes("_Stopped._") &&
           !/\/Stopped\./i.test(visible)
         ) {
-          void playChatTts(assistantId, visible);
+          void playChatTtsOrKiosk(assistantId, visible);
         }
       }
     } catch (error) {
@@ -2490,6 +2498,7 @@ export default function HomePage() {
         );
       }
     } finally {
+      clearKioskAssistantMarkdownSchedule();
       setStreamPhase("thinking");
       setLoading(false);
       streamAbortRef.current = null;
@@ -2999,7 +3008,7 @@ export default function HomePage() {
               ) : null}
               {turn.role === "assistant" ? (
                 <div className="mt-2 space-y-1.5">
-                  <div className="-mx-0.5 overflow-x-auto overflow-y-visible pb-0.5 [scrollbar-width:thin]">
+                  <div className="-mx-0.5 overflow-x-auto overflow-y-visible pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                     <div className="flex min-w-min flex-nowrap items-center gap-2 px-0.5">
                       <button
                         type="button"
@@ -3037,7 +3046,7 @@ export default function HomePage() {
                           if (ttsPlayingTurnId === turn.id || ttsGeneratingTurnId === turn.id) {
                             stopChatTtsPlayback();
                           } else {
-                            void playChatTts(turn.id, turn.text);
+                            void playChatTtsOrKiosk(turn.id, turn.text);
                           }
                         }}
                       >
@@ -3342,7 +3351,7 @@ export default function HomePage() {
           ) : null}
         </form>
       </div>
-      {ttsPlaybackActive && ttsPlayingTurnId !== null ? (
+      {ttsPlaybackActive && ttsPlayingTurnId !== null && !kioskPresentationActive ? (
         <div
           className="pointer-events-none absolute left-1/2 top-[40%] z-[35] -translate-x-1/2 -translate-y-1/2"
           aria-hidden
