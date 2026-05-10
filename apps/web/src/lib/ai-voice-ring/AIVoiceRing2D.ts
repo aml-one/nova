@@ -141,8 +141,8 @@ export class AIVoiceRing2D {
     const accent = parseHex(hex);
     const warmAnchor = parseHex("#ff2e12");
     const coolAnchor = parseHex("#00dcff");
-    const warm = lerpRgb(warmAnchor, accent, 0.22);
-    const cool = lerpRgb(coolAnchor, accent, 0.18);
+    const warm = lerpRgb(warmAnchor, accent, 0.12);
+    const cool = lerpRgb(coolAnchor, accent, 0.08);
     this.moodTargetA = warm;
     this.moodTargetB = cool;
     this.moodA = { ...warm };
@@ -172,8 +172,9 @@ export class AIVoiceRing2D {
   setMoodPalette(colorA: string, colorB: string, _shellRgb: string, _glowHex: string): void {
     void _shellRgb;
     void _glowHex;
-    this.moodTargetA = parseHex(colorA);
-    this.moodTargetB = parseHex(colorB);
+    // Keep the reference look vivid. Emotion colors can be pastel, so they only nudge the anchors.
+    this.moodTargetA = lerpRgb(parseHex("#ff2e12"), parseHex(colorA), 0.14);
+    this.moodTargetB = lerpRgb(parseHex("#00dcff"), parseHex(colorB), 0.1);
   }
 
   setRotationSpeed(speed: number): void {
@@ -231,14 +232,14 @@ export class AIVoiceRing2D {
     return clamp01(this.dampedSpeak * 0.55 + this.dampedSpeakPeak * 0.42);
   }
 
-  /** Single radial undulation on the base circle (−1…1), smooth “plasma” silhouette. */
+  /** Radial corona modulation around a fixed base circle (−1…1), smooth “plasma” silhouette. */
   private sampleRadialWave(theta: number): number {
     const t = this.timeSec;
     const k = this.noiseSeed;
-    const s0 = Math.sin(theta * 3 + t * 0.95 + k);
-    const s1 = Math.sin(theta * 6 - t * 0.58 + k * 1.2);
-    const s2 = Math.sin(theta * 9 + t * 1.05 + k * 0.35);
-    return s0 * 0.52 + s1 * 0.32 + s2 * 0.16;
+    const s0 = Math.sin(theta * 4 + t * 0.95 + k);
+    const s1 = Math.sin(theta * 9 - t * 0.62 + k * 1.2);
+    const s2 = Math.sin(theta * 14 + t * 1.05 + k * 0.35);
+    return s0 * 0.5 + s1 * 0.34 + s2 * 0.16;
   }
 
   /** Conic sweep: cyan → white → orange around the ring (reference poster). */
@@ -247,12 +248,12 @@ export class AIVoiceRing2D {
     const B = this.moodB;
     const A = this.moodA;
     g.addColorStop(0, rgbStr(B.r, B.g, B.b, 1));
-    g.addColorStop(0.14, rgbStr(lerp(B.r, 255, 0.45), lerp(B.g, 255, 0.45), lerp(B.b, 255, 0.38), 1));
-    g.addColorStop(0.28, rgbStr(lerp(B.r, 255, 0.78), lerp(B.g, 255, 0.78), lerp(B.b, 255, 0.72), 1));
-    g.addColorStop(0.42, rgbStr(255, 255, 255, 1));
-    g.addColorStop(0.52, rgbStr(255, 252, 248, 1));
-    g.addColorStop(0.64, rgbStr(lerp(255, A.r, 0.22), lerp(255, A.g, 0.18), lerp(255, A.b, 0.12), 1));
-    g.addColorStop(0.8, rgbStr(A.r, A.g, A.b, 1));
+    g.addColorStop(0.16, rgbStr(0, 120, 255, 1));
+    g.addColorStop(0.28, rgbStr(0, 235, 255, 1));
+    g.addColorStop(0.4, rgbStr(255, 255, 255, 1));
+    g.addColorStop(0.56, rgbStr(255, 255, 245, 1));
+    g.addColorStop(0.7, rgbStr(255, 72, 24, 1));
+    g.addColorStop(0.84, rgbStr(A.r, A.g, A.b, 1));
     g.addColorStop(1, rgbStr(B.r, B.g, B.b, 1));
     return g;
   }
@@ -294,26 +295,30 @@ export class AIVoiceRing2D {
     const cy = h * 0.5;
     const half = Math.min(w, h) * 0.5;
     const rHole = half * this.innerHoleNorm;
-    const rMargin = half * 0.006;
-    // Mean orbit (“base circle”) sits outside the hard hole; waves ride on this radius only.
-    const rBase = half * Math.min(0.66, this.innerHoleNorm + 0.2);
+    const rMargin = half * 0.008;
+    // The sample reads as a large, fixed circle. Waves ride on this radius; they do not define the circle.
+    const rBase = half * 0.79;
 
     const e = this.energy();
     const idleBreath = this.presentationIdleCalm ? 0.14 + Math.sin(this.timeSec * 0.82) * 0.1 : 0;
     const waveBoost = this.presentationIdleCalm ? idleBreath : e;
 
     const maxInward = Math.max(0, rBase - rHole - rMargin);
-    const ampDesired = half * (0.012 + waveBoost * 0.038);
-    const amp = Math.min(ampDesired, maxInward * 0.92);
+    const ampDesired = half * (0.006 + waveBoost * 0.026);
+    const amp = Math.min(ampDesired, maxInward * 0.55);
 
     const steps = 400;
-    const pts: { x: number; y: number }[] = [];
+    const coronaPts: { x: number; y: number }[] = [];
+    const innerPts: { x: number; y: number }[] = [];
     for (let i = 0; i <= steps; i++) {
       const theta = (i / steps) * Math.PI * 2;
       const wv = this.sampleRadialWave(theta);
-      let r = rBase + wv * amp;
-      r = Math.max(rHole + rMargin, r);
-      pts.push({ x: cx + Math.cos(theta) * r, y: cy + Math.sin(theta) * r });
+      const outward = Math.max(0, wv);
+      const inward = Math.max(0, -wv);
+      const ro = rBase + outward * amp;
+      const ri = Math.max(rHole + rMargin, rBase - inward * amp * 0.42);
+      coronaPts.push({ x: cx + Math.cos(theta) * ro, y: cy + Math.sin(theta) * ro });
+      innerPts.push({ x: cx + Math.cos(theta) * ri, y: cy + Math.sin(theta) * ri });
     }
 
     const ctx = this.ctx;
@@ -323,55 +328,79 @@ export class AIVoiceRing2D {
 
     const conic = this.createConic(cx, cy);
 
-    // Faint perfect base circle (mean radius) — “sun” reference orbit, not a filled disk.
+    // Perfect base circle: this is the stable "sun" orbit. The waves sit on top of it.
     ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.055)";
-    ctx.lineWidth = 0.9;
+    ctx.strokeStyle = conic;
+    ctx.globalAlpha = 0.26;
+    ctx.lineWidth = 7.2;
+    ctx.shadowBlur = 30 + waveBoost * 18;
+    ctx.shadowColor = "rgba(130, 210, 255, 0.5)";
     ctx.beginPath();
     ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
     ctx.stroke();
     ctx.restore();
 
-    // Outer corona: wide, soft, light-tinted shadow only (no dark purple fill).
     ctx.save();
     ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.42;
-    ctx.lineWidth = 5.2;
-    ctx.shadowBlur = 32 + waveBoost * 26;
-    ctx.shadowColor = "rgba(200, 235, 255, 0.55)";
+    ctx.globalAlpha = 0.95;
+    ctx.lineWidth = 2.2;
+    ctx.shadowBlur = 9 + waveBoost * 8;
+    ctx.shadowColor = "rgba(255,255,255,0.75)";
     ctx.beginPath();
-    this.buildWavyPath(pts);
+    ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,0.82)";
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = 0.75;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rBase, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+
+    // Thin outer corona waves. They are glow strokes, not a second thick body.
+    ctx.save();
+    ctx.strokeStyle = conic;
+    ctx.globalAlpha = 0.48 + waveBoost * 0.22;
+    ctx.lineWidth = 2.8;
+    ctx.shadowBlur = 22 + waveBoost * 16;
+    ctx.shadowColor = "rgba(210, 235, 255, 0.58)";
+    ctx.beginPath();
+    this.buildWavyPath(coronaPts);
     ctx.stroke();
     ctx.restore();
 
     ctx.save();
     ctx.strokeStyle = conic;
-    ctx.globalAlpha = 0.72;
-    ctx.lineWidth = 2.6;
-    ctx.shadowBlur = 14 + waveBoost * 16;
-    ctx.shadowColor = "rgba(255, 250, 255, 0.5)";
+    ctx.globalAlpha = 0.88;
+    ctx.lineWidth = 1.05;
+    ctx.shadowBlur = 6 + waveBoost * 7;
+    ctx.shadowColor = "rgba(255,255,255,0.7)";
     ctx.beginPath();
-    this.buildWavyPath(pts);
+    this.buildWavyPath(coronaPts);
     ctx.stroke();
     ctx.restore();
 
+    // A very subtle inner shimmer so the wave feels attached to the circle without becoming thick.
     ctx.save();
     ctx.strokeStyle = conic;
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = 1.15;
-    ctx.shadowBlur = 5 + waveBoost * 8;
-    ctx.shadowColor = "rgba(255,255,255,0.65)";
+    ctx.globalAlpha = 0.22 + waveBoost * 0.18;
+    ctx.lineWidth = 0.8;
+    ctx.shadowBlur = 3;
+    ctx.shadowColor = "rgba(255,255,255,0.35)";
     ctx.beginPath();
-    this.buildWavyPath(pts);
+    this.buildWavyPath(innerPts);
     ctx.stroke();
     ctx.restore();
 
     ctx.save();
     ctx.strokeStyle = rgbStr(255, 255, 255, 0.55 + waveBoost * 0.28);
-    ctx.lineWidth = 0.65;
+    ctx.lineWidth = 0.55;
     ctx.shadowBlur = 0;
     ctx.beginPath();
-    this.buildWavyPath(pts);
+    this.buildWavyPath(coronaPts);
     ctx.stroke();
     ctx.restore();
   };
