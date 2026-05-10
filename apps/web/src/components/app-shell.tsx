@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { IconType } from "react-icons";
 import {
   FaCamera,
@@ -251,6 +251,38 @@ export function AppShell({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const navScrollRef = useRef<HTMLElement | null>(null);
+  const [navShowTopFade, setNavShowTopFade] = useState(false);
+  const [navShowBottomFade, setNavShowBottomFade] = useState(false);
+
+  const syncNavScrollFades = useCallback(() => {
+    const el = navScrollRef.current;
+    if (!el) {
+      setNavShowTopFade(false);
+      setNavShowBottomFade(false);
+      return;
+    }
+    const { scrollTop, scrollHeight, clientHeight } = el;
+    const maxScroll = Math.max(0, scrollHeight - clientHeight);
+    const epsilon = 2;
+    setNavShowTopFade(scrollTop > epsilon);
+    setNavShowBottomFade(maxScroll > epsilon && scrollTop < maxScroll - epsilon);
+  }, []);
+
+  useLayoutEffect(() => {
+    syncNavScrollFades();
+  }, [pathname, navCollapsed, navBadges, syncNavScrollFades]);
+
+  useEffect(() => {
+    const el = navScrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    const ro = new ResizeObserver(() => syncNavScrollFades());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [syncNavScrollFades]);
+
   return (
     <div className="flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-gradient-to-br from-surface via-surface to-surface2">
       <aside
@@ -274,14 +306,24 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
         <div className="relative min-h-0 flex-1 overflow-hidden">
           <div
-            className="pointer-events-none absolute inset-x-0 top-0 z-10 h-5 bg-gradient-to-b from-surface/95 via-surface/50 to-transparent"
+            className={cn(
+              "pointer-events-none absolute inset-x-0 top-0 z-10 h-5 bg-gradient-to-b from-surface/95 via-surface/50 to-transparent transition-opacity duration-150",
+              navShowTopFade ? "opacity-100" : "opacity-0"
+            )}
             aria-hidden
           />
           <div
-            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-surface/95 via-surface/50 to-transparent"
+            className={cn(
+              "pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-t from-surface/95 via-surface/50 to-transparent transition-opacity duration-150",
+              navShowBottomFade ? "opacity-100" : "opacity-0"
+            )}
             aria-hidden
           />
-          <nav className="h-full max-h-full space-y-1 overflow-y-auto overflow-x-hidden pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <nav
+            ref={navScrollRef}
+            onScroll={syncNavScrollFades}
+            className="h-full max-h-full space-y-1 overflow-y-auto overflow-x-hidden pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+          >
           {links.map((link, index) => {
             const badgeCount = navBadges[link.href] ?? 0;
             return (
