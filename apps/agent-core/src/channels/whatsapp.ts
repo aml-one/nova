@@ -1,7 +1,11 @@
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import type { ChannelMessage } from "./channel-router.js";
 import { effectiveWhatsAppPhoneNumberId, effectiveWhatsAppToken } from "./channel-runtime-config.js";
-import { sendWhatsAppWebMessage, sendWhatsAppWebVoice } from "./whatsapp-web-bridge.js";
+import {
+  sendWhatsAppWebMessage,
+  sendWhatsAppWebTypingPresence,
+  sendWhatsAppWebVoice
+} from "./whatsapp-web-bridge.js";
 import { tryEncodeVoicePttOggOpus } from "./whatsapp-voice-utils.js";
 
 /** Meta Cloud API expects digits-only `to` (no `whatsapp:` prefix). */
@@ -143,7 +147,13 @@ export class WhatsAppChannelAdapter {
    * WhatsApp Cloud API: mark an inbound user message as read (blue ticks), best-effort.
    * No-op for Baileys transport.
    */
-  async markInboundMessageRead(messageId: string): Promise<void> {
+  /**
+   * Cloud API: mark inbound user message read and (by default) show the typing indicator for that
+   * thread. Meta dismisses typing after ~25s — call again on a quiet interval to keep it visible
+   * during slow model turns. No-op for Baileys (bridge handles read receipts separately).
+   * @see https://developers.facebook.com/docs/whatsapp/cloud-api/typing-indicators/
+   */
+  async markInboundMessageRead(messageId: string, opts?: { quiet?: boolean }): Promise<void> {
     if ((process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase() === "baileys") {
       return;
     }
@@ -165,16 +175,28 @@ export class WhatsAppChannelAdapter {
       body: JSON.stringify({
         messaging_product: "whatsapp",
         status: "read",
-        message_id: mid
+        message_id: mid,
+        typing_indicator: { type: "text" }
       })
     });
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      if (process.env.NOVA_WA_DEBUG?.trim() === "1") {
-        console.warn(`[whatsapp] mark read failed: ${response.status} ${body.slice(0, 400)}`);
+      if (process.env.NOVA_WA_DEBUG?.trim() === "1" && !opts?.quiet) {
+        console.warn(`[whatsapp] mark read / typing failed: ${response.status} ${body.slice(0, 400)}`);
+      }
+      if (opts?.quiet) {
+        return;
       }
       throw new Error(`whatsapp mark read failed (${response.status}): ${body.slice(0, 300)}`);
     }
+  }
+
+  /** Baileys only: show or clear the “composing…” bubble for a 1:1 chat. Cloud API uses {@link markInboundMessageRead}. */
+  async sendTypingPresence(to: string, composing: boolean): Promise<void> {
+    if ((process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase() !== "baileys") {
+      return;
+    }
+    await sendWhatsAppWebTypingPresence(to, composing);
   }
 
   async sendMessage(to: string, text: string): Promise<void> {

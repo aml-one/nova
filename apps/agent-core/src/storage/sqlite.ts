@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 
 let database: DatabaseSync | undefined;
-const LATEST_SCHEMA_VERSION = 24;
+const LATEST_SCHEMA_VERSION = 26;
 
 export function getDatabase(): DatabaseSync {
   if (database) {
@@ -647,6 +647,49 @@ function runMigrations(db: DatabaseSync): void {
 
     CREATE INDEX IF NOT EXISTS idx_signal_deferred_rings_fire
       ON signal_deferred_rings(fire_at_ms ASC);
+  `);
+    },
+    () => {
+      db.exec(`
+    CREATE TABLE IF NOT EXISTS user_reminders (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      body TEXT NOT NULL,
+      fire_at_ms INTEGER,
+      created_at_ms INTEGER NOT NULL,
+      fired_at_ms INTEGER,
+      dismissed INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_reminders_due
+      ON user_reminders(fire_at_ms ASC)
+      WHERE dismissed = 0 AND fired_at_ms IS NULL AND fire_at_ms IS NOT NULL;
+
+    CREATE INDEX IF NOT EXISTS idx_user_reminders_user
+      ON user_reminders(user_id, dismissed, created_at_ms DESC);
+
+    CREATE TABLE IF NOT EXISTS user_timers (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      recipient TEXT NOT NULL,
+      label TEXT,
+      ends_at_ms INTEGER NOT NULL,
+      fired_at_ms INTEGER,
+      created_at_ms INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_timers_due
+      ON user_timers(ends_at_ms ASC)
+      WHERE fired_at_ms IS NULL;
+  `);
+    },
+    () => {
+      db.exec(`
+    ALTER TABLE user_reminders ADD COLUMN requested_by_name TEXT;
+    ALTER TABLE user_reminders ADD COLUMN target_person_id TEXT;
   `);
     }
   ];

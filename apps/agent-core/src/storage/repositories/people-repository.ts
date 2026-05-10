@@ -36,6 +36,71 @@ function normalizePreferredChannel(value: unknown): PersonRecord["preferredChann
 }
 
 export class PeopleRepository {
+  /**
+   * Match a first name / handle the user typed (e.g. "Anita") against People display names.
+   * Exact case-insensitive match first; otherwise prefix match on the first word of display_name.
+   */
+  findPeopleByDisplayNameToken(token: string): PersonRecord[] {
+    const raw = token.trim();
+    if (raw.length < 2) return [];
+    const t = raw.toLowerCase();
+    if (t === "me" || t === "myself") return [];
+    const db = getDatabase();
+    const exact = db
+      .prepare(
+        `
+        SELECT id, display_name, about_notes, rating, interest_score, rudeness_score,
+               preferred_channel, topics_json, opted_out, blocked, created_at, updated_at
+        FROM people
+        WHERE display_name IS NOT NULL AND lower(trim(display_name)) = lower(?)
+        LIMIT 6
+        `
+      )
+      .all(raw) as Array<Record<string, unknown>>;
+    if (exact.length > 0) {
+      return exact.map((row) => this.rowToPerson(row)).filter(isDefined);
+    }
+    const prefix = db
+      .prepare(
+        `
+        SELECT id, display_name, about_notes, rating, interest_score, rudeness_score,
+               preferred_channel, topics_json, opted_out, blocked, created_at, updated_at
+        FROM people
+        WHERE display_name IS NOT NULL
+          AND (
+            lower(trim(display_name)) LIKE lower(?) || ' %'
+            OR lower(trim(display_name)) LIKE lower(?) || '-%'
+          )
+        LIMIT 8
+        `
+      )
+      .all(raw, raw) as Array<Record<string, unknown>>;
+    return prefix.map((row) => this.rowToPerson(row)).filter(isDefined);
+  }
+
+  private rowToPerson(row: Record<string, unknown>): PersonRecord | undefined {
+    const id = typeof row.id === "string" ? row.id : "";
+    if (!id) return undefined;
+    const displayName = typeof row.display_name === "string" ? row.display_name : undefined;
+    const aboutNotes = typeof row.about_notes === "string" ? row.about_notes : undefined;
+    const createdAt = typeof row.created_at === "string" ? row.created_at : undefined;
+    const updatedAt = typeof row.updated_at === "string" ? row.updated_at : undefined;
+    return {
+      id,
+      ...(displayName ? { displayName } : {}),
+      ...(aboutNotes ? { aboutNotes } : {}),
+      rating: clampInt((row.rating as number | null | undefined) ?? 50, 0, 100),
+      interestScore: clampNumber((row.interest_score as number | null | undefined) ?? 0.5, 0, 1),
+      rudenessScore: clampNumber((row.rudeness_score as number | null | undefined) ?? 0, 0, 1),
+      preferredChannel: normalizePreferredChannel(row.preferred_channel) ?? undefined,
+      topics: parseTopics((row.topics_json as string | null | undefined) ?? null),
+      optedOut: Boolean(row.opted_out),
+      blocked: Boolean(row.blocked),
+      ...(createdAt ? { createdAt } : {}),
+      ...(updatedAt ? { updatedAt } : {})
+    };
+  }
+
   getById(personId: string): PersonRecord | undefined {
     const db = getDatabase();
     const row = db

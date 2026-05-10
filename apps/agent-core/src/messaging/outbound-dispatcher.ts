@@ -57,6 +57,40 @@ export class OutboundDispatcher {
     this.queue.enqueue(channel, recipient, payload, correlationId);
   }
 
+  async whatsappTyping(recipient: string, typing: boolean, opts?: { quiet?: boolean }): Promise<void> {
+    if ((process.env.WHATSAPP_TRANSPORT ?? "").trim().toLowerCase() !== "baileys") {
+      return;
+    }
+    try {
+      await this.wa.sendTypingPresence(recipient, typing);
+      if (opts?.quiet) {
+        return;
+      }
+      pushChannelDebug({
+        channel: "whatsapp",
+        direction: "out",
+        transport: "dispatcher",
+        correlationId: randomUUID(),
+        peer: recipient,
+        textPreview: typing ? "(typing on)" : "(typing off)",
+        trace: [typing ? "whatsapp_typing_on" : "whatsapp_typing_off"]
+      });
+    } catch (error) {
+      if (!opts?.quiet) {
+        pushChannelDebug({
+          channel: "whatsapp",
+          direction: "out",
+          transport: "dispatcher",
+          correlationId: randomUUID(),
+          peer: recipient,
+          textPreview: typing ? "(typing on failed)" : "(typing off failed)",
+          trace: [typing ? "whatsapp_typing_on_failed" : "whatsapp_typing_off_failed"],
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
+  }
+
   async signalTyping(recipient: string, typing: boolean, opts?: { quiet?: boolean }): Promise<void> {
     try {
       await this.signal.sendTypingIndicator(recipient, typing);

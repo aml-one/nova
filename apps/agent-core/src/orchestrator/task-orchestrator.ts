@@ -31,6 +31,8 @@ import {
   runImplicitShellPlan
 } from "../execution/implicit-auto-shell.js";
 import { detectHostTimeIntent, formatNovaLocalTimeSentence, runHostTimeCollection } from "../execution/host-time.js";
+import { detectWorldClocksIntent, formatWorldClocks } from "../execution/world-clocks.js";
+import { tryHandleReminderTimerChat } from "../reminders/reminder-chat-handler.js";
 import { parseNaturalLanguageRelayToPerson } from "./natural-language-tell.js";
 import { formatAdminRelayPayload } from "./format-admin-relay-payload.js";
 import {
@@ -281,10 +283,16 @@ const WEB_CHAT_TONE_MARKDOWN_HINT =
   "The UI derives readable shades from the user’s assistant text and bubble colors (same family, lighter/darker) in light and dark mode—no rainbow or arbitrary colors. " +
   "Use sparingly (a handful per message; plain markdown for structure).";
 
+const CHANNEL_NO_REPLY_MARKER = "__NOVA_NO_REPLY__";
+
 const WHATSAPP_SIGNAL_REPLY_FORMAT =
   "Signal/WhatsApp reply discipline: Output ONLY the short message the user will see in the chat bubble—plain text. " +
   "No bullet lists of Context/Goal/Identity/Tone/Constraints, no 'User says:' lines, no rehearsal or alternate drafts, no 'Final polish' labels, no step-by-step planning visible to the user. " +
-  "Think silently if needed; the visible reply must read like a normal text.";
+  "Think silently if needed; the visible reply must read like a normal text. " +
+  "Human texting rhythm: do not send a message when the user’s last line needs no answer (e.g. short acknowledgements like “ok”, “good”, “thanks”, “got it”, a single emoji reaction, or clearly closing small talk). In those cases, output exactly one line containing only " +
+  CHANNEL_NO_REPLY_MARKER +
+  " and nothing else—no punctuation or explanation before or after. " +
+  "Prefer being last in the thread only when you have something worth sending; silence is better than filler.";
 
 const SIGNAL_WALKIE_CALL_HINT =
   "Signal in-app voice session: the user is in a short back-and-forth using Signal **voice notes** in the chat (like a walkie call inside the app). " +
@@ -428,6 +436,8 @@ export class TaskOrchestrator {
     signalInboundVoiceNote?: boolean;
     /** Signal: `sourceName` / profile display from the bridge (used to seed People displayName). */
     signalSourceProfileName?: string;
+    /** Signal/WhatsApp: exact outbound peer (e.g. Signal `from`, WhatsApp sender id) for reminders/timers. */
+    channelReplyAddress?: string;
   }): Promise<string> {
     this.inFlightCount += 1;
     this.lastActivityAt = Date.now();
@@ -686,7 +696,7 @@ export class TaskOrchestrator {
     const pendingQuestionsForUser = this.deps.improvement.consumePendingQuestions(userId, 2);
     const runId = randomUUID();
     const correlationId = input.correlationId ?? runId;
-    const preferLocalForHostTime = detectHostTimeIntent(input.text);
+    const preferLocalForHostTime = detectHostTimeIntent(input.text) && !detectWorldClocksIntent(input.text);
     const selectedModel = this.resolveChatModel(input, runtimeSettings);
 
     const enableSkillId = parseEnableSkillCommand(input.text);
@@ -719,6 +729,35 @@ export class TaskOrchestrator {
       });
       this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: enabled.ok });
       return reply;
+    }
+
+    if (isSkillRuntimeEnabled(runtimeSettings.skillSettings, "reminders-and-timers")) {
+      const reminderReply = tryHandleReminderTimerChat({
+        text: input.text,
+        userId,
+        channel: input.channel,
+        channelReplyAddress: input.channelReplyAddress
+      });
+      if (reminderReply) {
+        this.rememberAssistantTurn(userId, input.channel, input.text, reminderReply, runtimeSettings.emotions);
+        this.recordRunHistory({
+          runId,
+          userId,
+          channel: input.channel,
+          inputText: input.text,
+          outputText: reminderReply,
+          success: true,
+          correlationId,
+          latencyMs: Date.now() - startedAt,
+          provider: "reminders-and-timers",
+          tokenInCount: estimateTokens(input.text),
+          tokenOutCount: estimateTokens(reminderReply),
+          toolTimingsMs: {}
+        });
+        this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+        this.thoughtLog.append({ category: "chat", title: "Reminder/timer skill", content: reminderReply.slice(0, 120) });
+        return reminderReply;
+      }
     }
 
     if (input.text.startsWith("/run ")) {
@@ -886,6 +925,28 @@ export class TaskOrchestrator {
       } finally {
         input.onActivity?.({ kind: "web-search", phase: "end" });
       }
+    }
+
+    if (detectWorldClocksIntent(input.text) && isSkillRuntimeEnabled(runtimeSettings.skillSettings, "time-and-date")) {
+      const worldReply = formatWorldClocks();
+      this.rememberAssistantTurn(userId, input.channel, input.text, worldReply, runtimeSettings.emotions);
+      this.recordRunHistory({
+        runId,
+        userId,
+        channel: input.channel,
+        inputText: input.text,
+        outputText: worldReply,
+        success: true,
+        correlationId,
+        latencyMs: Date.now() - startedAt,
+        provider: "time-and-date",
+        tokenInCount: estimateTokens(input.text),
+        tokenOutCount: estimateTokens(worldReply),
+        toolTimingsMs: {}
+      });
+      this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+      this.thoughtLog.append({ category: "chat", title: "World clocks", content: "time-and-date" });
+      return worldReply;
     }
 
     let hostTimeMs = 0;
@@ -1421,7 +1482,7 @@ export class TaskOrchestrator {
       return fallback;
     }
 
-    if (!input.onToken && replyNeedsNovaIdentityRepair(result.content)) {
+    if (!input.onToken && !result.content.includes(CHANNEL_NO_REPLY_MARKER) && replyNeedsNovaIdentityRepair(result.content)) {
       try {
         const repairMessages: ChatMessage[] = [
           ...(promptMessages as ChatMessage[]),
@@ -1455,6 +1516,42 @@ export class TaskOrchestrator {
       stripOrpheusSpeechCues(stripNovaToneMarkup(stripChannelAssistantScratchpad(rawAssistant))).trim() ||
       stripNovaToneMarkup(rawAssistant).trim() ||
       rawAssistant.trim();
+
+    const isDmNoReply =
+      (input.channel === "whatsapp" || input.channel === "signal") &&
+      (forMemoryAndHistory === CHANNEL_NO_REPLY_MARKER ||
+        forMemoryAndHistory.replace(/[`\s]/g, "") === CHANNEL_NO_REPLY_MARKER);
+
+    if (isDmNoReply) {
+      const silentNote = "[no reply]";
+      this.rememberAssistantTurn(userId, input.channel, input.text, silentNote, runtimeSettings.emotions);
+      this.recordRunHistory({
+        runId,
+        userId,
+        channel: input.channel,
+        inputText: input.text,
+        outputText: "",
+        success: true,
+        correlationId,
+        latencyMs: Date.now() - startedAt,
+        provider: result.provider,
+        modelName: result.model,
+        tokenInCount: estimateTokens(input.text),
+        tokenOutCount: 0,
+        firstTokenMs: result.firstTokenMs,
+        tokensPerSecond: 0,
+        costUsd: 0,
+        toolTimingsMs: mergeToolTimings(hostDiagnosticsMs, implicitShellMs) ?? {}
+      });
+      this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+      this.thoughtLog.append({
+        category: "chat",
+        title: "Suppressed DM reply",
+        content: "channel_no_reply_marker",
+        metadata: { provider: result.provider, latencyMs: Date.now() - startedAt }
+      });
+      return "";
+    }
 
     if (input.channel !== "web") {
       if (forMemoryAndHistory) {

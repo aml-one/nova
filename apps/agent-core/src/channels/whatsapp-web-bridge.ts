@@ -316,6 +316,19 @@ class WhatsAppWebBridge {
     await sock.sendMessage(jid, { audio: payload, mimetype, ptt: true });
   }
 
+  async setTypingPresence(to: string, composing: boolean): Promise<void> {
+    const sock = this.socket;
+    if (!sock || this.state !== "connected") {
+      return;
+    }
+    const jid = normalizeWhatsAppRecipientJid(to);
+    try {
+      await sock.sendPresenceUpdate(composing ? "composing" : "paused", jid);
+    } catch {
+      /* best-effort; never break orchestration */
+    }
+  }
+
   getStatus(): Status {
     return {
       state: this.state,
@@ -359,4 +372,9 @@ export async function sendWhatsAppWebMessage(to: string, text: string): Promise<
 
 export async function sendWhatsAppWebVoice(to: string, audio: Buffer, mimeType: string): Promise<void> {
   return globalBridge.sendVoice(to, audio, mimeType);
+}
+
+/** Best-effort typing indicator for the given recipient JID or phone-derived JID. */
+export async function sendWhatsAppWebTypingPresence(to: string, composing: boolean): Promise<void> {
+  return globalBridge.setTypingPresence(to, composing);
 }

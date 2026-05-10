@@ -78,6 +78,7 @@ import { LearningDaemon } from "../improvement/learning-daemon.js";
 import { NOVA_PRIMARY_EMOTION_USER_ID } from "../identity/nova-emotion-user.js";
 import { expandUserPath, invalidateSentiCoreOrchestrationCache } from "../emotion/senti-core-loader.js";
 import { buildMemoryKnowledgeGraph } from "../knowledge/memory-graph.js";
+import { ReminderTimerDaemon } from "../reminders/reminder-timer-daemon.js";
 const execAsync = promisify(execCallback);
 
 type HttpServerOptions = {
@@ -203,6 +204,8 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
   }
   const outreach = new ProactiveOutreachDaemon({ settings: options.settings, orchestrator: options.orchestrator, dispatcher });
   outreach.start();
+  const reminderTimerDaemon = new ReminderTimerDaemon();
+  reminderTimerDaemon.start();
   const runScheduledTask = async (taskPayload: string): Promise<void> => {
     await options.orchestrator.handleChannelMessage({
       channel: "web",
@@ -211,6 +214,11 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
     });
   };
   scheduler.start(runScheduledTask);
+  /** Cloud typing expires after ~25s; refresh quietly so long model turns still show “typing…”. */
+  const WHATSAPP_CLOUD_TYPING_HEARTBEAT_MS = 20_000;
+  /** Baileys presence is not tied to Cloud’s 25s cap; keep aligned with Signal’s ~15s refresh. */
+  const WHATSAPP_BAILEYS_TYPING_HEARTBEAT_MS = 14_000;
+
   const baileysInboundHandler = async ({ from, text }: { from: string; text: string }) => {
       const msgCorr = randomUUID();
       const trace: string[] = ["baileys_inbound"];
@@ -241,13 +249,27 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
         if (options.orchestrator.isChannelPeerBlocked({ channel: "whatsapp", phoneNumber: identity })) {
           return;
         }
-        const reply = await options.orchestrator.handleChannelMessage({
-          channel: "whatsapp",
-          phoneNumber: identity,
-          text,
-          correlationId: msgCorr,
-          accessProfile
-        });
+        await dispatcher.whatsappTyping(from, true);
+        const waTypingHb = setInterval(() => {
+          void dispatcher.whatsappTyping(from, true, { quiet: true });
+        }, WHATSAPP_BAILEYS_TYPING_HEARTBEAT_MS);
+        if (typeof waTypingHb.unref === "function") {
+          waTypingHb.unref();
+        }
+        let reply: string;
+        try {
+          reply = await options.orchestrator.handleChannelMessage({
+            channel: "whatsapp",
+            phoneNumber: identity,
+            text,
+            correlationId: msgCorr,
+            accessProfile,
+            channelReplyAddress: from
+          });
+        } finally {
+          clearInterval(waTypingHb);
+          void dispatcher.whatsappTyping(from, false, { quiet: true });
+        }
         trace.push("orchestrator_ok", "queued_outbound_reply");
         pushChannelDebug({
           channel: "whatsapp",
@@ -259,16 +281,28 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           trace,
           reachedNova: true
         });
-        dispatcher.enqueue("whatsapp", identity, reply, msgCorr);
-        pushChannelDebug({
-          channel: "whatsapp",
-          direction: "out",
-          transport: "baileys",
-          correlationId: msgCorr,
-          peer: identity,
-          textPreview: previewChannelText(reply),
-          trace: ["reply_enqueued"]
-        });
+        if (reply.trim()) {
+          dispatcher.enqueue("whatsapp", identity, reply, msgCorr);
+          pushChannelDebug({
+            channel: "whatsapp",
+            direction: "out",
+            transport: "baileys",
+            correlationId: msgCorr,
+            peer: identity,
+            textPreview: previewChannelText(reply),
+            trace: ["reply_enqueued"]
+          });
+        } else {
+          pushChannelDebug({
+            channel: "whatsapp",
+            direction: "out",
+            transport: "baileys",
+            correlationId: msgCorr,
+            peer: identity,
+            textPreview: "(no outbound — suppressed empty reply)",
+            trace: ["reply_suppressed_empty"]
+          });
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         trace.push("handler_error");
@@ -1864,18 +1898,35 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
             if (options.orchestrator.isChannelPeerBlocked({ channel: "whatsapp", phoneNumber: message.phoneNumber })) {
               continue;
             }
+            let waCloudTypingHb: NodeJS.Timeout | undefined;
             if (message.whatsappMessageId) {
               await wa.markInboundMessageRead(message.whatsappMessageId).catch(() => {
-                /* Cloud API read receipts are best-effort */
+                /* Cloud API read + typing are best-effort */
               });
+              waCloudTypingHb = setInterval(() => {
+                void wa.markInboundMessageRead(message.whatsappMessageId!, { quiet: true }).catch(() => {
+                  /* keep heartbeat cheap */
+                });
+              }, WHATSAPP_CLOUD_TYPING_HEARTBEAT_MS);
+              if (typeof waCloudTypingHb.unref === "function") {
+                waCloudTypingHb.unref();
+              }
             }
-            const reply = await options.orchestrator.handleChannelMessage({
-              channel: "whatsapp",
-              phoneNumber: message.phoneNumber,
-              text: message.text,
-              correlationId: msgCorr,
-              accessProfile
-            });
+            let reply: string;
+            try {
+              reply = await options.orchestrator.handleChannelMessage({
+                channel: "whatsapp",
+                phoneNumber: message.phoneNumber,
+                text: message.text,
+                correlationId: msgCorr,
+                accessProfile,
+                channelReplyAddress: message.from
+              });
+            } finally {
+              if (waCloudTypingHb) {
+                clearInterval(waCloudTypingHb);
+              }
+            }
             trace.push("orchestrator_ok", "queued_outbound_reply");
             pushChannelDebug({
               channel: "whatsapp",
@@ -1887,16 +1938,28 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
               trace,
               reachedNova: true
             });
-            dispatcher.enqueue("whatsapp", message.from, reply, msgCorr);
-            pushChannelDebug({
-              channel: "whatsapp",
-              direction: "out",
-              transport: "webhook",
-              correlationId: msgCorr,
-              peer: message.from,
-              textPreview: previewChannelText(reply),
-              trace: ["reply_enqueued"]
-            });
+            if (reply.trim()) {
+              dispatcher.enqueue("whatsapp", message.from, reply, msgCorr);
+              pushChannelDebug({
+                channel: "whatsapp",
+                direction: "out",
+                transport: "webhook",
+                correlationId: msgCorr,
+                peer: message.from,
+                textPreview: previewChannelText(reply),
+                trace: ["reply_enqueued"]
+              });
+            } else {
+              pushChannelDebug({
+                channel: "whatsapp",
+                direction: "out",
+                transport: "webhook",
+                correlationId: msgCorr,
+                peer: message.from,
+                textPreview: "(no outbound — suppressed empty reply)",
+                trace: ["reply_suppressed_empty"]
+              });
+            }
             replies.push({ to: message.from, reply, delivered: true });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);

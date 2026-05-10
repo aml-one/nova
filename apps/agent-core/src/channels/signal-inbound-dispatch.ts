@@ -228,6 +228,7 @@ export async function dispatchSignalInboundMessages(
                   text: callCmd.remainder,
                   correlationId: msgCorr,
                   accessProfile,
+                  channelReplyAddress: message.from,
                   signalWalkieCall: true,
                   signalInboundVoiceNote: voiceNote,
                   signalSourceProfileName: message.signalSourceProfileName
@@ -252,6 +253,7 @@ export async function dispatchSignalInboundMessages(
                 text: message.text,
                 correlationId: msgCorr,
                 accessProfile,
+                channelReplyAddress: message.from,
                 signalWalkieCall: walkie || voiceNote,
                 signalInboundVoiceNote: voiceNote,
                 signalSourceProfileName: message.signalSourceProfileName
@@ -273,18 +275,30 @@ export async function dispatchSignalInboundMessages(
         trace,
         reachedNova: true
       });
-      deps.dispatcher.enqueue("signal", message.from, reply, msgCorr);
-      pushChannelDebug({
-        channel: "signal",
-        direction: "out",
-        transport: deps.transport,
-        correlationId: msgCorr,
-        peer: message.from,
-        // Trace shows the visible body (without `<chuckle>` / `<sigh>` cues). The dispatcher still
-        // synthesizes audio from the original `reply` so the audio keeps the cues.
-        textPreview: previewChannelText(stripOrpheusSpeechCues(reply)),
-        trace: ["reply_enqueued"]
-      });
+      if (reply.trim()) {
+        deps.dispatcher.enqueue("signal", message.from, reply, msgCorr);
+        pushChannelDebug({
+          channel: "signal",
+          direction: "out",
+          transport: deps.transport,
+          correlationId: msgCorr,
+          peer: message.from,
+          // Trace shows the visible body (without `<chuckle>` / `<sigh>` cues). The dispatcher still
+          // synthesizes audio from the original `reply` so the audio keeps the cues.
+          textPreview: previewChannelText(stripOrpheusSpeechCues(reply)),
+          trace: ["reply_enqueued"]
+        });
+      } else {
+        pushChannelDebug({
+          channel: "signal",
+          direction: "out",
+          transport: deps.transport,
+          correlationId: msgCorr,
+          peer: message.from,
+          textPreview: "(no outbound — suppressed empty reply)",
+          trace: ["reply_suppressed_empty"]
+        });
+      }
       replies.push({ to: message.from, reply, delivered: true });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
