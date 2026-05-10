@@ -4,7 +4,6 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using Microsoft.Web.WebView2.Core;
 
 namespace Nova.WebShell;
@@ -43,25 +42,6 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        TrySetWindowIcon();
-    }
-
-    private void TrySetWindowIcon()
-    {
-        try
-        {
-            var iconPath = Path.Combine(AppContext.BaseDirectory, "images", "nova_icon.ico");
-            if (!File.Exists(iconPath))
-            {
-                return;
-            }
-
-            Icon = BitmapFrame.Create(new Uri(iconPath, UriKind.Absolute));
-        }
-        catch
-        {
-            /* optional branding */
-        }
     }
 
     private static string ReadStartUrl()
