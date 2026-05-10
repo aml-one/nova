@@ -1,5 +1,7 @@
 export const CHAT_TTS_CHUNK_TARGET_CHARS = 190;
 export const CHAT_TTS_CHUNK_MIN_CHARS = 120;
+/** Hard cap per Orpheus request — long unpunctuated paragraphs (common in HU chat) must not be sent as one huge `input`. */
+export const CHAT_TTS_CHUNK_HARD_MAX = 340;
 
 export function stripMarkdownForTts(raw: string): string {
   let visible = raw;
@@ -47,12 +49,40 @@ export function stripMarkdownForTts(raw: string): string {
   return visible.slice(0, 8000);
 }
 
+/** Break a single long string into ≤maxLen pieces, preferring spaces so words stay intact. */
+export function splitLongTtsSegment(text: string, maxLen: number): string[] {
+  const t = text.trim();
+  if (!t || t.length <= maxLen) return t ? [t] : [];
+  const out: string[] = [];
+  let rest = t;
+  while (rest.length > maxLen) {
+    let cut = maxLen;
+    const head = rest.slice(0, maxLen);
+    const lastSpace = head.lastIndexOf(" ");
+    if (lastSpace >= Math.floor(maxLen * 0.45)) {
+      cut = lastSpace + 1;
+    }
+    let piece = rest.slice(0, cut).trim();
+    if (!piece) {
+      cut = maxLen;
+      piece = rest.slice(0, cut);
+    }
+    out.push(piece);
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) out.push(rest);
+  return out;
+}
+
 export function splitTextForTts(raw: string): string[] {
   const text = raw.trim();
   if (!text) return [];
-  if (text.length <= CHAT_TTS_CHUNK_TARGET_CHARS + 24) return [text];
+  if (text.length <= CHAT_TTS_CHUNK_TARGET_CHARS + 24) {
+    return splitLongTtsSegment(text, CHAT_TTS_CHUNK_HARD_MAX);
+  }
 
-  const sentenceLike = text.match(/[^.!?]+[.!?]+(?:["')\]]+)?|[^.!?]+$/g) ?? [text];
+  // `.` `!` `?` and ellipsis (U+2026); HU copy often uses `…` without ASCII `.`
+  const sentenceLike = text.match(/[^.!?\u2026]+[.!?\u2026]+(?:["')\]]+)?|[^.!?\u2026]+$/g) ?? [text];
   const parts: string[] = [];
   let buffer = "";
 
@@ -86,7 +116,9 @@ export function splitTextForTts(raw: string): string[] {
   }
   pushBuffer();
 
-  if (parts.length <= 1) return [text];
+  if (parts.length <= 1) {
+    return splitLongTtsSegment(text, CHAT_TTS_CHUNK_HARD_MAX);
+  }
 
   const merged: string[] = [];
   for (const part of parts) {
@@ -101,5 +133,5 @@ export function splitTextForTts(raw: string): string[] {
       merged.push(part);
     }
   }
-  return merged;
+  return merged.flatMap((segment) => splitLongTtsSegment(segment, CHAT_TTS_CHUNK_HARD_MAX));
 }

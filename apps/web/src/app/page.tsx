@@ -533,6 +533,7 @@ export default function HomePage() {
   const kioskStreamDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [ttsPlayingTurnId, setTtsPlayingTurnId] = useState<string | null>(null);
   const [ttsGeneratingTurnId, setTtsGeneratingTurnId] = useState<string | null>(null);
+  const [chatTtsLastError, setChatTtsLastError] = useState<{ turnId: string; message: string } | null>(null);
   /** True only while the chat audio element is in `playing` (not during fetch/generate). */
   const [ttsPlaybackActive, setTtsPlaybackActive] = useState(false);
   const [ttsTraceOpenTurnId, setTtsTraceOpenTurnId] = useState<string | null>(null);
@@ -1633,6 +1634,7 @@ export default function HomePage() {
       if (!cleaned.trim()) {
         return;
       }
+      setChatTtsLastError(null);
       const key = chatTtsCacheKey(turnId, cleaned);
       const map = chatTtsBlobCacheRef.current;
       const order = chatTtsCacheOrderRef.current;
@@ -1686,7 +1688,8 @@ export default function HomePage() {
           signal: runAc.signal
         });
         if (!response.ok) {
-          throw new Error(`tts request failed (${response.status})`);
+          const errBody = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(errBody.error?.trim() || `tts request failed (${response.status})`);
         }
         const mime = response.headers.get("content-type") ?? "audio/wav";
         const blob = await response.blob();
@@ -1707,7 +1710,11 @@ export default function HomePage() {
           stopChatTtsPlayback({ naturalTtsEnd: true });
         } catch (err) {
           const aborted = err instanceof DOMException && err.name === "AbortError";
-          if (!aborted) stopChatTtsPlayback();
+          if (!aborted) {
+            const message = err instanceof Error ? err.message : String(err);
+            setChatTtsLastError({ turnId, message });
+            stopChatTtsPlayback();
+          }
         } finally {
           if (chatTtsFetchAbortRef.current === ac) {
             chatTtsFetchAbortRef.current = null;
@@ -1746,6 +1753,8 @@ export default function HomePage() {
       } catch (err) {
         const aborted = err instanceof DOMException && err.name === "AbortError";
         if (!aborted) {
+          const message = err instanceof Error ? err.message : String(err);
+          setChatTtsLastError({ turnId, message });
           stopChatTtsPlayback();
         } else {
           setTtsGeneratingTurnId(null);
@@ -2925,10 +2934,13 @@ export default function HomePage() {
                               <span className="h-1.5 w-1.5 rounded-full bg-amber-400 nova-thinking-dot-3" />
                             </span>
                           </div>
-                          <p className="text-[11px] text-muted">
-                            Nova is synthetizing speech.. Please hold on..
-                          </p>
+                          <p className="text-[11px] text-muted">Nova is synthesizing speech. Please hold on.</p>
                         </div>
+                      ) : null}
+                      {turn.role === "assistant" && chatTtsLastError?.turnId === turn.id ? (
+                        <p className="mt-2 text-[11px] text-red-600 dark:text-red-400" role="alert">
+                          Read-aloud failed: {chatTtsLastError.message}
+                        </p>
                       ) : null}
                     </>
                   )}
