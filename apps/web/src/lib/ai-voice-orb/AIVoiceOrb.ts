@@ -1,4 +1,8 @@
 import * as THREE from "three";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 
 export interface VoiceOrbOptions {
   radius?: number;
@@ -227,8 +231,7 @@ vec3 getDisplacedPosition(vec3 _position)
 void main()
 {
   vec3 displacedPosition = getDisplacedPosition(position);
-  vec4 viewPosition = modelViewMatrix * vec4(displacedPosition, 1.0);
-  gl_Position = projectionMatrix * viewPosition;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(displacedPosition, 1.0);
 
   float distanceA = (M_PI * 2.0) / uSubdivision.x;
   float distanceB = M_PI / uSubdivision.x;
@@ -244,12 +247,14 @@ void main()
   vec3 computedNormal = cross(displacedPositionA - displacedPosition, displacedPositionB - displacedPosition);
   computedNormal = normalize(computedNormal);
 
-  vec3 viewDirection = normalize(displacedPosition - cameraPosition);
-  float fresnel = uFresnelOffset + (1.0 + dot(viewDirection, computedNormal)) * uFresnelMultiplier;
+  vec3 worldNormal = normalize((modelMatrix * vec4(computedNormal, 0.0)).xyz);
+  vec3 worldPos = (modelMatrix * vec4(displacedPosition, 1.0)).xyz;
+  vec3 viewDirection = normalize(worldPos - cameraPosition);
+  float fresnel = uFresnelOffset + (1.0 + dot(viewDirection, worldNormal)) * uFresnelMultiplier;
   fresnel = pow(max(0.0, fresnel), uFresnelPower);
 
-  float lightAIntensity = max(0.0, - dot(computedNormal, normalize(- uLightAPosition))) * uLightAIntensity;
-  float lightBIntensity = max(0.0, - dot(computedNormal, normalize(- uLightBPosition))) * uLightBIntensity;
+  float lightAIntensity = max(0.0, - dot(worldNormal, normalize(- uLightAPosition))) * uLightAIntensity;
+  float lightBIntensity = max(0.0, - dot(worldNormal, normalize(- uLightBPosition))) * uLightBIntensity;
 
   vec3 color = vec3(0.0);
   color = mix(color, uLightAColor, lightAIntensity * fresnel);
@@ -266,6 +271,38 @@ varying vec3 vColor;
 void main()
 {
   gl_FragColor = vec4(vColor, 1.0);
+}
+`;
+
+const ORGANIC_CLEAR = 0x010101;
+const BLOOM_TINT_FRAGMENT = `
+varying vec2 vUv;
+uniform sampler2D blurTexture1;
+uniform sampler2D blurTexture2;
+uniform sampler2D blurTexture3;
+uniform sampler2D blurTexture4;
+uniform sampler2D blurTexture5;
+uniform float bloomStrength;
+uniform float bloomRadius;
+uniform float bloomFactors[NUM_MIPS];
+uniform vec3 bloomTintColors[NUM_MIPS];
+uniform vec3 uTintColor;
+uniform float uTintStrength;
+
+float lerpBloomFactor(const in float factor) {
+  float mirrorFactor = 1.2 - factor;
+  return mix(factor, mirrorFactor, bloomRadius);
+}
+
+void main() {
+  vec4 color = bloomStrength * ( lerpBloomFactor(bloomFactors[0]) * vec4(bloomTintColors[0], 1.0) * texture2D(blurTexture1, vUv) +
+    lerpBloomFactor(bloomFactors[1]) * vec4(bloomTintColors[1], 1.0) * texture2D(blurTexture2, vUv) +
+    lerpBloomFactor(bloomFactors[2]) * vec4(bloomTintColors[2], 1.0) * texture2D(blurTexture3, vUv) +
+    lerpBloomFactor(bloomFactors[3]) * vec4(bloomTintColors[3], 1.0) * texture2D(blurTexture4, vUv) +
+    lerpBloomFactor(bloomFactors[4]) * vec4(bloomTintColors[4], 1.0) * texture2D(blurTexture5, vUv) );
+
+  color.rgb = mix(color.rgb, uTintColor, uTintStrength);
+  gl_FragColor = color;
 }
 `;
 
@@ -286,8 +323,12 @@ export class AIVoiceOrb {
   private readonly camera: THREE.PerspectiveCamera;
   private readonly clock = new THREE.Clock();
 
+  private readonly composer: EffectComposer;
+  private readonly renderPass: RenderPass;
+  private readonly bloomPass: UnrealBloomPass;
+  private readonly outputPass: OutputPass;
+
   private readonly mesh: THREE.Mesh<THREE.SphereGeometry, THREE.ShaderMaterial>;
-  private readonly glow: THREE.Sprite;
 
   private rotationSpeed = 0.5;
   private rotationDirection = new THREE.Vector3(0.4, 1, 0.2).normalize();
@@ -297,14 +338,12 @@ export class AIVoiceOrb {
 
   private readonly moodTarget = {
     colorA: new THREE.Color("#ff3e00"),
-    colorB: new THREE.Color("#0063ff"),
-    glow: new THREE.Color("#2ea8ff")
+    colorB: new THREE.Color("#0063ff")
   };
 
   private readonly moodCurrent = {
     colorA: new THREE.Color("#ff3e00"),
-    colorB: new THREE.Color("#0063ff"),
-    glow: new THREE.Color("#2ea8ff")
+    colorB: new THREE.Color("#0063ff")
   };
 
   private rafId = 0;
@@ -331,8 +370,6 @@ export class AIVoiceOrb {
   private dampedSpeak = 0.2;
   private dampedSpeakPeak = 0.2;
 
-  private glowMaterial: THREE.SpriteMaterial;
-
   private readonly variations: Record<"volume" | "lowLevel" | "mediumLevel" | "highLevel", Variation> = {
     volume: { current: 0.152, target: 0.152, upEasing: 0.03, downEasing: 0.002 },
     lowLevel: { current: 0.0003, target: 0.0003, upEasing: 0.005, downEasing: 0.002 },
@@ -357,21 +394,45 @@ export class AIVoiceOrb {
 
   constructor(private readonly mount: HTMLElement, options: VoiceOrbOptions = {}) {
     const radius = options.radius ?? 1.8;
-    const segs = 220;
+    const segs = 384;
+    const w = this.mount.clientWidth;
+    const h = Math.max(this.mount.clientHeight, 1);
+    const pr = Math.min(window.devicePixelRatio, 2);
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.setSize(this.mount.clientWidth, this.mount.clientHeight);
-    this.renderer.setClearColor(0x000000, 0);
-    this.mount.appendChild(this.renderer.domElement);
+    this.mount.style.position = "relative";
+    this.mount.style.overflow = "hidden";
 
-    this.camera = new THREE.PerspectiveCamera(
-      25,
-      this.mount.clientWidth / Math.max(this.mount.clientHeight, 1),
-      0.1,
-      100
-    );
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    this.renderer.setPixelRatio(pr);
+    this.renderer.setSize(w, h);
+    this.renderer.setClearColor(ORGANIC_CLEAR, 1);
+    this.renderer.toneMapping = THREE.NoToneMapping;
+
+    const canvas = this.renderer.domElement;
+    canvas.style.display = "block";
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    this.mount.appendChild(canvas);
+
+    this.camera = new THREE.PerspectiveCamera(25, w / h, 0.1, 100);
     this.camera.position.set(0, 0, 7);
+
+    this.renderPass = new RenderPass(this.scene, this.camera, null, new THREE.Color(ORGANIC_CLEAR), 1);
+
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.8, 0.315, 0);
+    this.bloomPass.compositeMaterial.uniforms.uTintColor = { value: new THREE.Color("#7f00ff") };
+    this.bloomPass.compositeMaterial.uniforms.uTintStrength = { value: 0.15 };
+    this.bloomPass.compositeMaterial.fragmentShader = BLOOM_TINT_FRAGMENT;
+    this.bloomPass.compositeMaterial.needsUpdate = true;
+
+    this.outputPass = new OutputPass();
+
+    this.composer = new EffectComposer(this.renderer);
+    this.composer.setPixelRatio(pr);
+    this.composer.setSize(w, h);
+    this.composer.addPass(this.renderPass);
+    this.composer.addPass(this.bloomPass);
+    this.composer.addPass(this.outputPass);
 
     const geometry = new THREE.SphereGeometry(radius, segs, segs);
     geometry.computeTangents();
@@ -408,19 +469,6 @@ export class AIVoiceOrb {
       })
     );
 
-    const glowMap = this.buildGlowTexture();
-    this.glowMaterial = new THREE.SpriteMaterial({
-      map: glowMap,
-      color: this.moodCurrent.glow.clone(),
-      transparent: true,
-      opacity: 0.42,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false
-    });
-    this.glow = new THREE.Sprite(this.glowMaterial);
-    this.glow.scale.set(7.8, 7.8, 1);
-
-    this.scene.add(this.glow);
     this.scene.add(this.mesh);
 
     if (options.baseColor) {
@@ -435,10 +483,8 @@ export class AIVoiceOrb {
     const c = new THREE.Color(hex);
     this.moodTarget.colorA.copy(c).offsetHSL(0.02, 0.06, 0.04);
     this.moodTarget.colorB.copy(c).offsetHSL(-0.04, 0.02, 0.12);
-    this.moodTarget.glow.copy(c);
     this.moodCurrent.colorA.copy(this.moodTarget.colorA);
     this.moodCurrent.colorB.copy(this.moodTarget.colorB);
-    this.moodCurrent.glow.copy(this.moodTarget.glow);
     this.syncLightUniforms();
   }
 
@@ -452,11 +498,11 @@ export class AIVoiceOrb {
     this.setSpeechEnvelope(v, v);
   }
 
-  setMoodPalette(colorA: string, colorB: string, _shellRgb: string, glowHex: string): void {
+  setMoodPalette(colorA: string, colorB: string, _shellRgb: string, _glowHex: string): void {
     void _shellRgb;
+    void _glowHex;
     this.moodTarget.colorA.set(colorA);
     this.moodTarget.colorB.set(colorB);
-    this.moodTarget.glow.set(glowHex);
   }
 
   setRotationSpeed(speed: number): void {
@@ -500,9 +546,9 @@ export class AIVoiceOrb {
     this.mesh.geometry.dispose();
     this.mesh.material.dispose();
 
-    const spriteMaterial = this.glow.material as THREE.SpriteMaterial;
-    spriteMaterial.map?.dispose();
-    spriteMaterial.dispose();
+    this.bloomPass.dispose();
+    this.outputPass.dispose();
+    this.composer.dispose();
 
     this.renderer.dispose();
     try {
@@ -517,25 +563,40 @@ export class AIVoiceOrb {
   private syncLightUniforms(): void {
     this.uniforms.uLightAColor.value.copy(this.moodCurrent.colorA);
     this.uniforms.uLightBColor.value.copy(this.moodCurrent.colorB);
-    this.glowMaterial.color.copy(this.moodCurrent.glow);
   }
 
+  /**
+   * Map TTS envelope to the same value ranges as organic-sphere's microphone `levels[0..2]`,
+   * then apply Bruno's exact formulas (see Sphere.js in the demo repo).
+   */
   private refreshSpeechTargets(speak: number, speakPeak: number): void {
-    const s = speak;
-    const p = speakPeak;
-    const drive = Math.min(1, s * 0.85 + p * 0.95);
+    const s = THREE.MathUtils.clamp(speak, 0, 1);
+    const p = THREE.MathUtils.clamp(speakPeak, 0, 1);
+    const level0 = THREE.MathUtils.clamp(s * 0.55 + p * 0.35, 0, 1);
+    const level1 = THREE.MathUtils.clamp(s * 0.5 + p * 0.42, 0, 1);
+    const level2 = THREE.MathUtils.clamp(s * 0.28 + p * 0.62, 0, 1);
 
-    this.variations.volume.target = THREE.MathUtils.clamp(0.11 + s * 0.34 + p * 0.48, 0.08, 0.78);
-    this.variations.lowLevel.target = THREE.MathUtils.clamp(0.00022 + drive * 0.00115, 0.00012, 0.0018);
-    this.variations.mediumLevel.target = THREE.MathUtils.clamp(3.35 + s * 0.55 + p * 1.05, 2.8, 6.2);
-    this.variations.highLevel.target = THREE.MathUtils.clamp(0.42 + s * 1.85 + p * 2.95, 0.35, 7.5);
+    this.variations.volume.target = Math.max(level0, level1, level2) * 0.3;
+
+    let low = (level0 || 0) * 0.003;
+    low += 0.0001;
+    this.variations.lowLevel.target = Math.max(0, low);
+
+    let med = (level1 || 0) * 2;
+    med += 3.587;
+    this.variations.mediumLevel.target = Math.max(3.587, med);
+
+    let high = (level2 || 0) * 5;
+    high += 0.5;
+    this.variations.highLevel.target = Math.max(0.5, high);
   }
 
-  private stepVariations(dt: number): void {
+  /** organic-sphere uses `time.delta` in milliseconds (~16), not seconds. */
+  private stepVariations(deltaMs: number): void {
     for (const key of Object.keys(this.variations) as (keyof typeof this.variations)[]) {
       const v = this.variations[key];
       const easing = v.target > v.current ? v.upEasing : v.downEasing;
-      v.current += (v.target - v.current) * easing * dt;
+      v.current += (v.target - v.current) * easing * deltaMs;
     }
 
     this.timeFrequency = this.variations.lowLevel.current;
@@ -544,8 +605,8 @@ export class AIVoiceOrb {
     this.uniforms.uFresnelMultiplier.value = this.variations.mediumLevel.current;
   }
 
-  private stepOrganicOffset(dt: number): void {
-    const elapsedTime = dt * this.timeFrequency;
+  private stepOrganicOffset(deltaMs: number): void {
+    const elapsedTime = deltaMs * this.timeFrequency;
     const offsetTime = elapsedTime * 0.3;
     this.offsetSpherical.phi = ((Math.sin(offsetTime * 0.001) * Math.sin(offsetTime * 0.00321)) * 0.5 + 0.5) * Math.PI;
     this.offsetSpherical.theta =
@@ -560,18 +621,18 @@ export class AIVoiceOrb {
     this.rafId = requestAnimationFrame(this.animate);
 
     const dt = this.clock.getDelta();
+    const deltaMs = Math.min(dt * 1000, 60);
 
     this.dampedSpeak = THREE.MathUtils.damp(this.dampedSpeak, this.speechLevel, 10, dt);
     this.dampedSpeakPeak = THREE.MathUtils.damp(this.dampedSpeakPeak, this.speechPeak, 28, dt);
 
     this.refreshSpeechTargets(this.dampedSpeak, this.dampedSpeakPeak);
-    this.stepVariations(dt);
-    this.stepOrganicOffset(dt);
+    this.stepVariations(deltaMs);
+    this.stepOrganicOffset(deltaMs);
 
     const moodLerp = Math.min(1, dt * 4.2);
     this.moodCurrent.colorA.lerp(this.moodTarget.colorA, moodLerp);
     this.moodCurrent.colorB.lerp(this.moodTarget.colorB, moodLerp);
-    this.moodCurrent.glow.lerp(this.moodTarget.glow, moodLerp);
     this.syncLightUniforms();
 
     this.rotationDirection.lerp(this.targetDirection, Math.min(1, dt * 5));
@@ -583,41 +644,20 @@ export class AIVoiceOrb {
     const spk = Math.max(this.dampedSpeak, this.dampedSpeakPeak * 0.82);
     const breathing = 1 + Math.sin(this.clock.elapsedTime * 1.65) * 0.018 * (1 + spk * 2.4);
     this.mesh.scale.setScalar(breathing);
-    this.glow.scale.setScalar(7.8 * (0.92 + spk * 0.22));
 
-    this.renderer.render(this.scene, this.camera);
+    this.composer.render(dt);
   };
 
   private handleResize = (): void => {
     const width = this.mount.clientWidth;
     const height = this.mount.clientHeight;
+    const pr = Math.min(window.devicePixelRatio, 2);
 
     this.camera.aspect = width / Math.max(height, 1);
     this.camera.updateProjectionMatrix();
+    this.renderer.setPixelRatio(pr);
     this.renderer.setSize(width, height);
+    this.composer.setPixelRatio(pr);
+    this.composer.setSize(width, height);
   };
-
-  private buildGlowTexture(): THREE.Texture {
-    const size = 256;
-    const canvas = document.createElement("canvas");
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext("2d");
-
-    if (!ctx) {
-      return new THREE.Texture();
-    }
-
-    const grad = ctx.createRadialGradient(size / 2, size / 2, 10, size / 2, size / 2, size / 2);
-    grad.addColorStop(0, "rgba(200, 230, 255, 0.95)");
-    grad.addColorStop(0.28, "rgba(90, 140, 255, 0.45)");
-    grad.addColorStop(1, "rgba(9, 25, 54, 0)");
-
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, size, size);
-
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.needsUpdate = true;
-    return tex;
-  }
 }
