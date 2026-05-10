@@ -105,7 +105,13 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
     <div
       ref={hostRef}
       className={className}
-      style={{ position: "relative", width: "100%", height: "100%", minHeight: "120px" }}
+      style={{
+        position: "relative",
+        width: "100%",
+        height: "100%",
+        minHeight: "120px",
+        containerType: "size"
+      }}
     >
       {showNovaTitle ? (
         <div
@@ -117,8 +123,8 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
             style={{
               margin: 0,
               padding: 0,
-              fontSize: "clamp(2.2rem, 18vw, 5.5rem)",
-              letterSpacing: "clamp(0.24rem, 1.3vw, 1.1rem)",
+              fontSize: "clamp(1.35rem, 20cqmin, 2.45rem)",
+              letterSpacing: "clamp(0.1rem, 2.5cqmin, 0.65rem)",
               lineHeight: 1,
               color: "rgba(255, 255, 255, 0.92)",
               textAlign: "center",

@@ -204,10 +204,11 @@ class ReactiveOrbCore {
   };
 
   private updateDisplacements(dt: number): void {
-    const maxSpike = Math.min(this.width, this.height) * 0.1;
+    // Slightly larger than Nova_Orb 0.1 so TTS (speech band) reads as taller spikes on smaller mounts.
+    const maxSpike = Math.min(this.width, this.height) * 0.14;
     const calmMul = this.presentationIdleCalm ? 0.35 : 1;
     const live = this.audio.ready;
-    const intensity = (live ? 0.18 + this.audio.energy * 2.4 : 0.15) * calmMul;
+    const intensity = (live ? 0.24 + this.audio.energy * 4.0 : 0.15) * calmMul;
     const attack = live ? 0.42 : 0.18;
     const decay = live ? 0.28 : 0.16;
 
@@ -215,9 +216,10 @@ class ReactiveOrbCore {
       const t = i / this.pointCount;
       const angle = t * Math.PI * 2;
       const spectral = this.getWrappedSpectrum(t);
-      const wave = (Math.sin(this.time * 60 + i * 0.22) * 0.5 + 0.5) * 0.06;
+      const wave = (Math.sin(this.time * 60 + i * 0.22) * 0.5 + 0.5) * 0.075;
 
-      const target = Math.pow(spectral, 1.85) * maxSpike * intensity + wave * maxSpike;
+      // Lower exponent = less squash on mid-level bins → visibly higher waves when Nova speaks.
+      const target = Math.pow(spectral, 1.48) * maxSpike * intensity + wave * maxSpike;
       const outwardOnly = Math.max(0, target);
 
       const displacementAlpha = outwardOnly > this.displacements[i] ? attack * dt : decay * dt;
@@ -242,7 +244,7 @@ class ReactiveOrbCore {
 
     const averaged = sampleA * 0.34 + sampleB * 0.26 + sampleC * 0.24 + sampleD * 0.16;
 
-    return Math.max(averaged, this.audio.energy * 0.1);
+    return Math.max(averaged, this.audio.energy * 0.22);
   }
 
   private render(): void {
