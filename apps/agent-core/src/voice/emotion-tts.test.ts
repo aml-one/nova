@@ -1,66 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  augmentOrpheusSpeechForMood,
-  countOrpheusNonverbTags,
-  ensureLexAuHungarianCueFallback,
-  isHungarianLikeForOrpheusVoice
-} from "./emotion-tts.js";
-
-describe("isHungarianLikeForOrpheusVoice", () => {
-  it("detects diacritic-heavy Hungarian", () => {
-    expect(isHungarianLikeForOrpheusVoice("A csend néha kényelmes.")).toBe(true);
-  });
-
-  it("detects Latin-only HU-like prose without English hints", () => {
-    expect(isHungarianLikeForOrpheusVoice("csak itt vagyok")).toBe(true);
-  });
-
-  it("is false for plain English", () => {
-    expect(isHungarianLikeForOrpheusVoice("Hello from Nova. This is a test.")).toBe(false);
-  });
-});
-
-describe("ensureLexAuHungarianCueFallback", () => {
-  it("does not prefix chuckle by default (custom / bilingual Orpheus)", () => {
-    expect(ensureLexAuHungarianCueFallback("újra itt vagyok")).toBe("újra itt vagyok");
-    expect(ensureLexAuHungarianCueFallback("csak itt vagyok")).toBe("csak itt vagyok");
-  });
-
-  it("prefixes chuckle when NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE is set (stock Lex-au)", () => {
-    const k = "NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE";
-    const prev = process.env[k];
-    process.env[k] = "1";
-    try {
-      const out = ensureLexAuHungarianCueFallback("újra itt vagyok");
-      expect(out.toLowerCase().startsWith("<chuckle>")).toBe(true);
-      expect(out).toContain("újra itt vagyok");
-      const out2 = ensureLexAuHungarianCueFallback("csak itt vagyok");
-      expect(out2.toLowerCase().startsWith("<chuckle>")).toBe(true);
-    } finally {
-      if (prev === undefined) {
-        delete process.env[k];
-      } else {
-        process.env[k] = prev;
-      }
-    }
-  });
-
-  it("does not change text that already has a cue when Lex-au mode is on", () => {
-    const k = "NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE";
-    const prev = process.env[k];
-    process.env[k] = "1";
-    try {
-      const raw = "Szia! <chuckle> Újra itt vagyok.";
-      expect(ensureLexAuHungarianCueFallback(raw)).toBe(raw);
-    } finally {
-      if (prev === undefined) {
-        delete process.env[k];
-      } else {
-        process.env[k] = prev;
-      }
-    }
-  });
-});
+import { augmentOrpheusSpeechForMood, countOrpheusNonverbTags } from "./emotion-tts.js";
 
 describe("countOrpheusNonverbTags", () => {
   it("detects standard Lex-au tags", () => {
@@ -131,19 +70,6 @@ describe("augmentOrpheusSpeechForMood", () => {
       }
     }
     expect(found).toBe(true);
-  });
-
-  it("does not prefix English Hmm or Lex-au chuckle for Hungarian-heavy neutral text", () => {
-    const text =
-      "Persze, szívesen! Itt vagyok neked, hogy segítsek a feladataidban, válaszoljak a kérdéseidre, vagy csak egy kis kikapcsolódást nyújtsak.";
-    const out = augmentOrpheusSpeechForMood(text, {
-      label: "neutral",
-      valence: 0.19,
-      arousal: 0.25
-    });
-    expect(out.toLowerCase().startsWith("hmm,")).toBe(false);
-    expect(out.toLowerCase().startsWith("<chuckle>")).toBe(false);
-    expect(out).toContain("Itt vagyok");
   });
 
   it("may prefix gasp for anxious surprise wording", () => {

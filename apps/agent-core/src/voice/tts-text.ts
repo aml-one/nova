@@ -125,22 +125,6 @@ export function unshieldOrpheusSpeechCueTags(masked: string, tokens: string[]): 
   });
 }
 
-/** Leading-only: strip repeated `<chuckle>`, `<sigh>`, … before speech (TTS retry when upstream WAV is tiny). */
-const LEADING_ORPHEUS_SPEECH_CUE_RE = new RegExp(
-  `^(?:\\s*<(?:${ORPHEUS_SPEECH_CUE_NAMES})\\b[^>]*>\\s*)+`,
-  "i"
-);
-
-export function stripLeadingOrpheusSpeechCues(text: string): string {
-  let t = text.replace(/\u00a0/g, " ").trimStart();
-  let prev = "";
-  while (t !== prev) {
-    prev = t;
-    t = t.replace(LEADING_ORPHEUS_SPEECH_CUE_RE, "").trimStart();
-  }
-  return t.trimEnd();
-}
-
 /**
  * Removes Orpheus voice-cue tags (`<chuckle>`, `<sigh>`, `<laugh>`, …) from a string so it can be
  * shown as a transcript / chat body without the TTS hints leaking into the visible message. The

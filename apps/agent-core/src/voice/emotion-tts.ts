@@ -12,43 +12,6 @@ export function countOrpheusNonverbTags(text: string): number {
   return (text.match(NONVERB_TAG_RE) ?? []).length;
 }
 
-/**
- * **Opt-in only** (stock Lex-au): some stacks return near-silent WAVs for Hungarian-heavy text with no
- * `<chuckle>` / `<laugh>` / … (HTTP 200, tiny body). When `NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE=1` on
- * agent-core, prefix one `<chuckle>` if there are no cues yet and HU-like heuristics match.
- *
- * Default is **no** automatic prefix — fine for custom bilingual Orpheus (e.g. Tara EN+HU). Orpheus fetch
- * may still retry once without leading cues if the first WAV response is suspiciously small.
- */
-export function ensureLexAuHungarianCueFallback(text: string): string {
-  const enabled =
-    process.env.NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE === "1" ||
-    process.env.NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE === "true";
-  if (!enabled) {
-    return text.trim();
-  }
-  const t = text.trim();
-  if (!t || t.length < 8) {
-    return t;
-  }
-  if (countOrpheusNonverbTags(t) > 0) {
-    return t;
-  }
-  if (shouldSkipEnglishHmmFiller(t) || looksLikeLatinProseWithoutEnglishHints(t)) {
-    return `<chuckle> ${t}`;
-  }
-  return t;
-}
-
-/** True when text looks Hungarian-heavy (for optional alternate Orpheus `voice` id only). */
-export function isHungarianLikeForOrpheusVoice(text: string): boolean {
-  const t = text.trim();
-  if (t.length < 8) {
-    return false;
-  }
-  return shouldSkipEnglishHmmFiller(t) || looksLikeLatinProseWithoutEnglishHints(t);
-}
-
 function stableRoll(text: string, salt: number): number {
   let h = 2166136261 >>> 0;
   const payload = `${text}\0${salt}`;
@@ -77,29 +40,6 @@ function alreadyHmmPrefixed(text: string): boolean {
   return /^hm+m?[,.!\s]/i.test(text);
 }
 
-/**
- * Hungarian-heavy Latin (áéíóöőúüű): English mood fillers like "Hmm," often make Tara HU sound
- * like it is reading the whole paragraph with English prosody.
- */
-function shouldSkipEnglishHmmFiller(text: string): boolean {
-  const diacCount = (text.match(/[áéíóöőúüűÁÉÍÓÖŐÚÜŰ]/g) ?? []).length;
-  return diacCount >= (text.length < 96 ? 2 : 4);
-}
-
-/** Short Latin prose with no common English function/content words — Lex-au often needs a cue like HU diacritics. */
-function looksLikeLatinProseWithoutEnglishHints(text: string): boolean {
-  const t = text.trim();
-  if (t.length < 10 || t.length > 480) {
-    return false;
-  }
-  const englishHits = (
-    t.match(
-      /\b(the|and|what|with|your|this|that|have|from|here|hello|about|please|thanks|thank you|good|nice|great|will|can|not|just|only|very|really)\b/gi
-    ) ?? []
-  ).length;
-  return englishHits === 0;
-}
-
 /** True when synthesis already starts with a non-speech tag (avoid stacking prefixes). */
 function hasLeadingNonverbPrefix(text: string): boolean {
   return /^\s*<(?:groan|sigh|sniffle|gasp|cough)\b[^>]*>/i.test(text);
@@ -126,8 +66,6 @@ export function augmentOrpheusSpeechForMood(
     return result;
   }
 
-  result = ensureLexAuHungarianCueFallback(result);
-
   const thinkingCue =
     /\b(let me think|let's think|consider|therefore|perhaps|probably|might mean|not sure yet|good question)\b/i.test(
       result
@@ -151,7 +89,7 @@ export function augmentOrpheusSpeechForMood(
     !alreadyHmmPrefixed(result) &&
     stableRoll(trimmed, 53) < 0.14;
 
-  if ((hmmThinking || hmmJoyfulWarm) && !shouldSkipEnglishHmmFiller(result)) {
+  if (hmmThinking || hmmJoyfulWarm) {
     result = `Hmm, ${result}`;
   }
 

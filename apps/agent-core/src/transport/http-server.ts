@@ -2256,7 +2256,7 @@ export async function startHttpServer(options: HttpServerOptions): Promise<void>
           pipeline: [
             "requestText: raw POST body (assistant markdown allowed)",
             "preparedForSpeech: strips thinking blocks, fences, nova tags, markdown → plain",
-            "sentToOrpheus: mood augmentation (Hmm; <laugh>/<chuckle>/…); optional Lex-au HU `<chuckle>` only when NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE=1 — Orpheus `input`"
+            "sentToOrpheus: mood augmentation (Hmm prefixes; <laugh>/<chuckle>/<sigh>/<gasp>/<groan>/<cough>/<sniffle>) — Orpheus `input`"
           ]
         });
       }

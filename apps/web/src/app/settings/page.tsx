@@ -176,7 +176,6 @@ type SettingsState = {
     baseUrl: string;
     apiKey: string;
     voice: string;
-    voiceHungarian: string;
     model: string;
     responseFormat: "mp3" | "wav" | "opus" | "pcm" | "flac";
   };
@@ -349,7 +348,6 @@ const DEFAULT_SETTINGS: SettingsState = {
     baseUrl: "http://127.0.0.1:5005",
     apiKey: "",
     voice: "tara",
-    voiceHungarian: "",
     model: "",
     responseFormat: "wav"
   },
@@ -4074,12 +4072,7 @@ export default function SettingsPage() {
                 <a className="underline" href="https://github.com/Lex-au/Orpheus-FastAPI" rel="noreferrer" target="_blank">
                   Orpheus-FastAPI
                 </a>{" "}
-                exposes <code className="text-xs">POST /v1/audio/speech</code>. Agent-core proxies synthesis for the web UI. Upstream Lex-au documents
-                stock voices for several languages; Nova does not assume your inference GGUF — if you run a custom bilingual speaker (e.g. Tara
-                trained for English and Hungarian), use that voice id in <strong>Voice id</strong> and leave the Hungarian alternate field empty unless
-                your server maps a different id for HU. Stock Lex-au sometimes needs a leading <code className="text-[10px]">&lt;chuckle&gt;</code> on HU-heavy
-                lines to avoid near-silent WAVs — enable that only with <code className="text-[10px]">NOVA_ORPHEUS_LEXAU_HU_SILENCE_CUE=1</code> on agent-core
-                (off by default for custom bilingual models).
+                exposes <code className="text-xs">POST /v1/audio/speech</code>. Agent-core proxies synthesis for the web UI.
               </p>
               <label className="flex items-center gap-2">
                 <Checkbox
@@ -4124,14 +4117,6 @@ export default function SettingsPage() {
                   />
                 </label>
               </div>
-              <label className="grid gap-1 text-xs">
-                Alternate voice id for Hungarian-like text (optional)
-                <Input
-                  value={settings.orpheusTts.voiceHungarian}
-                  onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, voiceHungarian: e.target.value } }))}
-                  placeholder="only if your Orpheus server uses a different speaker id for HU — else leave empty"
-                />
-              </label>
               <label className="grid gap-1 text-xs">
                 Response format
                 <Select
@@ -5421,7 +5406,6 @@ function normalizeSettings(value: Partial<SettingsState> | undefined): SettingsS
       baseUrl: value?.orpheusTts?.baseUrl ?? DEFAULT_SETTINGS.orpheusTts.baseUrl,
       apiKey: value?.orpheusTts?.apiKey ?? DEFAULT_SETTINGS.orpheusTts.apiKey,
       voice: value?.orpheusTts?.voice ?? DEFAULT_SETTINGS.orpheusTts.voice,
-      voiceHungarian: value?.orpheusTts?.voiceHungarian ?? DEFAULT_SETTINGS.orpheusTts.voiceHungarian,
       model: value?.orpheusTts?.model ?? DEFAULT_SETTINGS.orpheusTts.model,
       responseFormat:
         value?.orpheusTts?.responseFormat === "mp3" ||

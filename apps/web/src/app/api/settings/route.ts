@@ -126,7 +126,6 @@ type AppSettingsPayload = {
     baseUrl?: string;
     apiKey?: string;
     voice?: string;
-    voiceHungarian?: string;
     model?: string;
     responseFormat?: "mp3" | "wav" | "opus" | "pcm" | "flac";
   };

@@ -6,7 +6,6 @@ import {
   prepareChatTextForSpeech,
   repairUnclosedOrpheusCueOpens,
   stripChannelAssistantScratchpad,
-  stripLeadingOrpheusSpeechCues,
   stripNovaToneMarkup,
   stripOrpheusSpeechCues
 } from "./tts-text.js";
@@ -15,20 +14,6 @@ describe("stripNovaToneMarkup", () => {
   it("unwraps tone segments and drops stray closers", () => {
     expect(stripNovaToneMarkup("Hello [nova:soft]aside[/nova] there.")).toBe("Hello aside there.");
     expect(stripNovaToneMarkup("[nova:strong]key[/nova]")).toBe("key");
-  });
-});
-
-describe("stripLeadingOrpheusSpeechCues", () => {
-  it("removes one leading cue and preserves body", () => {
-    expect(stripLeadingOrpheusSpeechCues("<chuckle> Akkor egy kis időutazás.")).toBe("Akkor egy kis időutazás.");
-  });
-
-  it("removes stacked leading cues", () => {
-    expect(stripLeadingOrpheusSpeechCues("<chuckle> <sigh> Hello")).toBe("Hello");
-  });
-
-  it("does not strip inline cues", () => {
-    expect(stripLeadingOrpheusSpeechCues("Hello <chuckle> there")).toBe("Hello <chuckle> there");
   });
 });
 
@@ -71,7 +56,7 @@ describe("dedupeAdjacentOrpheusCueTags", () => {
 });
 
 describe("repairUnclosedOrpheusCueOpens", () => {
-  it("closes space-separated broken chuckle before Hungarian text", () => {
+  it("closes space-separated broken chuckle before glued prose", () => {
     const raw = "Szívesen! <chuckle Akkor egy másik kedvenc";
     expect(repairUnclosedOrpheusCueOpens(raw)).toContain("<chuckle>");
     expect(repairUnclosedOrpheusCueOpens(raw)).toContain("<chuckle> Akkor");

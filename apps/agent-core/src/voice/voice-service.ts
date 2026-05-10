@@ -5,12 +5,8 @@ import { basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import type { AppSettings } from "../storage/repositories/settings-repository.js";
 import type { EmotionState } from "../emotion/emotion-service.js";
-import {
-  augmentOrpheusSpeechForMood,
-  ensureLexAuHungarianCueFallback,
-  isHungarianLikeForOrpheusVoice
-} from "./emotion-tts.js";
-import { normalizeOrpheusSpeechCues, prepareChatTextForSpeech, stripLeadingOrpheusSpeechCues } from "./tts-text.js";
+import { augmentOrpheusSpeechForMood } from "./emotion-tts.js";
+import { normalizeOrpheusSpeechCues, prepareChatTextForSpeech } from "./tts-text.js";
 import { prependSilenceToWavPcm } from "./wav-prepend-silence.js";
 
 /** True when agent-core can run mic upload transcription (Whisper API or NOVA_STT_COMMAND). */
@@ -31,9 +27,6 @@ function runSttShellCommand(command: string, audioPath: string) {
   }
   return spawnSync(trimmed, [audioPath], { shell: true, encoding: "utf8" });
 }
-
-/** Lex-au “silent” HU WAVs are often ~9KB; normal clips are much larger. Retry without leading cues below this (raw upstream, before prepended silence). */
-const ORPHEUS_RAW_WAV_RETRY_MAX_BYTES = 14_000;
 
 const MIME_BY_FORMAT: Record<AppSettings["orpheusTts"]["responseFormat"], string> = {
   mp3: "audio/mpeg",
@@ -184,7 +177,7 @@ export class VoiceService {
     } catch {
       /* keep prepared */
     }
-    return normalizeOrpheusSpeechCues(ensureLexAuHungarianCueFallback(preparedText));
+    return normalizeOrpheusSpeechCues(preparedText);
   }
 
   private async synthesizeOrpheusBufferInternal(preparedOrRawText: string): Promise<Buffer> {
@@ -193,57 +186,19 @@ export class VoiceService {
     return this.fetchOrpheusAudio(sent);
   }
 
-  /**
-   * Calls Orpheus once; for WAV, may call again without leading `<chuckle>` / … if the first response is
-   * suspiciously small (Lex-au “silent HU” blobs ~9KB). `getTtsPipelineTrace` still shows the nominal
-   * `sentToOrpheus` string — use agent logs / audio size if they diverge.
-   */
   private async fetchOrpheusAudio(inputText: string): Promise<Buffer> {
     const tts = this.getSettings?.().orpheusTts;
     if (!tts?.enabled || !tts.baseUrl.trim()) {
       throw new Error("Orpheus TTS is not enabled or base URL is empty");
     }
-    let buf = await this.fetchOrpheusAudioBytes(tts, inputText);
-    const rf = tts.responseFormat ?? "wav";
-    if (rf === "wav" && buf.length < ORPHEUS_RAW_WAV_RETRY_MAX_BYTES) {
-      const stripped = stripLeadingOrpheusSpeechCues(inputText);
-      if (stripped.length > 0 && stripped !== inputText.trim()) {
-        try {
-          const again = await this.fetchOrpheusAudioBytes(tts, stripped);
-          if (again.length > buf.length) {
-            buf = again;
-          }
-        } catch {
-          // Keep first buffer; better than failing the whole request if the retry errors.
-        }
-      }
-    }
-    if (rf === "wav") {
-      const raw = process.env.NOVA_TTS_LEADING_SILENCE_MS?.trim();
-      const parsed = raw ? Number(raw) : NaN;
-      /** Default favors clean starts over speed. Tune with `NOVA_TTS_LEADING_SILENCE_MS` if needed. */
-      const silenceMs =
-        Number.isFinite(parsed) && parsed >= 0 ? Math.min(500, parsed) : 185;
-      buf = prependSilenceToWavPcm(buf, silenceMs) as Buffer;
-    }
-    return buf;
-  }
-
-  /** One Orpheus HTTP round-trip; raw body only (no prepended silence). */
-  private async fetchOrpheusAudioBytes(tts: AppSettings["orpheusTts"], inputText: string): Promise<Buffer> {
     const base = tts.baseUrl.replace(/\/+$/, "");
     const url = `${base}/v1/audio/speech`;
     const body: Record<string, unknown> = {
       input: inputText,
       response_format: tts.responseFormat ?? "wav"
     };
-    const voicePrimary = (tts.voice ?? "").trim() || "tara";
-    const voiceHu = (tts.voiceHungarian ?? "").trim();
-    const voice =
-      voiceHu && isHungarianLikeForOrpheusVoice(inputText) ? voiceHu.slice(0, 128) : voicePrimary.slice(0, 128);
-    if (voice) {
-      body.voice = voice;
-    }
+    const voice = (tts.voice ?? "").trim() || "tara";
+    body.voice = voice.slice(0, 128);
     if (tts.model.trim()) {
       body.model = tts.model.trim();
     }
@@ -276,9 +231,18 @@ export class VoiceService {
       );
     }
     const arrayBuf = await response.arrayBuffer();
-    const buf: Buffer = Buffer.from(arrayBuf);
+    let buf: Buffer = Buffer.from(arrayBuf);
     if (buf.length === 0) {
       throw new Error("TTS upstream returned an empty body (0 bytes) while HTTP status was OK");
+    }
+    const rf = tts.responseFormat ?? "wav";
+    if (rf === "wav") {
+      const raw = process.env.NOVA_TTS_LEADING_SILENCE_MS?.trim();
+      const parsed = raw ? Number(raw) : NaN;
+      /** Default favors clean starts over speed. Tune with `NOVA_TTS_LEADING_SILENCE_MS` if needed. */
+      const silenceMs =
+        Number.isFinite(parsed) && parsed >= 0 ? Math.min(500, parsed) : 185;
+      buf = prependSilenceToWavPcm(buf, silenceMs) as Buffer;
     }
     return buf;
   }

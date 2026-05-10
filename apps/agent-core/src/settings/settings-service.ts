@@ -163,7 +163,6 @@ const DEFAULT_SETTINGS: AppSettings = {
     baseUrl: process.env.NOVA_ORPHEUS_TTS_BASE_URL?.trim() || "http://127.0.0.1:5005",
     apiKey: process.env.NOVA_ORPHEUS_TTS_API_KEY?.trim() ?? "",
     voice: process.env.NOVA_ORPHEUS_TTS_VOICE?.trim() || "tara",
-    voiceHungarian: process.env.NOVA_ORPHEUS_TTS_VOICE_HUNGARIAN?.trim() ?? "",
     model: process.env.NOVA_ORPHEUS_TTS_MODEL?.trim() ?? "",
     responseFormat:
       process.env.NOVA_ORPHEUS_TTS_FORMAT === "mp3"
@@ -427,7 +426,6 @@ export class SettingsService {
         baseUrl: update.orpheusTts?.baseUrl ?? current.orpheusTts.baseUrl,
         apiKey: update.orpheusTts?.apiKey ?? current.orpheusTts.apiKey,
         voice: update.orpheusTts?.voice ?? current.orpheusTts.voice,
-        voiceHungarian: update.orpheusTts?.voiceHungarian ?? current.orpheusTts.voiceHungarian,
         model: update.orpheusTts?.model ?? current.orpheusTts.model,
         responseFormat: update.orpheusTts?.responseFormat ?? current.orpheusTts.responseFormat
       },
@@ -793,7 +791,6 @@ export class SettingsService {
         baseUrl: String(settings.orpheusTts?.baseUrl ?? "").trim() || "http://127.0.0.1:5005",
         apiKey: String(settings.orpheusTts?.apiKey ?? "").trim(),
         voice: (String(settings.orpheusTts?.voice ?? "").trim().slice(0, 128) || "tara").slice(0, 128),
-        voiceHungarian: String(settings.orpheusTts?.voiceHungarian ?? "").trim().slice(0, 128),
         model: String(settings.orpheusTts?.model ?? "").trim().slice(0, 128),
         responseFormat:
           settings.orpheusTts?.responseFormat === "mp3"

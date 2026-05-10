@@ -13,7 +13,7 @@ const mockSettings = (): AppSettings =>
       syncWrites: false
     },
     sentiCore: { enabled: false, orchestrationMarkdownPath: "" },
-    orpheusTts: { enabled: false, baseUrl: "", apiKey: "", voice: "", voiceHungarian: "", model: "", responseFormat: "wav" }
+    orpheusTts: { enabled: false, baseUrl: "", apiKey: "", voice: "", model: "", responseFormat: "wav" }
   }) as unknown as AppSettings;
 
 describe("MemoryService", () => {
