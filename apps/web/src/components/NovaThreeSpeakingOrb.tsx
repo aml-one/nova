@@ -9,12 +9,17 @@ export type NovaThreeSpeakingOrbHandle = {
   setRotationSpeed: (speed: number) => void;
   randomizeDirection: () => void;
   setMoodPalette: (colorA: string, colorB: string, shellRgb: string, glowHex: string) => void;
+  setPresentationIdleCalm: (calm: boolean) => void;
 };
 
 type Props = {
   className?: string;
   baseColor?: string;
   preset?: VoiceOrbPresetName;
+  /** WebGL clears to transparent so the host background shows through. */
+  transparentBackground?: boolean;
+  /** Near-static surface + slow scale pulse (e.g. kiosk when not speaking). */
+  presentationIdleCalm?: boolean;
 };
 
 /**
@@ -22,7 +27,7 @@ type Props = {
  * Mount must have non-zero width/height before construction.
  */
 export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props>(function NovaThreeSpeakingOrb(
-  { className, baseColor = "#ff3d26", preset = "speaking" },
+  { className, baseColor = "#ff3d26", preset = "speaking", transparentBackground, presentationIdleCalm },
   ref
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -43,13 +48,20 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
     },
     setMoodPalette: (colorA: string, colorB: string, shellRgb: string, glowHex: string) => {
       orbRef.current?.setMoodPalette(colorA, colorB, shellRgb, glowHex);
+    },
+    setPresentationIdleCalm: (calm: boolean) => {
+      orbRef.current?.setPresentationIdleCalm(calm);
     }
   }));
 
   useEffect(() => {
     const el = hostRef.current;
     if (!el) return;
-    const orb = new AIVoiceOrb(el, { radius: 1.85, baseColor });
+    const orb = new AIVoiceOrb(el, {
+      radius: 1.85,
+      baseColor,
+      transparentBackground: transparentBackground === true
+    });
     orbRef.current = orb;
     return () => {
       try {
@@ -59,11 +71,14 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
       }
       orbRef.current = null;
     };
-  }, [baseColor]);
+  }, [baseColor, transparentBackground]);
 
   useEffect(() => {
-    orbRef.current?.applyPreset(preset);
-  }, [preset]);
+    const orb = orbRef.current;
+    if (!orb) return;
+    orb.setPresentationIdleCalm(presentationIdleCalm ?? false);
+    orb.applyPreset(preset);
+  }, [preset, presentationIdleCalm, baseColor, transparentBackground]);
 
   return <div ref={hostRef} className={className} style={{ width: "100%", height: "100%", minHeight: "120px" }} />;
 });

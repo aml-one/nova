@@ -7,6 +7,8 @@ import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 export interface VoiceOrbOptions {
   radius?: number;
   baseColor?: string;
+  /** Clear WebGL to transparent so the page background shows (e.g. kiosk). */
+  transparentBackground?: boolean;
 }
 
 export interface RotationDirection {
@@ -25,9 +27,9 @@ export interface VoiceOrbPreset {
 
 const DEFAULT_PRESETS: Record<VoiceOrbPresetName, VoiceOrbPreset> = {
   calm: {
-    speechLevel: 0.14,
-    rotationSpeed: 0.34,
-    direction: { x: 0.15, y: 1, z: 0.1 }
+    speechLevel: 0,
+    rotationSpeed: 0.085,
+    direction: { x: 0.12, y: 1, z: 0.06 }
   },
   thinking: {
     speechLevel: 0.3,
@@ -336,8 +338,11 @@ export class AIVoiceOrb {
   private rotationSpeed = 0.5;
   private rotationDirection = new THREE.Vector3(0.4, 1, 0.2).normalize();
   private targetDirection = this.rotationDirection.clone();
-  private speechLevel = 0.2;
-  private speechPeak = 0.2;
+  private speechLevel = 0;
+  private speechPeak = 0;
+
+  /** Near-static mesh + slow breathing when Nova is not speaking (kiosk idle, etc.). */
+  private presentationIdleCalm = false;
 
   private readonly moodTarget = {
     colorA: new THREE.Color("#ff2a08"),
@@ -370,14 +375,14 @@ export class AIVoiceOrb {
     uTime: THREE.IUniform<number>;
   };
 
-  private dampedSpeak = 0.2;
-  private dampedSpeakPeak = 0.2;
+  private dampedSpeak = 0;
+  private dampedSpeakPeak = 0;
 
   private readonly variations: Record<"volume" | "lowLevel" | "mediumLevel" | "highLevel", Variation> = {
-    volume: { current: 0.152, target: 0.152, upEasing: 0.03, downEasing: 0.002 },
-    lowLevel: { current: 0.0003, target: 0.0003, upEasing: 0.005, downEasing: 0.002 },
-    mediumLevel: { current: 3.587, target: 3.587, upEasing: 0.008, downEasing: 0.004 },
-    highLevel: { current: 0.65, target: 0.65, upEasing: 0.02, downEasing: 0.001 }
+    volume: { current: 0.02, target: 0.02, upEasing: 0.03, downEasing: 0.002 },
+    lowLevel: { current: 0.00008, target: 0.00008, upEasing: 0.005, downEasing: 0.002 },
+    mediumLevel: { current: 2.08, target: 2.08, upEasing: 0.008, downEasing: 0.004 },
+    highLevel: { current: 0.06, target: 0.06, upEasing: 0.02, downEasing: 0.001 }
   };
 
   private readonly offsetSpherical = new THREE.Spherical(1, Math.random() * Math.PI, Math.random() * Math.PI * 2);
@@ -402,26 +407,36 @@ export class AIVoiceOrb {
     const w = this.mount.clientWidth;
     const h = Math.max(this.mount.clientHeight, 1);
     const pr = Math.min(window.devicePixelRatio, 2);
+    const transparent = options.transparentBackground === true;
 
     this.mount.style.position = "relative";
     this.mount.style.overflow = "hidden";
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: transparent });
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h);
-    this.renderer.setClearColor(ORGANIC_CLEAR, 1);
+    if (transparent) {
+      this.renderer.setClearColor(0x000000, 0);
+    } else {
+      this.renderer.setClearColor(ORGANIC_CLEAR, 1);
+    }
     this.renderer.toneMapping = THREE.NoToneMapping;
 
     const canvas = this.renderer.domElement;
     canvas.style.display = "block";
     canvas.style.width = "100%";
     canvas.style.height = "100%";
+    if (transparent) {
+      canvas.style.background = "transparent";
+    }
     this.mount.appendChild(canvas);
 
     this.camera = new THREE.PerspectiveCamera(25, w / h, 0.1, 100);
     this.camera.position.set(0, 0, 7);
 
-    this.renderPass = new RenderPass(this.scene, this.camera, null, new THREE.Color(ORGANIC_CLEAR), 1);
+    this.renderPass = transparent
+      ? new RenderPass(this.scene, this.camera, null, new THREE.Color(0, 0, 0), 0)
+      : new RenderPass(this.scene, this.camera, null, new THREE.Color(ORGANIC_CLEAR), 1);
 
     this.bloomPass = new UnrealBloomPass(new THREE.Vector2(w, h), 0.42, 0.55, 0.82);
     this.bloomPass.compositeMaterial.uniforms.uTintColor = { value: new THREE.Color("#4a0a6e") };
@@ -497,6 +512,20 @@ export class AIVoiceOrb {
     this.syncLightUniforms();
   }
 
+  setPresentationIdleCalm(calm: boolean): void {
+    this.presentationIdleCalm = calm;
+    if (calm) {
+      this.speechLevel = 0;
+      this.speechPeak = 0;
+      this.dampedSpeak = 0;
+      this.dampedSpeakPeak = 0;
+      this.variations.volume.current = 0.018;
+      this.variations.lowLevel.current = 0.00006;
+      this.variations.mediumLevel.current = 2.02;
+      this.variations.highLevel.current = 0.055;
+    }
+  }
+
   setSpeechEnvelope(smooth: number, peak: number): void {
     this.speechLevel = THREE.MathUtils.clamp(smooth, 0, 1);
     this.speechPeak = THREE.MathUtils.clamp(peak, 0, 1);
@@ -537,13 +566,17 @@ export class AIVoiceOrb {
 
   applyPreset(name: VoiceOrbPresetName): void {
     const preset = DEFAULT_PRESETS[name];
-    this.setSpeechLevel(preset.speechLevel);
+    if (!this.presentationIdleCalm) {
+      this.setSpeechLevel(preset.speechLevel);
+    }
     this.setRotationSpeed(preset.rotationSpeed);
     this.setRotationDirection(preset.direction);
   }
 
   applyPresetValues(values: VoiceOrbPreset): void {
-    this.setSpeechLevel(values.speechLevel);
+    if (!this.presentationIdleCalm) {
+      this.setSpeechLevel(values.speechLevel);
+    }
     this.setRotationSpeed(values.rotationSpeed);
     this.setRotationDirection(values.direction);
   }
@@ -579,6 +612,14 @@ export class AIVoiceOrb {
    * then apply Bruno's exact formulas (see Sphere.js in the demo repo).
    */
   private refreshSpeechTargets(speak: number, speakPeak: number): void {
+    if (this.presentationIdleCalm) {
+      this.variations.volume.target = 0.018;
+      this.variations.lowLevel.target = 0.00006;
+      this.variations.mediumLevel.target = 2.02;
+      this.variations.highLevel.target = 0.055;
+      return;
+    }
+
     const s = THREE.MathUtils.clamp(speak, 0, 1);
     const p = THREE.MathUtils.clamp(speakPeak, 0, 1);
     const level0 = THREE.MathUtils.clamp(s * 0.55 + p * 0.35, 0, 1);
@@ -615,6 +656,12 @@ export class AIVoiceOrb {
   }
 
   private stepOrganicOffset(deltaMs: number): void {
+    if (this.presentationIdleCalm) {
+      // Freeze noise phase drift so the surface stays visually calm; breathing is scale-only.
+      this.uniforms.uTime.value += deltaMs * 0.000002;
+      return;
+    }
+
     const elapsedTime = deltaMs * this.timeFrequency;
     const offsetTime = elapsedTime * 0.3;
     this.offsetSpherical.phi = ((Math.sin(offsetTime * 0.001) * Math.sin(offsetTime * 0.00321)) * 0.5 + 0.5) * Math.PI;
@@ -632,8 +679,10 @@ export class AIVoiceOrb {
     const dt = this.clock.getDelta();
     const deltaMs = Math.min(dt * 1000, 60);
 
-    this.dampedSpeak = THREE.MathUtils.damp(this.dampedSpeak, this.speechLevel, 10, dt);
-    this.dampedSpeakPeak = THREE.MathUtils.damp(this.dampedSpeakPeak, this.speechPeak, 28, dt);
+    const dampRate = this.presentationIdleCalm ? 22 : 10;
+    const dampPeakRate = this.presentationIdleCalm ? 36 : 28;
+    this.dampedSpeak = THREE.MathUtils.damp(this.dampedSpeak, this.speechLevel, dampRate, dt);
+    this.dampedSpeakPeak = THREE.MathUtils.damp(this.dampedSpeakPeak, this.speechPeak, dampPeakRate, dt);
 
     this.refreshSpeechTargets(this.dampedSpeak, this.dampedSpeakPeak);
     this.stepVariations(deltaMs);
@@ -650,8 +699,11 @@ export class AIVoiceOrb {
     const step = this.rotationSpeed * dt;
     this.mesh.rotateOnAxis(this.rotationDirection, step);
 
-    const spk = Math.max(this.dampedSpeak, this.dampedSpeakPeak * 0.82);
-    const breathing = 1 + Math.sin(this.clock.elapsedTime * 1.65) * 0.018 * (1 + spk * 2.4);
+    const calm = this.presentationIdleCalm;
+    const spk = calm ? 0 : Math.max(this.dampedSpeak, this.dampedSpeakPeak * 0.82);
+    const breathOmega = calm ? 0.95 : 1.65;
+    const breathAmp = calm ? 0.0075 : 0.018 * (1 + spk * 2.4);
+    const breathing = 1 + Math.sin(this.clock.elapsedTime * breathOmega) * breathAmp;
     this.mesh.scale.setScalar(breathing);
 
     this.composer.render(dt);

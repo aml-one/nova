@@ -1,13 +1,15 @@
 "use client";
 
 import Image from "next/image";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FaMicrophone } from "react-icons/fa6";
 import { ChatMarkdown } from "../../components/chat-markdown";
 import { NovaThreeSpeakingOrb, type NovaThreeSpeakingOrbHandle } from "../../components/NovaThreeSpeakingOrb";
+import type { VoiceOrbPresetName } from "../../lib/ai-voice-orb/AIVoiceOrb";
 import { apiFetch } from "../../lib/api-fetch";
 import { splitTextForTts, stripMarkdownForTts } from "../../lib/chat-tts-text";
 import { loadAudioElementThenPlay } from "../../lib/audio-play";
+import { TtsVoiceOrbDriver } from "../../lib/tts-voice-orb-driver";
 import { cn } from "../../lib/cn";
 
 const NOVA_KIOSK_STT_MIN_BYTES = 900;
@@ -17,7 +19,20 @@ export default function KioskPage() {
   const [sttError, setSttError] = useState<string | null>(null);
   const [listening, setListening] = useState(false);
   const [thinking, setThinking] = useState(false);
+  const [ttsPlaying, setTtsPlaying] = useState(false);
   const orbRef = useRef<NovaThreeSpeakingOrbHandle | null>(null);
+  const kioskTtsOrbDriver = useMemo(
+    () =>
+      new TtsVoiceOrbDriver({
+        getOrb: () => orbRef.current,
+        getMeter: () => null,
+        getEmotionLabel: () => "neutral",
+        requireMeterForAttach: false,
+        enableMoodFromEmotion: false,
+        enablePeriodicDirectionFlip: true
+      }),
+    []
+  );
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
@@ -36,12 +51,15 @@ export default function KioskPage() {
     return () => clearInterval(id);
   }, []);
 
+  useEffect(() => () => kioskTtsOrbDriver.teardownAudioGraph(), [kioskTtsOrbDriver]);
+
   const playTts = useCallback(async (ttsText: string) => {
     const el = audioRef.current;
     if (!el) return;
     const chunks = splitTextForTts(ttsText);
     if (chunks.length === 0) return;
 
+    setTtsPlaying(true);
     const revoke = () => {
       if (objectUrlRef.current) {
         URL.revokeObjectURL(objectUrlRef.current);
@@ -49,45 +67,52 @@ export default function KioskPage() {
       }
     };
 
-    for (const piece of chunks) {
-      const response = await apiFetch("/api/voice/speak-audio", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ text: piece })
-      });
-      if (!response.ok) break;
-      const blob = await response.blob();
-      revoke();
-      const url = URL.createObjectURL(blob);
-      objectUrlRef.current = url;
-      el.src = url;
-      el.onplaying = () => {
-        orbRef.current?.setSpeechEnvelope(0.35, 0.55);
-      };
-      try {
-        await loadAudioElementThenPlay(el);
-        await new Promise<void>((resolve, reject) => {
-          const done = () => {
-            el.removeEventListener("ended", done);
-            el.removeEventListener("error", err);
-            resolve();
-          };
-          const err = () => {
-            el.removeEventListener("ended", done);
-            el.removeEventListener("error", err);
-            reject(new Error("playback"));
-          };
-          el.addEventListener("ended", done, { once: true });
-          el.addEventListener("error", err, { once: true });
+    try {
+      for (const piece of chunks) {
+        const response = await apiFetch("/api/voice/speak-audio", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ text: piece })
         });
-      } catch {
-        break;
-      } finally {
-        orbRef.current?.setSpeechEnvelope(0, 0);
+        if (!response.ok) break;
+        const blob = await response.blob();
+        revoke();
+        const url = URL.createObjectURL(blob);
+        objectUrlRef.current = url;
+        el.src = url;
+        el.onplaying = () => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => kioskTtsOrbDriver.attach(el));
+          });
+        };
+        try {
+          await loadAudioElementThenPlay(el);
+          await new Promise<void>((resolve, reject) => {
+            const done = () => {
+              el.removeEventListener("ended", done);
+              el.removeEventListener("error", err);
+              resolve();
+            };
+            const err = () => {
+              el.removeEventListener("ended", done);
+              el.removeEventListener("error", err);
+              reject(new Error("playback"));
+            };
+            el.addEventListener("ended", done, { once: true });
+            el.addEventListener("error", err, { once: true });
+          });
+        } catch {
+          break;
+        } finally {
+          kioskTtsOrbDriver.stopDriving();
+        }
       }
+    } finally {
+      revoke();
+      kioskTtsOrbDriver.stopDriving();
+      setTtsPlaying(false);
     }
-    revoke();
-  }, []);
+  }, [kioskTtsOrbDriver]);
 
   useEffect(() => {
     const es = new EventSource("/api/kiosk/events");
@@ -187,6 +212,9 @@ export default function KioskPage() {
     }
   }, [playTts]);
 
+  const kioskOrbIdle = !listening && !thinking && !ttsPlaying;
+  const kioskOrbPreset: VoiceOrbPresetName = ttsPlaying ? "speaking" : listening || thinking ? "thinking" : "calm";
+
   const toggleMic = useCallback(() => {
     if (listening) {
       stopRecorder();
@@ -198,8 +226,15 @@ export default function KioskPage() {
   return (
     <div className="flex h-[100dvh] flex-col bg-surface pt-14 text-text sm:pt-16">
       <div className="flex h-[33vh] min-h-[140px] shrink-0 flex-col items-center justify-center px-4">
-        <div className="h-full w-full max-w-[min(52vw,420px)] overflow-hidden rounded-full bg-[#0c0218] shadow-[0_0_36px_rgba(255,45,25,0.18),0_0_64px_rgba(0,100,255,0.1)] ring-1 ring-white/10">
-          <NovaThreeSpeakingOrb ref={orbRef} className="h-full w-full" preset="speaking" baseColor="#ff4420" />
+        <div className="h-full w-full max-w-[min(52vw,420px)] overflow-hidden rounded-full">
+          <NovaThreeSpeakingOrb
+            ref={orbRef}
+            className="h-full w-full"
+            preset={kioskOrbPreset}
+            baseColor="#ff4420"
+            transparentBackground
+            presentationIdleCalm={kioskOrbIdle}
+          />
         </div>
       </div>
 
