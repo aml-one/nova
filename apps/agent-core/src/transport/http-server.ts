@@ -37,6 +37,7 @@ import {
   voiceGatewayStop
 } from "../voice/voice-gateway-control.js";
 import { getRecentTtsEntries, recordTtsSpeakResult } from "../voice/tts-recent-log.js";
+import { formatOrpheusAuthorizationHeader, normalizeOrpheusBaseUrl } from "../voice/orpheus-http.js";
 import { prepareChatTextForSpeech } from "../voice/tts-text.js";
 import { getDatabase } from "../storage/sqlite.js";
 import { RagService } from "../rag/rag-service.js";
@@ -3624,10 +3625,11 @@ async function checkVoiceTtsReachable(getSettings: () => AppSettings): Promise<H
         : "Orpheus disabled; no NOVA_TTS_COMMAND (spoken output optional)"
     };
   }
-  const base = tts.baseUrl.replace(/\/+$/, "");
+  const base = normalizeOrpheusBaseUrl(tts.baseUrl);
   const headers: Record<string, string> = {};
-  if (tts.apiKey.trim()) {
-    headers.authorization = `Bearer ${tts.apiKey.trim()}`;
+  const auth = formatOrpheusAuthorizationHeader(tts.apiKey ?? "");
+  if (auth) {
+    headers.authorization = auth;
   }
   let lastDetail = "";
   for (const path of ["", "/v1/models", "/health"]) {

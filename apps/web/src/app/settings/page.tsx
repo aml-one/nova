@@ -4073,6 +4073,9 @@ export default function SettingsPage() {
                   Orpheus-FastAPI
                 </a>{" "}
                 exposes <code className="text-xs">POST /v1/audio/speech</code>. Agent-core proxies synthesis for the web UI.
+                Use the <strong>server root</strong> as Base URL (e.g. <code className="text-[10px]">http://127.0.0.1:5005</code>) — not{" "}
+                <code className="text-[10px]">…/v1</code> (OpenWebUI-style); Nova appends <code className="text-[10px]">/v1/audio/speech</code>{" "}
+                itself.
               </p>
               <label className="flex items-center gap-2">
                 <Checkbox
@@ -4113,7 +4116,7 @@ export default function SettingsPage() {
                   <Input
                     value={settings.orpheusTts.model}
                     onChange={(e) => setSettings((p) => ({ ...p, orpheusTts: { ...p.orpheusTts, model: e.target.value } }))}
-                    placeholder="tts-1 or omit"
+                    placeholder="orpheus (Lex-au default) or tts-1"
                   />
                 </label>
               </div>

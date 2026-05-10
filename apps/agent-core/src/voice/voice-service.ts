@@ -7,6 +7,7 @@ import type { AppSettings } from "../storage/repositories/settings-repository.js
 import type { EmotionState } from "../emotion/emotion-service.js";
 import { augmentOrpheusSpeechForMood } from "./emotion-tts.js";
 import { normalizeOrpheusSpeechCues, prepareChatTextForSpeech } from "./tts-text.js";
+import { formatOrpheusAuthorizationHeader, normalizeOrpheusBaseUrl } from "./orpheus-http.js";
 import { prependSilenceToWavPcm } from "./wav-prepend-silence.js";
 
 /** True when agent-core can run mic upload transcription (Whisper API or NOVA_STT_COMMAND). */
@@ -191,20 +192,20 @@ export class VoiceService {
     if (!tts?.enabled || !tts.baseUrl.trim()) {
       throw new Error("Orpheus TTS is not enabled or base URL is empty");
     }
-    const base = tts.baseUrl.replace(/\/+$/, "");
+    const base = normalizeOrpheusBaseUrl(tts.baseUrl);
     const url = `${base}/v1/audio/speech`;
     const body: Record<string, unknown> = {
       input: inputText,
-      response_format: tts.responseFormat ?? "wav"
+      response_format: tts.responseFormat ?? "wav",
+      model: (tts.model ?? "").trim() || "orpheus",
+      speed: 1.0
     };
     const voice = (tts.voice ?? "").trim() || "tara";
     body.voice = voice.slice(0, 128);
-    if (tts.model.trim()) {
-      body.model = tts.model.trim();
-    }
     const headers: Record<string, string> = { "content-type": "application/json" };
-    if (tts.apiKey.trim()) {
-      headers.authorization = `Bearer ${tts.apiKey.trim()}`;
+    const auth = formatOrpheusAuthorizationHeader(tts.apiKey ?? "");
+    if (auth) {
+      headers.authorization = auth;
     }
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 120_000);
@@ -237,6 +238,7 @@ export class VoiceService {
     }
     const rf = tts.responseFormat ?? "wav";
     if (rf === "wav") {
+      assertOrpheusWavPayload(buf);
       const raw = process.env.NOVA_TTS_LEADING_SILENCE_MS?.trim();
       const parsed = raw ? Number(raw) : NaN;
       /** Default favors clean starts over speed. Tune with `NOVA_TTS_LEADING_SILENCE_MS` if needed. */
@@ -251,6 +253,24 @@ export class VoiceService {
     const fmt = this.getSettings?.().orpheusTts?.responseFormat ?? "wav";
     return MIME_BY_FORMAT[fmt] ?? "audio/wav";
   }
+}
+
+/** Lex-au Orpheus-FastAPI returns RIFF WAV; HTML/error pages often slip through as HTTP 200 from misconfigured proxies. */
+function assertOrpheusWavPayload(buf: Buffer): void {
+  if (buf.length < 12) {
+    return;
+  }
+  const magic = buf.subarray(0, 4).toString("ascii");
+  if (magic === "RIFF") {
+    return;
+  }
+  const sniff = buf.subarray(0, Math.min(240, buf.length)).toString("utf8");
+  const looksHtml = /<!DOCTYPE|<html|<H1\b/i.test(sniff);
+  throw new Error(
+    looksHtml
+      ? "Orpheus returned HTML instead of WAV. Common fix: set Base URL to the server root (e.g. http://127.0.0.1:5005), not …/v1. Also verify ORPHEUS_API_URL / inference on the Orpheus host."
+      : `Orpheus returned non-WAV audio (expected RIFF, got "${magic}"). Check Orpheus-FastAPI logs and response_format compatibility.`
+  );
 }
 
 function isWavMime(mimeType: string | undefined): boolean {

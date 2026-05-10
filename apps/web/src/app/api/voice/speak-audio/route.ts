@@ -1,5 +1,8 @@
 ﻿import { NextResponse } from "next/server";
-import { getAgentBaseUrl, getAgentHeaders } from "../../../../lib/agent-core";
+import { fetchFromAgent, getAgentHeaders } from "../../../../lib/agent-core";
+
+/** Orpheus synthesis can exceed default serverless limits; agent-core allows up to 120s per upstream call. */
+export const maxDuration = 300;
 
 export async function POST(request: Request): Promise<Response> {
   const body = (await request.json().catch(() => ({}))) as { text?: string };
@@ -7,7 +10,7 @@ export async function POST(request: Request): Promise<Response> {
   if (!text) {
     return NextResponse.json({ error: "text is required" }, { status: 400 });
   }
-  const response = await fetch(`${getAgentBaseUrl(request)}/v1/voice/speak-audio`, {
+  const response = await fetchFromAgent(request, "/v1/voice/speak-audio", {
     method: "POST",
     headers: getAgentHeaders(request, true),
     body: JSON.stringify({ text })
