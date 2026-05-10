@@ -1,7 +1,7 @@
 "use client";
 
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { AIVoiceOrb, type VoiceOrbPresetName } from "../lib/ai-voice-orb/AIVoiceOrb";
+import { AIVoiceRing2D, type VoiceOrbPresetName } from "../lib/ai-voice-ring/AIVoiceRing2D";
 
 export type NovaThreeSpeakingOrbHandle = {
   setSpeechLevel: (level: number) => void;
@@ -23,7 +23,7 @@ type Props = {
 };
 
 /**
- * WebGL speaking orb: organic Perlin sphere (after brunosimon/organic-sphere), driven by TTS levels.
+ * 2D neon voice ring: wavy inner/outer edge (inner clamped to a clear center hole), driven by TTS levels.
  * Mount must have non-zero width/height before construction.
  */
 export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props>(function NovaThreeSpeakingOrb(
@@ -31,7 +31,7 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
   ref
 ) {
   const hostRef = useRef<HTMLDivElement | null>(null);
-  const orbRef = useRef<AIVoiceOrb | null>(null);
+  const orbRef = useRef<AIVoiceRing2D | null>(null);
 
   useImperativeHandle(ref, () => ({
     setSpeechLevel: (level: number) => {
@@ -57,8 +57,7 @@ export const NovaThreeSpeakingOrb = forwardRef<NovaThreeSpeakingOrbHandle, Props
   useEffect(() => {
     const el = hostRef.current;
     if (!el) return;
-    const orb = new AIVoiceOrb(el, {
-      radius: 1.85,
+    const orb = new AIVoiceRing2D(el, {
       baseColor,
       transparentBackground: transparentBackground === true
     });
