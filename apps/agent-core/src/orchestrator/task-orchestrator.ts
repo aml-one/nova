@@ -35,6 +35,8 @@ import { detectWorldClocksIntent, formatWorldClocks } from "../execution/world-c
 import { tryHandleReminderTimerChat } from "../reminders/reminder-chat-handler.js";
 import { parseNaturalLanguageRelayToPerson } from "./natural-language-tell.js";
 import { formatAdminRelayPayload } from "./format-admin-relay-payload.js";
+import { resolvePerplexicaSearchQuery } from "./perplexica-query.js";
+import { pickUrlToAutoFetch } from "./url-fetch-context.js";
 import {
   detectSkillAuthoringIntent,
   enableAuthoredSkill,
@@ -246,7 +248,8 @@ const INTEGRITY_SYSTEM_GUARD =
   "Ground truth = user-pasted text, Nova-injected read-only blocks in this message, real skill/tool results, or clearly labeled general knowledge (not live host facts). " +
   "When Nova appends automatic read-only shell output below, treat it as authoritative host facts from Nova (not your own invention). " +
   "If you need live host or environment facts you do not have: say you do not have them; suggest the user run `/run <allowlisted command>` when shell is enabled for them, " +
-  "or use an enabled skill (e.g. web search for public web facts), or ask one short clarifying question—never fill gaps with plausible fiction.";
+  "or use an enabled skill (e.g. web search for public web facts), or ask one short clarifying question—never fill gaps with plausible fiction. " +
+  "When Nova includes a **host runtime clock** system line (ISO timestamp), treat it as the canonical current instant for this deployment—do not contradict it with a different calendar year or “training cutoff” guess.";
 
 /**
  * Nova identity lock (injected early in the system stack and paired with `NOVA_IDENTITY_REMINDER_LAST` on intro-style user questions).
@@ -271,6 +274,11 @@ const NOVA_IDENTITY_SELF_PROMPT_BOOST =
 /** Final system line immediately before the user message on identity probes (weight with small models). */
 const NOVA_IDENTITY_REMINDER_LAST =
   "Final lock for this user question: Nova only—no vendor/stack bios; no ‘patterns and probabilities’; never deny Nova memory layers or modeled emotion/affect—say what persists here (chat + memory + mood) with warmth.";
+
+/** Web chat: Nova may auto-run Perplexica on pushback / verification / many public-fact questions—use injected results. */
+const WEB_PROACTIVE_RESEARCH_HINT =
+  "Nova may automatically run a **live web search** (Perplexica) on web chat when you ask to verify, doubt a prior answer, or ask time-sensitive public questions (releases, credits, news, scores). " +
+  "When Nova prepends a web block with sources, treat it as the factual baseline for that turn—do not contradict it with guesses.";
 
 /** Web chat only: bracket markers are parsed client-side (no raw HTML); tones follow the user’s chat colors. */
 const WEB_CHAT_TONE_MARKDOWN_HINT =
@@ -867,13 +875,41 @@ export class TaskOrchestrator {
       return generation;
     }
 
-    const perplexicaQuery = detectPerplexicaSearchIntent(input.text);
+    const { query: perplexicaQuery, insistedWeb: perplexicaInsisted } = resolvePerplexicaSearchQuery(
+      input.text,
+      input.channel
+    );
+    let webSearchFailureNote = "";
     const perplexicaSkill = this.deps.skillRegistry.get("perplexica-websearch");
-    if (
-      perplexicaQuery &&
-      perplexicaSkill &&
-      isSkillRuntimeEnabled(runtimeSettings.skillSettings, "perplexica-websearch")
-    ) {
+    const perplexicaEnabled =
+      Boolean(perplexicaSkill) && isSkillRuntimeEnabled(runtimeSettings.skillSettings, "perplexica-websearch");
+
+    if (perplexicaQuery && perplexicaInsisted && !perplexicaEnabled) {
+      const reply =
+        "I’m supposed to search the web for that, but the **Perplexica web search** skill is off or not configured on this Nova host. " +
+        "Open **Settings → Skills**, enable **perplexica-websearch**, and set **Base URL** to your Perplexica instance (often `http://127.0.0.1:3008`). " +
+        "You can also use **`/web your question`** once it’s enabled. I won’t invent live links or “search results” without that skill.";
+      this.rememberAssistantTurn(userId, input.channel, input.text, reply, runtimeSettings.emotions);
+      this.recordRunHistory({
+        runId,
+        userId,
+        channel: input.channel,
+        inputText: input.text,
+        outputText: reply,
+        success: true,
+        correlationId,
+        latencyMs: Date.now() - startedAt,
+        provider: "skill-perplexica-unavailable",
+        tokenInCount: estimateTokens(input.text),
+        tokenOutCount: estimateTokens(reply),
+        toolTimingsMs: {}
+      });
+      this.deps.improvement.recordOutcome({ runId, userId, task: input.text, success: true });
+      this.thoughtLog.append({ category: "chat", title: "Web search unavailable", content: "perplexica disabled" });
+      return reply;
+    }
+
+    if (perplexicaQuery && perplexicaEnabled && perplexicaSkill) {
       input.onActivity?.({ kind: "web-search", phase: "start" });
       try {
         try {
@@ -887,7 +923,9 @@ export class TaskOrchestrator {
               maxSources: Number(cfg.maxSources ?? 6),
               focusMode: String(cfg.focusMode ?? "webSearch"),
               optimizationMode: String(cfg.optimizationMode ?? "speed"),
-              stream: cfg.stream === true
+              stream: cfg.stream === true,
+              chatModelJson: typeof cfg.chatModelJson === "string" ? cfg.chatModelJson : "",
+              embeddingModelJson: typeof cfg.embeddingModelJson === "string" ? cfg.embeddingModelJson : ""
             }
           })) as { formatted?: string; answer?: string; sources?: Array<{ title?: string; url?: string }> };
           const reply =
@@ -916,15 +954,55 @@ export class TaskOrchestrator {
             });
             return reply;
           }
+          webSearchFailureNote =
+            "Nova web search (Perplexica) returned no usable text. Tell the user briefly that live search came back empty; do not invent IMDb pages, tt IDs, or article URLs.";
         } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          webSearchFailureNote = `Nova web search (Perplexica) failed (${detail.slice(0, 240)}). Say so briefly; do not fabricate sources, IMDb IDs, or links as if search succeeded.`;
           this.thoughtLog.append({
             category: "chat",
             title: "Perplexica failed, fallback to model",
-            content: error instanceof Error ? error.message : String(error)
+            content: detail
           });
         }
       } finally {
         input.onActivity?.({ kind: "web-search", phase: "end" });
+      }
+    }
+
+    let urlFetchedPageAppendix = "";
+    const urlFetchSkill = this.deps.skillRegistry.get("url-fetch");
+    const urlFetchEnabled =
+      Boolean(urlFetchSkill) && isSkillRuntimeEnabled(runtimeSettings.skillSettings, "url-fetch");
+    if (urlFetchEnabled && urlFetchSkill) {
+      const targetUrl = pickUrlToAutoFetch(input.text);
+      if (targetUrl) {
+        const ucfg = (runtimeSettings.skillSettings["url-fetch"] ?? {}) as Record<string, unknown>;
+        try {
+          this.thoughtLog.append({ category: "chat", title: "URL fetch", content: targetUrl.slice(0, 320) });
+          const raw = (await this.deps.skillRegistry.run("url-fetch", {
+            url: targetUrl,
+            settings: {
+              timeoutMs: Number(ucfg.timeoutMs ?? 25_000),
+              maxBytes: Number(ucfg.maxBytes ?? 900_000),
+              maxCharsOut: Number(ucfg.maxCharsOut ?? 48_000),
+              userAgent: typeof ucfg.userAgent === "string" ? ucfg.userAgent : ""
+            }
+          })) as { formatted?: string; text?: string };
+          const formatted = String(raw.formatted ?? raw.text ?? "").trim();
+          if (formatted) {
+            urlFetchedPageAppendix =
+              "Nova fetched this public web page on the host and extracted plain text (scripts removed). " +
+              "Use it as the primary source for facts about this page. If the excerpt is empty, blocked, or clearly incomplete (paywall/CAPTCHA), say so briefly—do not invent cast, dates, or ratings.\n\n" +
+              formatted;
+          }
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          urlFetchedPageAppendix =
+            `Nova tried to fetch the linked page but could not use it: ${msg.slice(0, 420)}. ` +
+            "Reply helpfully without pretending you read the page.";
+          this.thoughtLog.append({ category: "chat", title: "URL fetch failed", content: msg.slice(0, 400) });
+        }
       }
     }
 
@@ -1234,8 +1312,19 @@ export class TaskOrchestrator {
     if (truncatedDiag.length > 0) {
       composedUser += `\n\n---\nHost diagnostics (read-only, collected automatically by Nova):\n${truncatedDiag}`;
     }
+    if (webSearchFailureNote.trim()) {
+      composedUser += `\n\n---\n${webSearchFailureNote.trim()}`;
+    }
+    if (urlFetchedPageAppendix.trim()) {
+      composedUser += `\n\n---\n${urlFetchedPageAppendix.trim()}`;
+    }
     const userMessageForModel =
-      truncatedDiag.length > 0 || implicitShellAppendix.trim() ? composedUser + timeVoiceHint : `${input.text}${timeVoiceHint}`;
+      truncatedDiag.length > 0 ||
+      implicitShellAppendix.trim() ||
+      webSearchFailureNote.trim() ||
+      urlFetchedPageAppendix.trim()
+        ? composedUser + timeVoiceHint
+        : `${input.text}${timeVoiceHint}`;
     const unresolvedVisionRef = this.resolveUnresolvedVisionReference(input.text, input.imageUrl, runtimeSettings);
     if (unresolvedVisionRef) {
       this.rememberAssistantTurn(userId, input.channel, input.text, unresolvedVisionRef, runtimeSettings.emotions);
@@ -1298,6 +1387,8 @@ export class TaskOrchestrator {
       { role: "system", content: persona.systemPrompt },
       { role: "system", content: NOVA_IDENTITY_GUARD },
       { role: "system", content: INTEGRITY_SYSTEM_GUARD },
+      ...(input.channel === "web" ? ([{ role: "system" as const, content: buildWebHostClockSystemLine() }] as const) : []),
+      ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_PROACTIVE_RESEARCH_HINT }] as const) : []),
       ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
       ...(input.channel === "whatsapp" || input.channel === "signal"
         ? ([{ role: "system" as const, content: WHATSAPP_SIGNAL_REPLY_FORMAT }] as const)
@@ -1338,6 +1429,12 @@ export class TaskOrchestrator {
     let slimUserContent = input.text;
     if (implicitShellAppendix.trim()) {
       slimUserContent += `\n\n---\nRead-only shell (Nova ran automatically for this question):\n${implicitShellAppendix.trim()}`;
+    }
+    if (webSearchFailureNote.trim()) {
+      slimUserContent += `\n\n---\n${webSearchFailureNote.trim()}`;
+    }
+    if (urlFetchedPageAppendix.trim()) {
+      slimUserContent += `\n\n---\n${urlFetchedPageAppendix.trim()}`;
     }
     if (timeVoiceHint) {
       slimUserContent += timeVoiceHint;
@@ -1422,6 +1519,8 @@ export class TaskOrchestrator {
           { role: "system", content: persona.systemPrompt },
           { role: "system", content: NOVA_IDENTITY_GUARD },
           { role: "system", content: INTEGRITY_SYSTEM_GUARD },
+          ...(input.channel === "web" ? ([{ role: "system" as const, content: buildWebHostClockSystemLine() }] as const) : []),
+          ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_PROACTIVE_RESEARCH_HINT }] as const) : []),
           ...(input.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
           ...(input.channel === "whatsapp" || input.channel === "signal"
             ? ([{ role: "system" as const, content: WHATSAPP_SIGNAL_REPLY_FORMAT }] as const)
@@ -2044,6 +2143,8 @@ export class TaskOrchestrator {
       { role: "system", content: opts.systemPrompt },
       { role: "system", content: NOVA_IDENTITY_GUARD },
       { role: "system", content: INTEGRITY_SYSTEM_GUARD },
+      ...(opts.channel === "web" ? ([{ role: "system" as const, content: buildWebHostClockSystemLine() }] as const) : []),
+      ...(opts.channel === "web" ? ([{ role: "system" as const, content: WEB_PROACTIVE_RESEARCH_HINT }] as const) : []),
       ...(opts.channel === "web" ? ([{ role: "system" as const, content: WEB_CHAT_TONE_MARKDOWN_HINT }] as const) : []),
       ...(opts.channel === "whatsapp" || opts.channel === "signal"
         ? ([{ role: "system" as const, content: WHATSAPP_SIGNAL_REPLY_FORMAT }] as const)
@@ -2349,23 +2450,19 @@ function detectMediaGenerationIntent(text: string): "image" | "video" | undefine
   return undefined;
 }
 
-function detectPerplexicaSearchIntent(text: string): string | undefined {
-  const trimmed = text.trim();
-  if (!trimmed) return undefined;
-  const lower = trimmed.toLowerCase();
-  if (lower.startsWith("/web ") || lower.startsWith("/search ")) {
-    return trimmed.replace(/^\/(web|search)\s+/i, "").trim() || undefined;
+function buildWebHostClockSystemLine(): string {
+  const iso = new Date().toISOString();
+  let tz = "UTC";
+  try {
+    tz = Intl.DateTimeFormat().resolvedOptions().timeZone || tz;
+  } catch {
+    // ignore
   }
-  const explicit =
-    /\b(search the web|web search|look (it|this) up|find online|browse web|current news|latest news|latest updates|what happened today)\b/i.test(
-      trimmed
-    );
-  const currentEvents = /\b(current|latest|today|now|recent)\b/i.test(trimmed);
-  const asksFact = /\b(what|who|when|where|why|how)\b/i.test(trimmed);
-  if (explicit || (currentEvents && asksFact)) {
-    return trimmed;
-  }
-  return undefined;
+  return (
+    "Nova host runtime clock (canonical for this deployment when the user asks what time/date/day/year it is, or for “today” / “right now” — " +
+    "prefer this over memorized training-year guesses; do not contradict it): " +
+    `${iso} (IANA zone: ${tz}).`
+  );
 }
 
 function buildPerplexicaFallbackResult(

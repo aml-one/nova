@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatNovaLocalTimeSentence, tryParseHostClockOutput } from "./host-time.js";
+import { detectHostTimeIntent, formatNovaLocalTimeSentence, tryParseHostClockOutput } from "./host-time.js";
 
 describe("tryParseHostClockOutput", () => {
   it("parses PowerShell-style line with +HH:MM offset", () => {
@@ -12,6 +12,13 @@ describe("tryParseHostClockOutput", () => {
     const d = tryParseHostClockOutput("2026-05-02 21:25:37 +0300");
     expect(d).toBeInstanceOf(Date);
     expect(d?.getUTCHours()).toBe(18);
+  });
+});
+
+describe("detectHostTimeIntent", () => {
+  it("treats what-year questions as host-time intent", () => {
+    expect(detectHostTimeIntent("What year is it?")).toBe(true);
+    expect(detectHostTimeIntent("which year are we in")).toBe(true);
   });
 });
 

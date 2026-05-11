@@ -163,9 +163,14 @@ export class TtsVoiceOrbDriver {
     if (!this.analyser) {
       this.analyser = this.audioCtx.createAnalyser();
       this.analyser.fftSize = 2048;
-      this.analyser.smoothingTimeConstant = 0.12;
+      this.analyser.smoothingTimeConstant = 0.07;
+      // Map quieter TTS bins higher in 0–255 so soft/calm voices still move the ring.
+      this.analyser.minDecibels = -96;
+      this.analyser.maxDecibels = -52;
     } else {
-      this.analyser.smoothingTimeConstant = 0.12;
+      this.analyser.smoothingTimeConstant = 0.07;
+      this.analyser.minDecibels = -96;
+      this.analyser.maxDecibels = -52;
     }
 
     const needNewSource = this.boundMediaElement !== el || !this.mediaSourceNode;
@@ -214,7 +219,9 @@ export class TtsVoiceOrbDriver {
           sumSq += v * v;
         }
         const rms = Math.sqrt(sumSq / Math.max(1, buf.length));
-        const timeInstant = Math.min(1, rms * 22 + peak * 3.9);
+        // Extra lift for quiet waveforms (calm TTS): sqrt compresses loud peaks less than linear on whispers.
+        const rmsLift = Math.sqrt(Math.max(0, rms)) * 0.42 + rms * 28;
+        const timeInstant = Math.min(1, rmsLift + peak * 6.2);
 
         const sr = ctxLive.sampleRate ?? 48000;
         const nyquist = sr * 0.5;
@@ -231,19 +238,19 @@ export class TtsVoiceOrbDriver {
           /* orb mid-dispose */
         }
         const binW = nyquist / Math.max(1, binCount);
-        const lo = Math.max(0, Math.floor(280 / binW));
-        const hi = Math.min(binCount - 1, Math.ceil(3400 / binW));
+        const lo = Math.max(0, Math.floor(180 / binW));
+        const hi = Math.min(binCount - 1, Math.ceil(4200 / binW));
         let bandSum = 0;
         for (let i = lo; i <= hi; i++) {
           bandSum += freqBuf[i] ?? 0;
         }
         const bandAvg = bandSum / Math.max(1, hi - lo + 1) / 255;
-        const combined = Math.min(1, timeInstant * 0.48 + bandAvg * 2.35);
-        const gated = Math.max(0, combined - 0.008);
+        const combined = Math.min(1, timeInstant * 0.78 + bandAvg * 2.85 + bandAvg * bandAvg * 0.45);
+        const gated = Math.max(0, combined - 0.0025);
 
         let level = this.voiceLevel;
-        const attack = 0.94;
-        const release = 0.24;
+        const attack = 0.96;
+        const release = 0.31;
         if (gated > level) {
           level += (gated - level) * attack;
         } else {
@@ -256,9 +263,9 @@ export class TtsVoiceOrbDriver {
         this.prevInstant = combined;
 
         const nowMs = performance.now();
-        const onset = combined > 0.065 && rise > 0.028;
+        const onset = combined > 0.028 && rise > 0.01;
         if (onset) {
-          const burst = Math.min(1, combined * 1.35 + rise * 2.45 + 0.14);
+          const burst = Math.min(1, combined * 1.55 + rise * 3.2 + 0.18);
           this.wordSpike = Math.max(this.wordSpike, burst);
           if (nowMs - this.lastFlipAt > 72) {
             this.lastFlipAt = nowMs;
@@ -267,13 +274,13 @@ export class TtsVoiceOrbDriver {
             orb?.setRotationSpeed(0.52 + Math.random() * 2.85);
           }
         }
-        this.wordSpike *= 0.72;
+        this.wordSpike *= 0.79;
 
-        const peakDrive = Math.min(1, combined * 1.18 + this.wordSpike * 1.38);
+        const peakDrive = Math.min(1, combined * 1.38 + this.wordSpike * 1.52);
         this.config.getOrb()?.setSpeechEnvelope(level, peakDrive);
 
         let slow = this.slowEnergy;
-        slow = Math.max(combined, slow * (combined < 0.018 ? 0.87 : 0.993));
+        slow = Math.max(combined, slow * (combined < 0.01 ? 0.9 : 0.994));
         this.slowEnergy = slow;
 
         // The 2D ring has a fixed frame. Voice energy changes wave height, not container size.

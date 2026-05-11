@@ -110,6 +110,15 @@ else
   bash "${ROOT_DIR}/scripts/install-macos-voice-gateway-service.sh"
 fi
 
+# Orpheus + MemoryBear supervisors (optional; set NOVA_INSTALL_CORES_WATCHDOG=1 when installing).
+if [[ "${NOVA_INSTALL_CORES_WATCHDOG:-}" == "1" ]]; then
+  echo ""
+  echo "Installing Orpheus + MemoryBear watchdog LaunchDaemons…"
+  bash "${ROOT_DIR}/scripts/install-macos-cores-watchdog.sh" || {
+    echo "WARN: cores watchdog install failed (see script output)." >&2
+  }
+fi
+
 echo "Installed ${LABEL} as root LaunchDaemon (HTTPS on 443)."
 echo "After git pull / identity backup, agent-core will: chown -R ${SERVICE_USER}:staff .git (via NOVA_REPO_GIT_CHOWN)."
 echo ""
@@ -121,3 +130,9 @@ echo "One-time if .git is already root-owned:"
 echo "  sudo bash ./scripts/repair-nova-git-ownership.sh"
 echo ""
 echo "Web UI: https://<this-mac-ip>/"
+if [[ "${NOVA_INSTALL_CORES_WATCHDOG:-}" != "1" ]]; then
+  echo ""
+  echo "Optional — auto-restart Orpheus + MemoryBear after reboot/crash:"
+  echo "  sudo bash ./scripts/install-macos-cores-watchdog.sh"
+  echo "  (or next full install: sudo NOVA_INSTALL_CORES_WATCHDOG=1 bash ./scripts/install-macos-service.sh)"
+fi

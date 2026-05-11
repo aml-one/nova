@@ -52,6 +52,7 @@ This is the common “Nova Mac server” pattern (example path: `~/projects/Nova
 
 - **LaunchDaemon label**: `com.nova.localstack`
 - **WebRTC voice gateway** (Python, mobile/WebRTC bridge): LaunchDaemon label `com.nova.voice-gateway` — HTTP `http://127.0.0.1:8790/health`. Installed with the main macOS service install unless `NOVA_SKIP_VOICE_GATEWAY_INSTALL=1`. Logs: `tmp/nova-voice-gateway.log`, `tmp/nova-voice-gateway.err.log`. Admin-only in WebUI: Settings → Voice → WebRTC voice gateway (start/stop/restart).
+- **Orpheus + MemoryBear watchdogs** (optional): LaunchDaemon labels `com.nova.orpheus-watchdog` and `com.nova.memorybear-watchdog` — long-running health loops that (re)start `scripts/mac-start-orpheus-native.sh` and the MemoryBear API under `~/nova-deps/MemoryBear/api`. **Not** installed by default with Nova; install with `sudo bash ./scripts/install-macos-cores-watchdog.sh`, or set `NOVA_INSTALL_CORES_WATCHDOG=1` when running `install-macos-service.sh`. Logs: `tmp/nova-orpheus-watchdog*.log`, `tmp/nova-memorybear-watchdog*.log`. Uninstall: `sudo bash ./scripts/install-macos-cores-watchdog.sh --uninstall`. Does not start Docker/Colima/Neo4j for you — those must still be available (see `scripts/memorybear-mac-bootstrap.sh`).
 - **Plist**: `/Library/LaunchDaemons/com.nova.localstack.plist`
 - **Runner script**: `scripts/start-local-macos-service.sh` → calls `scripts/start-local.sh`
 - **Install script**: `sudo bash ./scripts/install-macos-service.sh` (from repo, with **`SUDO_USER` set** — do not use bare `sudo su -`)

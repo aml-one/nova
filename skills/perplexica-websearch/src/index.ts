@@ -1,5 +1,7 @@
 import type { RuntimeSkill } from "@nova/skills";
 
+type ModelPair = { provider: string; model: string };
+
 type Input = {
   query?: string;
   mode?: "search" | "ask";
@@ -10,6 +12,9 @@ type Input = {
     focusMode?: string;
     optimizationMode?: string;
     stream?: boolean;
+    /** JSON object: `{"provider":"ollama","model":"llama3.1"}` — must match your Perplexica build (e.g. GitHub Copilot / custom). */
+    chatModelJson?: string;
+    embeddingModelJson?: string;
   };
 };
 
@@ -41,13 +46,26 @@ export const perplexicaWebsearchSkill: RuntimeSkill = {
     const maxSources = clampInt(settings.maxSources, 1, 20, 6);
     const focusMode = settings.focusMode?.trim() || "webSearch";
     const optimizationMode = settings.optimizationMode?.trim() || "speed";
+    const defaultChat: ModelPair = {
+      provider: process.env.NOVA_PERPLEXICA_CHAT_PROVIDER ?? "ollama",
+      model: process.env.NOVA_PERPLEXICA_CHAT_MODEL ?? process.env.OLLAMA_MODEL ?? "llama3.1"
+    };
+    const defaultEmbed: ModelPair = {
+      provider: process.env.NOVA_PERPLEXICA_EMBEDDING_PROVIDER ?? defaultChat.provider,
+      model: process.env.NOVA_PERPLEXICA_EMBEDDING_MODEL ?? defaultChat.model
+    };
+    const chatModel = parseModelPairJson(settings.chatModelJson, defaultChat);
+    const embeddingModel = parseModelPairJson(settings.embeddingModelJson, defaultEmbed);
+
     const response = await queryPerplexica({
       baseUrl,
       query: parsed.query,
       timeoutMs,
       focusMode,
       optimizationMode,
-      stream: settings.stream === true
+      stream: settings.stream === true,
+      chatModel,
+      embeddingModel
     });
     const sources = dedupeSources(response.sources).slice(0, maxSources);
     return {
@@ -61,6 +79,23 @@ export const perplexicaWebsearchSkill: RuntimeSkill = {
   }
 };
 
+function parseModelPairJson(raw: unknown, fallback: ModelPair): ModelPair {
+  if (typeof raw !== "string") return fallback;
+  const s = raw.trim();
+  if (!s) return fallback;
+  try {
+    const o = JSON.parse(s) as unknown;
+    if (!o || typeof o !== "object") return fallback;
+    const r = o as Record<string, unknown>;
+    const provider = String(r.provider ?? "").trim();
+    const model = String(r.model ?? "").trim();
+    if (!provider || !model) return fallback;
+    return { provider, model };
+  } catch {
+    return fallback;
+  }
+}
+
 async function queryPerplexica(input: {
   baseUrl: string;
   query: string;
@@ -68,6 +103,8 @@ async function queryPerplexica(input: {
   focusMode: string;
   optimizationMode: string;
   stream: boolean;
+  chatModel: ModelPair;
+  embeddingModel: ModelPair;
 }): Promise<{ answer: string; sources: Source[] }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), input.timeoutMs);
@@ -79,8 +116,8 @@ async function queryPerplexica(input: {
       {
         path: "/api/search",
         body: {
-          chatModel: { provider: "ollama", model: process.env.OLLAMA_MODEL ?? "llama3.1" },
-          embeddingModel: { provider: "ollama", model: process.env.OLLAMA_MODEL ?? "llama3.1" },
+          chatModel: { provider: input.chatModel.provider, model: input.chatModel.model },
+          embeddingModel: { provider: input.embeddingModel.provider, model: input.embeddingModel.model },
           optimizationMode: input.optimizationMode,
           focusMode: input.focusMode,
           query: input.query,
@@ -95,17 +132,10 @@ async function queryPerplexica(input: {
           optimizationMode: input.optimizationMode,
           focusMode: input.focusMode
         }
-      },
-      {
-        path: "/api/ask",
-        body: {
-          query: input.query,
-          focusMode: input.focusMode
-        }
       }
     ];
 
-    let lastError = "unknown error";
+    const errors: string[] = [];
     for (const candidate of candidates) {
       try {
         const response = await fetch(`${input.baseUrl}${candidate.path}`, {
@@ -115,7 +145,7 @@ async function queryPerplexica(input: {
           signal: controller.signal
         });
         if (!response.ok) {
-          lastError = `HTTP ${response.status} at ${candidate.path}`;
+          errors.push(`${candidate.path} → HTTP ${response.status}`);
           continue;
         }
         const payload = (await response.json()) as Record<string, unknown>;
@@ -124,12 +154,12 @@ async function queryPerplexica(input: {
         if (answer) {
           return { answer, sources };
         }
-        lastError = `no answer field at ${candidate.path}`;
+        errors.push(`${candidate.path} → empty answer`);
       } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
+        errors.push(`${candidate.path} → ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    throw new Error(`Perplexica request failed: ${lastError}`);
+    throw new Error(`Perplexica request failed (${errors.join("; ") || "no candidates"})`);
   } finally {
     clearTimeout(timer);
   }

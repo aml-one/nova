@@ -63,6 +63,8 @@ class OrbAudioFeed {
   private mid = 0;
   private high = 0;
   energy = 0;
+  /** RMS/smooth envelope from `TtsVoiceOrbDriver` — soft TTS often has weak FFT bins; this keeps the ring alive. */
+  private speechEnvelope = 0;
 
   /** Slightly longer than one frame so TTS FFT gaps don’t flash “mic idle”. */
   private static readonly SPECTRUM_TTL_MS = 120;
@@ -75,9 +77,14 @@ class OrbAudioFeed {
     this.lastSpectrumMs = typeof performance !== "undefined" ? performance.now() : 0;
   }
 
-  setEnvelope(_smooth: number, _peak: number): void {
-    void _smooth;
-    void _peak;
+  setEnvelope(smooth: number, peak: number): void {
+    const s = Number.isFinite(smooth) ? smooth : 0;
+    const p = Number.isFinite(peak) ? peak : 0;
+    this.speechEnvelope = clamp01(Math.max(s, p * 0.94));
+  }
+
+  getSpeechEnvelope(): number {
+    return this.speechEnvelope;
   }
 
   randomizePhase(): void {
@@ -93,6 +100,7 @@ class OrbAudioFeed {
   update(dt: number): void {
     // Match standalone Nova_Orb `AudioInput` whenAnalyser isn’t feeding (no mic / no fresh FFT).
     if (!this.ready || this.frequencies.length === 0) {
+      this.speechEnvelope = lerp(this.speechEnvelope, 0, 0.14 * dt);
       this.energy = lerp(this.energy, 0, 0.08 * dt);
       this.low = lerp(this.low, 0, 0.12 * dt);
       this.mid = lerp(this.mid, 0, 0.12 * dt);
@@ -111,7 +119,13 @@ class OrbAudioFeed {
     this.low = lerp(this.low, lowTarget, lowAlpha);
     this.mid = lerp(this.mid, midTarget, midAlpha);
     this.high = lerp(this.high, highTarget, highAlpha);
-    this.energy = clamp((this.low * 1.6 + this.mid * 1.1 + this.high * 0.9) / 3.3, 0, 1);
+    const spectralBlend = (this.low * 1.65 + this.mid * 1.18 + this.high * 0.95) / 3.35;
+    const env = this.speechEnvelope;
+    this.energy = clamp(
+      Math.max(spectralBlend, env * 0.68, spectralBlend * 0.5 + env * 0.52),
+      0,
+      1
+    );
   }
 
   getFrequencyAt(normalizedPosition: number): number {
@@ -206,9 +220,11 @@ class ReactiveOrbCore {
   private updateDisplacements(dt: number): void {
     // Slightly larger than Nova_Orb 0.1 so TTS (speech band) reads as taller spikes on smaller mounts.
     const maxSpike = Math.min(this.width, this.height) * 0.14;
-    const calmMul = this.presentationIdleCalm ? 0.35 : 1;
+    const calmMul = this.presentationIdleCalm ? 0.52 : 1;
     const live = this.audio.ready;
-    const intensity = (live ? 0.24 + this.audio.energy * 4.0 : 0.15) * calmMul;
+    const envBoost = 0.22 + this.audio.getSpeechEnvelope() * 1.15;
+    const rawIntensity = live ? 0.34 + this.audio.energy * 5.1 + envBoost : 0.18;
+    const intensity = clamp(rawIntensity, 0.12, 2.65) * calmMul;
     const attack = live ? 0.42 : 0.18;
     const decay = live ? 0.28 : 0.16;
 
@@ -216,10 +232,11 @@ class ReactiveOrbCore {
       const t = i / this.pointCount;
       const angle = t * Math.PI * 2;
       const spectral = this.getWrappedSpectrum(t);
-      const wave = (Math.sin(this.time * 60 + i * 0.22) * 0.5 + 0.5) * 0.075;
+      const wave = (Math.sin(this.time * 60 + i * 0.22) * 0.5 + 0.5) * 0.092;
 
-      // Lower exponent = less squash on mid-level bins → visibly higher waves when Nova speaks.
-      const target = Math.pow(spectral, 1.48) * maxSpike * intensity + wave * maxSpike;
+      // Lower exponent = less squash on mid-level bins → visibly higher waves when Nova speaks softly.
+      const spectralLifted = Math.max(spectral, this.audio.getSpeechEnvelope() * 0.38);
+      const target = Math.pow(spectralLifted, 1.22) * maxSpike * intensity + wave * maxSpike;
       const outwardOnly = Math.max(0, target);
 
       const displacementAlpha = outwardOnly > this.displacements[i] ? attack * dt : decay * dt;
@@ -244,7 +261,8 @@ class ReactiveOrbCore {
 
     const averaged = sampleA * 0.34 + sampleB * 0.26 + sampleC * 0.24 + sampleD * 0.16;
 
-    return Math.max(averaged, this.audio.energy * 0.22);
+    const ev = this.audio.getSpeechEnvelope();
+    return Math.max(averaged, this.audio.energy * 0.3, ev * 0.44);
   }
 
   private render(): void {

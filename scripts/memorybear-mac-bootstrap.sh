@@ -10,6 +10,9 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 MB_PASSWORD="${MB_PASSWORD:-NovaPassword7880}"
 MB_DIR="${MB_DIR:-$HOME/nova-deps/MemoryBear/api}"
+# Host port for Elasticsearch HTTP (container still listens on 9200). Default 9201 avoids a stale
+# Docker Desktop proxy often holding *:9200 on macOS while Colima runs the real ES container.
+MB_ES_HOST_PORT="${MB_ES_HOST_PORT:-9201}"
 SECRET_KEY="${SECRET_KEY:-$(openssl rand -hex 32)}"
 U="$(whoami)"
 
@@ -33,18 +36,18 @@ fi
 echo "==> libmagic (python-magic) for MemoryBear API"
 brew list libmagic >/dev/null 2>&1 || brew install libmagic
 
-echo "==> Elasticsearch on :9200 (Docker + Colima if available; MemoryBear defaults to HTTPS without a scheme)"
+echo "==> Elasticsearch on host :${MB_ES_HOST_PORT} -> container :9200 (Docker + Colima if available)"
 if command -v docker >/dev/null 2>&1; then
   export DOCKER_HOST="${DOCKER_HOST:-unix://$HOME/.colima/default/docker.sock}"
   if docker info >/dev/null 2>&1; then
     docker rm -f nova-es >/dev/null 2>&1 || true
-    docker run -d --name nova-es -p 9200:9200 \
+    docker run -d --name nova-es -p "${MB_ES_HOST_PORT}:9200" \
       -e discovery.type=single-node -e xpack.security.enabled=false \
-      -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
+      -e ES_JAVA_OPTS="-Xms512m -Xmx512m" \
       docker.elastic.co/elasticsearch/elasticsearch:8.11.0 >/dev/null 2>&1 || true
     echo "    Waiting for Elasticsearch (up to 90s)..."
     for _ in $(seq 1 18); do
-      curl -fsS "http://127.0.0.1:9200" >/dev/null 2>&1 && break
+      curl -fsS "http://127.0.0.1:${MB_ES_HOST_PORT}" >/dev/null 2>&1 && break
       sleep 5
     done
   else
@@ -77,7 +80,7 @@ FIRST_SUPERUSER_EMAIL=admin@example.com
 FIRST_SUPERUSER_USERNAME=admin
 FIRST_SUPERUSER_PASSWORD=$MB_PASSWORD
 ELASTICSEARCH_HOST=http://127.0.0.1
-ELASTICSEARCH_PORT=9200
+ELASTICSEARCH_PORT=${MB_ES_HOST_PORT}
 ELASTICSEARCH_USERNAME=
 ELASTICSEARCH_PASSWORD=
 ELASTICSEARCH_VERIFY_CERTS=false

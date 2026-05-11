@@ -1755,6 +1755,7 @@ export default function SettingsPage() {
   const ollamaVisionCatalog = modelOptions.ollamaVision ?? [];
   const websiteBuilderSettings = (settings.skillSettings["website-builder"] ?? {}) as Record<string, unknown>;
   const perplexicaSettings = (settings.skillSettings["perplexica-websearch"] ?? {}) as Record<string, unknown>;
+  const urlFetchSettings = (settings.skillSettings["url-fetch"] ?? {}) as Record<string, unknown>;
   const cameraVisionSettings = (settings.skillSettings["camera-vision"] ?? {}) as Record<string, unknown>;
   const websiteBuilderProviderStored = String(websiteBuilderSettings.provider ?? settings.activeProvider);
   const websiteBuilderProviderEffective = ((): "ollama" | "lmstudio" | "copilot" => {
@@ -4488,7 +4489,7 @@ export default function SettingsPage() {
           <Card className="space-y-3">
             <h2 className="text-lg font-semibold">Perplexica Web Search Skill</h2>
             <p className="text-xs text-muted">
-              Configure local or remote Perplexica endpoint. Nova will use this skill for explicit web-search/current-events queries, alongside normal model chat.
+              Configure local or remote Perplexica endpoint. Nova runs this skill when you ask to verify, doubt a prior answer, use /web, or ask many time-sensitive or public-fact questions on web chat (and on other channels when you clearly ask for a web check).
             </p>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
@@ -4606,9 +4607,130 @@ export default function SettingsPage() {
                 Stream responses when endpoint supports it
               </label>
             </div>
+            <label className="grid gap-1 text-xs">
+              Chat model (JSON, optional)
+              <textarea
+                className="min-h-[4.5rem] rounded-ui border bg-surface px-2 py-1.5 font-mono text-[11px] text-fg"
+                placeholder='{"provider":"ollama","model":"llama3.1"}'
+                value={String(perplexicaSettings.chatModelJson ?? "")}
+                onChange={(e) =>
+                  setSettings((p) => ({
+                    ...p,
+                    skillSettings: {
+                      ...p.skillSettings,
+                      ["perplexica-websearch"]: { ...p.skillSettings["perplexica-websearch"], chatModelJson: e.target.value }
+                    }
+                  }))
+                }
+              />
+            </label>
+            <label className="grid gap-1 text-xs">
+              Embedding model (JSON, optional)
+              <textarea
+                className="min-h-[4.5rem] rounded-ui border bg-surface px-2 py-1.5 font-mono text-[11px] text-fg"
+                placeholder="Leave blank to reuse chat provider/model, or set explicitly for your Perplexica version."
+                value={String(perplexicaSettings.embeddingModelJson ?? "")}
+                onChange={(e) =>
+                  setSettings((p) => ({
+                    ...p,
+                    skillSettings: {
+                      ...p.skillSettings,
+                      ["perplexica-websearch"]: { ...p.skillSettings["perplexica-websearch"], embeddingModelJson: e.target.value }
+                    }
+                  }))
+                }
+              />
+            </label>
+            <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
+              Provider and model strings must match whatever your Perplexica build exposes (Ollama, OpenAI-compatible, GitHub Models,
+              Copilot-backed routes, etc.). Example for a hypothetical mini model:{" "}
+              <code className="font-mono">{"{\"provider\":\"github\",\"model\":\"gpt-5-mini\"}"}</code> — adjust to the exact ids
+              your UI lists. Env fallbacks: <code className="font-mono">NOVA_PERPLEXICA_CHAT_PROVIDER</code>,{" "}
+              <code className="font-mono">NOVA_PERPLEXICA_CHAT_MODEL</code>, and embedding variants.
+            </div>
             <div className="rounded-ui border bg-surface p-2 text-xs text-muted">
               Your current setup example: <code className="font-mono">http://127.0.0.1:3008</code>. You can point to LAN/remote hosts too.
             </div>
+          </Card>
+        ) : null}
+
+        {tab === "skill:url-fetch" ? (
+          <Card className="space-y-3">
+            <h2 className="text-lg font-semibold">URL fetch (read page)</h2>
+            <p className="text-xs text-muted">
+              When you paste a link (e.g. IMDb) or ask Nova to read a page, agent-core fetches the URL from this machine,
+              strips HTML to plain text, and adds it to the model context. Localhost and private IPs are blocked.
+              You can also type <code className="font-mono">/fetch https://…</code> to force a URL.
+            </p>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={isSkillRuntimeEnabled(settings.skillSettings, "url-fetch")}
+                onChange={(e) =>
+                  setSettings((p) => ({
+                    ...p,
+                    skillSettings: {
+                      ...p.skillSettings,
+                      ["url-fetch"]: { ...(p.skillSettings["url-fetch"] ?? {}), enabled: e.target.checked }
+                    }
+                  }))
+                }
+              />
+              Enable URL fetch skill
+            </label>
+            <div className="grid gap-2 md:grid-cols-2">
+              <label className="grid gap-1 text-xs">
+                Fetch timeout (ms)
+                <Input
+                  type="number"
+                  min={2000}
+                  max={120000}
+                  value={String(urlFetchSettings.timeoutMs ?? 25000)}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      skillSettings: {
+                        ...p.skillSettings,
+                        ["url-fetch"]: { ...p.skillSettings["url-fetch"], timeoutMs: Number(e.target.value || 25000) }
+                      }
+                    }))
+                  }
+                />
+              </label>
+              <label className="grid gap-1 text-xs">
+                Max text sent to model (chars)
+                <Input
+                  type="number"
+                  min={2000}
+                  max={120000}
+                  value={String(urlFetchSettings.maxCharsOut ?? 48000)}
+                  onChange={(e) =>
+                    setSettings((p) => ({
+                      ...p,
+                      skillSettings: {
+                        ...p.skillSettings,
+                        ["url-fetch"]: { ...p.skillSettings["url-fetch"], maxCharsOut: Number(e.target.value || 48000) }
+                      }
+                    }))
+                  }
+                />
+              </label>
+            </div>
+            <label className="grid gap-1 text-xs">
+              User-Agent override (optional)
+              <Input
+                value={String(urlFetchSettings.userAgent ?? "")}
+                onChange={(e) =>
+                  setSettings((p) => ({
+                    ...p,
+                    skillSettings: {
+                      ...p.skillSettings,
+                      ["url-fetch"]: { ...p.skillSettings["url-fetch"], userAgent: e.target.value }
+                    }
+                  }))
+                }
+                placeholder="Leave blank for browser-like default"
+              />
+            </label>
           </Card>
         ) : null}
 
@@ -4640,6 +4762,7 @@ export default function SettingsPage() {
         {tab.startsWith("skill:") &&
         tab !== "skill:website-builder" &&
         tab !== "skill:perplexica-websearch" &&
+        tab !== "skill:url-fetch" &&
         tab !== "skill:camera-vision" &&
         tab !== "skill:cameraVision" &&
         tab !== "skill:network-defense" ? (

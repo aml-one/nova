@@ -10,12 +10,19 @@ export function detectHostTimeIntent(text: string): boolean {
   if (/\bin\s+[a-z]{2,}/i.test(trimmed) && !/\b(here|local|this\s+machine|this\s+host|nova)\b/i.test(t)) {
     return false;
   }
-  const timeWord = /\b(time|clock|hour|timestamp)\b/.test(t) || /\bdate\b/.test(t) || /\btimezone\b|\btz\b|\butc\b/.test(t);
+  const timeWord =
+    /\b(time|clock|hour|timestamp)\b/.test(t) ||
+    /\bdate\b/.test(t) ||
+    /\byear\b/.test(t) ||
+    /\bday\b/.test(t) ||
+    /\btimezone\b|\btz\b|\butc\b/.test(t);
   if (!timeWord) return false;
   const asks =
     /\b(what|which|current|right\s+now|now|tell|give|show)\b/.test(t) ||
     /^whats?\s+the\s+time/.test(t) ||
     /^what\s+time\b/.test(t) ||
+    /\bwhat\s+year\b/.test(t) ||
+    /\bwhich\s+year\b/.test(t) ||
     /^time\s*\?/.test(t);
   if (!asks && trimmed.length > 24) return false;
   return true;
