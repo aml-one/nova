@@ -36,9 +36,12 @@ fi
 echo "==> libmagic (python-magic) for MemoryBear API"
 brew list libmagic >/dev/null 2>&1 || brew install libmagic
 
-echo "==> Elasticsearch on host :${MB_ES_HOST_PORT} -> container :9200 (Docker + Colima if available)"
+echo "==> Elasticsearch on host :${MB_ES_HOST_PORT} -> container :9200 (Docker Desktop or Colima)"
 if command -v docker >/dev/null 2>&1; then
-  export DOCKER_HOST="${DOCKER_HOST:-unix://$HOME/.colima/default/docker.sock}"
+  # Only pin Colima when that socket exists; Docker Desktop works with the default DOCKER_HOST.
+  if [[ -z "${DOCKER_HOST:-}" && -S "${HOME}/.colima/default/docker.sock" ]]; then
+    export DOCKER_HOST="unix://${HOME}/.colima/default/docker.sock"
+  fi
   if docker info >/dev/null 2>&1; then
     docker rm -f nova-es >/dev/null 2>&1 || true
     docker run -d --name nova-es -p "${MB_ES_HOST_PORT}:9200" \

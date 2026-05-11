@@ -463,6 +463,13 @@ MB_PASSWORD='your-secret' bash scripts/memorybear-mac-bootstrap.sh
 
 The script starts the three brew services, writes MemoryBear `api/.env`, runs Alembic, starts the API on port **8000**, completes setup/login, creates a Nova API key, and writes it to **`$HOME/nova-deps/memorybear-nova-api-key.txt`** by default (`MB_PASSWORD` defaults to a documented dev value in the script header—override in production).
 
+**Troubleshooting (macOS):**
+
+- **`nova-es` / Elasticsearch:** MemoryBear’s generated `.env` uses **`ELASTICSEARCH_PORT=9201`** (avoids Docker hogging **9200**). If the API logs ES errors or `nova-es` shows **`Exited`**, re-run **`bash scripts/memorybear-es-docker.sh`** from the Nova repo (or re-run the bootstrap ES block). After **Docker Desktop restart**, start **`nova-es`** again if MemoryBear needs RAG/ES.
+- **Nova sync returns 500 / “embedding model is required”:** that comes from **MemoryBear workspace memory config**, not Nova. In the **MemoryBear** web UI, open the workspace’s memory / model settings and assign an **embedding model** (per upstream MemoryBear docs) so `/v1/memory/read/sync` can load the config.
+- **Web login / `npm run dev` → `ECONNREFUSED` on port 5173 when calling `/api/token`:** upstream `web/vite.config.ts` may still proxy **`/api` → `http://localhost:5173`** (nothing listens there). The API lives on **:8000**. From your Nova repo on the Mac run **`bash scripts/patch-memorybear-web-vite-proxy.sh`** (or edit **`vite.config.ts`** so the `/api` proxy **`target`** is **`http://127.0.0.1:8000`**), restart **`npm run dev`**, and ensure the **FastAPI** process is running on **8000**.
+- **Rerank / `PROVIDER_NOT_SUPPORTED` (ollama or openai for rerank):** upstream MemoryBear only implements rerank for **`xinference`**, **`gpustack`**, and **`dashscope`**. On macOS, start Xinference in Docker from this repo: **`bash scripts/xinference-mac-docker.sh`** (defaults to **`http://127.0.0.1:9997`**). Then launch a rerank model in the Xinference UI and register it in MemoryBear with provider **`xinference`** and that base URL.
+
 ---
 
 ## 11. Optional: other Nova-adjacent services
