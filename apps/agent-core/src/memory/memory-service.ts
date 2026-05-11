@@ -105,7 +105,7 @@ export class MemoryService {
     if (!created) {
       warnMemoryBearOnce(
         "create-user-failed",
-        "MemoryBear end-user creation failed; check MemoryBear API key, memory scope, default memory config, and API reachability."
+        "MemoryBear end-user creation failed: base URL must be reachable from the machine running agent-core (not only your browser), API key needs MemoryBear `memory` scope, and MemoryBear must have a default memory config. Restart agent-core with NOVA_MEMORYBEAR_DEBUG=1 for HTTP/API details in logs."
       );
       return undefined;
     }
@@ -140,7 +140,10 @@ export class MemoryService {
       storageType: settings.storageType
     });
     if (!ok) {
-      warnMemoryBearOnce("write-failed", "MemoryBear write/sync failed; memories are still stored locally in SQLite.");
+      warnMemoryBearOnce(
+        "write-failed",
+        "MemoryBear write/sync failed (same checks as end-user: URL from agent-core, key scope, Neo4j/RAG/Celery healthy on MemoryBear). Local SQLite memory still works. NOVA_MEMORYBEAR_DEBUG=1 for details."
+      );
     }
   }
 

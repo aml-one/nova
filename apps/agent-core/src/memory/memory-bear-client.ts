@@ -2,6 +2,15 @@ import type { AppSettings } from "../storage/repositories/settings-repository.js
 
 type MemoryBearEnvelope<T> = { code?: number; data?: T; msg?: string; error?: string };
 
+function memoryBearDebugEnabled(): boolean {
+  return process.env.NOVA_MEMORYBEAR_DEBUG?.trim() === "1";
+}
+
+function logMemoryBear(where: string, detail: string): void {
+  if (!memoryBearDebugEnabled()) return;
+  console.warn(`[nova][memorybear:${where}] ${detail}`);
+}
+
 function joinUrl(base: string, path: string): string {
   const b = base.replace(/\/$/, "");
   const p = path.startsWith("/") ? path : `/${path}`;
@@ -24,10 +33,21 @@ export async function memoryBearResolveDefaultConfigId(baseUrl: string, apiKey: 
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: AbortSignal.timeout(60_000)
     });
+  } catch (e) {
+    logMemoryBear("resolve_config", `fetch failed: ${e instanceof Error ? e.message : String(e)}`);
+    return undefined;
+  }
+  const bodyText = await response.text().catch(() => "");
+  if (!response.ok) {
+    logMemoryBear("resolve_config", `HTTP ${response.status} ${bodyText.slice(0, 400)}`);
+    return undefined;
+  }
+  let json: unknown;
+  try {
+    json = bodyText ? JSON.parse(bodyText) : null;
   } catch {
     return undefined;
   }
-  const json = (await response.json().catch(() => null)) as unknown;
   if (!json || typeof json !== "object") return undefined;
   const blob = JSON.stringify(json);
   const m = /"config_id"\s*:\s*"([0-9a-fA-F-]{36})"/.exec(blob);
@@ -55,20 +75,45 @@ export async function memoryBearCreateEndUser(opts: {
       }),
       signal: AbortSignal.timeout(60_000)
     });
-  } catch {
+  } catch (e) {
+    logMemoryBear("end_user_create", `fetch failed: ${e instanceof Error ? e.message : String(e)}`);
     return undefined;
   }
-  const json = (await response.json().catch(() => null)) as unknown;
+  const bodyText = await response.text().catch(() => "");
+  let json: unknown;
+  try {
+    json = bodyText ? JSON.parse(bodyText) : null;
+  } catch {
+    logMemoryBear("end_user_create", `non-JSON body HTTP ${response.status} ${bodyText.slice(0, 300)}`);
+    return undefined;
+  }
+  if (!response.ok) {
+    logMemoryBear("end_user_create", `HTTP ${response.status} ${bodyText.slice(0, 500)}`);
+    return undefined;
+  }
+  const rawEnv = json && typeof json === "object" ? (json as MemoryBearEnvelope<unknown>) : undefined;
+  if (rawEnv && rawEnv.code !== 0 && rawEnv.code !== undefined) {
+    logMemoryBear(
+      "end_user_create",
+      `API code=${rawEnv.code} msg=${String(rawEnv.msg ?? rawEnv.error ?? "").slice(0, 400)}`
+    );
+  }
   const data = parseEnvelope<{
     id?: string;
     memory_config_id?: string | null;
   }>(json);
-  if (!data?.id) return undefined;
+  if (!data?.id) {
+    logMemoryBear("end_user_create", "no end_user id in envelope (code≠0 or missing data.id)");
+    return undefined;
+  }
   let memoryConfigId = data.memory_config_id?.trim();
   if (!memoryConfigId) {
     memoryConfigId = await memoryBearResolveDefaultConfigId(opts.baseUrl, opts.apiKey);
   }
-  if (!memoryConfigId) return undefined;
+  if (!memoryConfigId) {
+    logMemoryBear("end_user_create", "no memory_config_id and read_all_config did not yield a config_id");
+    return undefined;
+  }
   return { endUserId: data.id, memoryConfigId };
 }
 
@@ -138,10 +183,26 @@ export async function memoryBearWriteSync(opts: {
       }),
       signal: AbortSignal.timeout(120_000)
     });
-  } catch {
+  } catch (e) {
+    logMemoryBear("write_sync", `fetch failed: ${e instanceof Error ? e.message : String(e)}`);
     return false;
   }
-  const json = (await response.json().catch(() => null)) as unknown;
+  const bodyText = await response.text().catch(() => "");
+  let json: unknown;
+  try {
+    json = bodyText ? JSON.parse(bodyText) : null;
+  } catch {
+    logMemoryBear("write_sync", `non-JSON body HTTP ${response.status} ${bodyText.slice(0, 300)}`);
+    return false;
+  }
   const env = json as MemoryBearEnvelope<unknown>;
-  return response.ok && env.code === 0;
+  const ok = response.ok && env.code === 0;
+  if (!ok) {
+    const t = typeof json === "object" && json ? JSON.stringify(json).slice(0, 500) : "";
+    logMemoryBear(
+      "write_sync",
+      `HTTP ${response.status} ok=${response.ok} code=${env?.code} body=${t || bodyText.slice(0, 200) || "(empty)"}`
+    );
+  }
+  return ok;
 }
