@@ -135,6 +135,25 @@ export class VoiceService {
     return target;
   }
 
+  /**
+   * Run {@code NOVA_TTS_COMMAND} only — never calls Orpheus.
+   * Used when Orpheus is enabled but unreachable so Signal/WhatsApp outbound can still attach a voice note.
+   */
+  speakShellCommandOnly(text: string): string {
+    const command = process.env.NOVA_TTS_COMMAND?.trim();
+    if (!command) {
+      throw new Error("NOVA_TTS_COMMAND is not set");
+    }
+    const dir = resolve(process.cwd(), "data", "voice");
+    mkdirSync(dir, { recursive: true });
+    const target = resolve(dir, `tts-shell-${Date.now()}.wav`);
+    const result = spawnSync(command, [text, target], { shell: true, encoding: "utf8" });
+    if (result.status !== 0) {
+      throw new Error(result.stderr || "NOVA_TTS_COMMAND failed");
+    }
+    return target;
+  }
+
   /** Raw audio for streaming endpoints (no shell TTS). Expects **prepared** chat text when matching web read-aloud. */
   async synthesizeOrpheusBuffer(text: string): Promise<Buffer> {
     return this.synthesizeOrpheusBufferInternal(text);

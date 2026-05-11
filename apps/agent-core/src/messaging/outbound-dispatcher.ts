@@ -249,6 +249,9 @@ export class OutboundDispatcher {
     if (tts?.enabled && tts.baseUrl.trim()) {
       try {
         const bytes = await this.voice.synthesizeOrpheusBuffer(ttsSource);
+        if (!bytes.byteLength) {
+          throw new Error("Orpheus returned empty audio");
+        }
         const fmt = (tts.responseFormat || "wav").replace(/[^a-z0-9]/gi, "") || "wav";
         return {
           bytes,
@@ -262,7 +265,8 @@ export class OutboundDispatcher {
     if (!process.env.NOVA_TTS_COMMAND?.trim()) return null;
     try {
       const plain = stripOrpheusSpeechCues(visibleText);
-      const outPath = await this.voice.speak(plain);
+      // Must not call speak(): when Orpheus is enabled but failed above, speak() would try Orpheus again and never reach the shell command.
+      const outPath = this.voice.speakShellCommandOnly(plain);
       if (!existsSync(outPath)) return null;
       const bytes = readFileSync(outPath);
       if (!bytes.byteLength) return null;
@@ -330,10 +334,12 @@ export class OutboundDispatcher {
     visibleText: string,
     correlationId: string
   ): Promise<void> {
+    let sendFailed = false;
+    let synthesized: { bytes: Buffer; mimeType: string; filename: string } | null = null;
     try {
-      const voice = await this.synthesizeOutboundVoiceBuffer(ttsSource, visibleText);
-      if (voice) {
-        await this.wa.sendVoiceMessage(recipient, voice.bytes, voice.mimeType);
+      synthesized = await this.synthesizeOutboundVoiceBuffer(ttsSource, visibleText);
+      if (synthesized) {
+        await this.wa.sendVoiceMessage(recipient, synthesized.bytes, synthesized.mimeType);
         // Always send transcript as a separate message (matches Signal’s “voice+transcript” pattern).
         await this.wa.sendMessage(recipient, visibleText);
         pushChannelDebug({
@@ -342,12 +348,13 @@ export class OutboundDispatcher {
           transport: "dispatcher",
           correlationId,
           peer: recipient,
-          textPreview: previewChannelText(`voice+transcript (${voice.bytes.byteLength} bytes)`),
+          textPreview: previewChannelText(`voice+transcript (${synthesized.bytes.byteLength} bytes)`),
           trace: ["whatsapp_voice_attachment_sent"]
         });
         return;
       }
     } catch (error) {
+      sendFailed = true;
       pushChannelDebug({
         channel: "whatsapp",
         direction: "out",
@@ -357,6 +364,27 @@ export class OutboundDispatcher {
         textPreview: previewChannelText(visibleText),
         trace: ["whatsapp_voice_attachment_failed", "falling_back_to_text"],
         error: error instanceof Error ? error.message : String(error)
+      });
+    }
+    if (!sendFailed && !synthesized) {
+      const settings = this.getSettings();
+      const tts = settings?.orpheusTts;
+      const orpheusOn = Boolean(tts?.enabled && tts?.baseUrl?.trim());
+      const shellOn = Boolean(process.env.NOVA_TTS_COMMAND?.trim());
+      const hint = !orpheusOn && !shellOn
+        ? "No TTS: enable Orpheus in Settings (Voice) with a base URL reachable from agent-core, or set NOVA_TTS_COMMAND."
+        : !shellOn
+          ? "Orpheus not configured or failed; add NOVA_TTS_COMMAND on agent-core as a fallback for WhatsApp voice notes."
+          : "Orpheus and NOVA_TTS_COMMAND both failed or returned empty audio.";
+      pushChannelDebug({
+        channel: "whatsapp",
+        direction: "out",
+        transport: "dispatcher",
+        correlationId,
+        peer: recipient,
+        textPreview: previewChannelText(visibleText),
+        trace: ["whatsapp_text_only_no_voice_buffer"],
+        error: hint
       });
     }
     await this.wa.sendMessage(recipient, visibleText);

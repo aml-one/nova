@@ -282,7 +282,8 @@ export class WhatsAppChannelAdapter {
         messaging_product: "whatsapp",
         to: toDigits,
         type: "audio",
-        audio: { id: mediaId }
+        // Voice note (PTT) in the app; omitting this often delivers as a generic audio file or fails expectations.
+        audio: { id: mediaId, voice: true }
       })
     });
     if (!msgRes.ok) {
